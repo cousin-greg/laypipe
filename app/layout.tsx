@@ -1,14 +1,40 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
-import { Poppins } from "next/font/google";
 import localFont from "next/font/local";
+import { SiteShell } from "./_components/SiteShell";
 import "./globals.css";
 
-const moriFallback = Poppins({
-  variable: "--font-mori-fallback",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+const mori = localFont({
+  variable: "--font-mori",
+  src: [
+    {
+      path: "./fonts/PPMori-Regular.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "./fonts/PPMori-Medium.woff2",
+      weight: "500",
+      style: "normal",
+    },
+    {
+      path: "./fonts/PPMori-SemiBold.woff2",
+      weight: "600",
+      style: "normal",
+    },
+    {
+      path: "./fonts/PPMori-Bold.woff2",
+      weight: "700",
+      style: "normal",
+    },
+    {
+      path: "./fonts/PPMori-ExtraBold.woff2",
+      weight: "800",
+      style: "normal",
+    },
+  ],
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
 });
 
 const dragon = localFont({
@@ -50,8 +76,11 @@ const dragon = localFont({
 });
 
 export const viewport: Viewport = {
-  themeColor: "#f8c94c",
-  colorScheme: "light",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fff7dc" },
+    { media: "(prefers-color-scheme: dark)", color: "#151a16" },
+  ],
+  colorScheme: "light dark",
 };
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -65,9 +94,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "laypipe.fun — Fees in. PIPEDOG burns.",
+    title: "laypipe.fun — Launch and trade on Robinhood Chain",
     description:
-      "A sunny Robinhood Chain launchpad where trading fees flow through public buybacks and burns of PIPEDOG.",
+      "A Robinhood Chain launch board where trading fees fund public PIPEDOG buybacks to treasury and the 0xdead sink.",
     applicationName: "laypipe.fun",
     icons: {
       icon: "/brand/favicon.png",
@@ -75,26 +104,26 @@ export async function generateMetadata(): Promise<Metadata> {
       apple: "/brand/favicon.png",
     },
     openGraph: {
-      title: "laypipe.fun — Fees in. PIPEDOG burns.",
+      title: "laypipe.fun — The Robinhood Chain coin pipeline",
       description:
-        "Launch a coin, lock its liquidity, and route protocol fees through public PIPEDOG buybacks and burns.",
+        "Launch a coin, lock its liquidity, and route protocol fees through public PIPEDOG buybacks to treasury and 0xdead.",
       url: origin,
       siteName: "laypipe.fun",
       type: "website",
       images: [
         {
           url: socialImage,
-          width: 1200,
-          height: 630,
-          alt: "PIPEDOG detective inside sunny green pipeworks",
+          width: 1728,
+          height: 910,
+          alt: "LayPipe dog-in-pipe mark with sunny Robinhood Chain pipeworks",
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: "laypipe.fun — Fees in. PIPEDOG burns.",
+      title: "laypipe.fun — The Robinhood Chain coin pipeline",
       description:
-        "Sunshine launch infrastructure with public PIPEDOG buybacks and burns.",
+        "Sunshine launch infrastructure with public PIPEDOG buybacks to treasury and 0xdead.",
       images: [socialImage],
     },
   };
@@ -106,11 +135,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var t=localStorage.getItem("laypipe-theme");if(t==="dark"||(!t&&matchMedia("(prefers-color-scheme: dark)").matches)){document.documentElement.dataset.theme="dark"}}catch(e){}',
+          }}
+        />
+      </head>
       <body
-        className={`${moriFallback.variable} ${dragon.variable}`}
+        className={`${mori.variable} ${dragon.variable}`}
       >
-        {children}
+        <SiteShell>{children}</SiteShell>
       </body>
     </html>
   );

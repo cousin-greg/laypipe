@@ -1,0 +1,24 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+solc_version = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 800
+via_ir = true
+bytecode_hash = "ipfs"
+fs_permissions = [{ access = "read", path = "./" }]
+
+fuzz = { runs = 512 }
+invariant = { runs = 256, depth = 64, fail_on_revert = false }
+
+[rpc_endpoints]
+robinhood = "${ROBINHOOD_RPC_URL}"
+
+[profile.ci]
+fuzz = { runs = 2048 }
+invariant = { runs = 512, depth = 128, fail_on_revert = false }

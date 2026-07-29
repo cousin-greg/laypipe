@@ -1,0 +1,126 @@
+{
+  "generatedAt": "2026-07-29T17:03:36.045Z",
+  "blockscout": "https://robinhoodchain.blockscout.com",
+  "letscashApi": "https://api.letscash.fun",
+  "references": [
+    {
+      "role": "hook",
+      "address": "0xEfe669814e5Eec33406Bd50ffa8331618D076aEc",
+      "expectedName": "CashCatHook",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0xEfe669814e5Eec33406Bd50ffa8331618D076aEc?tab=contract",
+      "filePath": "src/v4/CashCatHook.sol",
+      "compilerVersion": "v0.8.28+commit.7893614a",
+      "evmVersion": "cancun",
+      "optimizationEnabled": true,
+      "optimizationRuns": 800,
+      "verifiedAt": "2026-07-10T13:45:22.553971Z",
+      "isFullyVerified": true,
+      "deployedBytecodeSha256": "c86f7085f8a87428af3f6ebd4d92bffa52c9a5627abb70efb00880c25fc87bac",
+      "metadataCid": "QmUwjDEVXsxToqtE6yoEnTDbYJAuBkpiwDXjCxBAjfoG5b",
+      "sources": [
+        "src/v4/CashCatHook.sol"
+      ]
+    },
+    {
+      "role": "dividend-distributor",
+      "address": "0xCa8B8e3ffE1f48A3555059AacBb962BFB668f522",
+      "expectedName": "CashCatDividendDistributor",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0xCa8B8e3ffE1f48A3555059AacBb962BFB668f522?tab=contract",
+      "filePath": "src/v4/CashCatDividendDistributor.sol",
+      "compilerVersion": "v0.8.28+commit.7893614a",
+      "evmVersion": "cancun",
+      "optimizationEnabled": true,
+      "optimizationRuns": 800,
+      "verifiedAt": "2026-07-14T15:42:40.485668Z",
+      "isFullyVerified": true,
+      "deployedBytecodeSha256": "45b2fcf610be5ec790cc898a53b42b1ab5c98c4556af577b10adb1100e316743",
+      "metadataCid": "QmaWLaKDrMswP1VFooKzCMjUvUiB4DJA8B4oJ9pfm2oFdw",
+      "sources": [
+        "src/v4/CashCatDividendDistributor.sol",
+        "src/v4/CashCatHook.sol",
+        "src/v4/CashCatBuybackBurner.sol",
+        "src/v4/lib/CurrencySettler.sol"
+      ]
+    },
+    {
+      "role": "self-burner-reference",
+      "address": "0x147420B86A5f9C9C955c7551e5D866607c6eD807",
+      "expectedName": "CashCatSelfBurner",
+      "note": "Verified earlier implementation. The currently configured burner is unverified and has different bytecode.",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0x147420B86A5f9C9C955c7551e5D866607c6eD807?tab=contract",
+      "filePath": "src/v4/CashCatSelfBurner.sol",
+      "compilerVersion": "v0.8.28+commit.7893614a",
+      "evmVersion": "cancun",
+      "optimizationEnabled": true,
+      "optimizationRuns": 800,
+      "verifiedAt": "2026-07-10T13:45:43.709650Z",
+      "isFullyVerified": true,
+      "deployedBytecodeSha256": "2ccff6c7bbeefac29bd5a4707a10a0f4e06954c8413a4c8afbea5cddd093e872",
+      "metadataCid": "Qmag3TVoRjVUXmSJcLeGStkCCP7f2yETen7uht46CKteq4",
+      "sources": [
+        "src/v4/CashCatSelfBurner.sol",
+        "src/v4/CashCatHook.sol",
+        "src/v4/lib/CurrencySettler.sol",
+        "src/v4/CashCatToken.sol"
+      ]
+    },
+    {
+      "role": "token-reference",
+      "address": "0xb7d4470443689995E286bEaAf456d24762703F05",
+      "expectedName": "CashCatToken",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0xb7d4470443689995E286bEaAf456d24762703F05?tab=contract",
+      "filePath": "src/v4/CashCatToken.sol",
+      "compilerVersion": "v0.8.28+commit.7893614a",
+      "evmVersion": "cancun",
+      "optimizationEnabled": true,
+      "optimizationRuns": 800,
+      "verifiedAt": "2026-07-28T23:23:52.844873Z",
+      "isFullyVerified": true,
+      "deployedBytecodeSha256": "5805a0c265dab4d06cc9fead784164e0f5f76c208c8b32b84aece12a1cd5ffc6",
+      "metadataCid": "QmUD8DbbdvoM26oDd167qNWMdRaAJLGQiuxDPWb4zoUere",
+      "sources": [
+        "src/v4/CashCatToken.sol"
+      ]
+    }
+  ],
+  "currentUnverified": [
+    {
+      "role": "factory-implementation",
+      "address": "0xCaC351078C2CB6486E765108dF688ac89FD58024",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0xCaC351078C2CB6486E765108dF688ac89FD58024?tab=contract",
+      "deployedBytecodeSha256": "966aae52e5e9d99be18d2e07fa2c17195d4e588759062ed833c234168a813916",
+      "metadataCid": "QmNsg5RcCpgGepueMUdfAocE6bhD1Zfy8cb4zUFWXhZuCY",
+      "note": "No verified source or ABI was returned by Blockscout at acquisition time."
+    },
+    {
+      "role": "self-burner",
+      "address": "0x580C70D2234a579B2631593693c66caE3886A98E",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0x580C70D2234a579B2631593693c66caE3886A98E?tab=contract",
+      "deployedBytecodeSha256": "e078bcdb5883ad3fec72123fcbe6037a84b2d9fddf68ef2041cf0913ce4d084e",
+      "metadataCid": "Qmbre9k8DSPgze1X1tM7E5sguGwdwgL3BPWbv2MBYcgC8B",
+      "note": "No verified source or ABI was returned by Blockscout at acquisition time."
+    },
+    {
+      "role": "revenue-splitter",
+      "address": "0x6D3d822F6e625c59804F47cf2Cc1d53B8301016F",
+      "blockscoutUrl": "https://robinhoodchain.blockscout.com/address/0x6D3d822F6e625c59804F47cf2Cc1d53B8301016F?tab=contract",
+      "deployedBytecodeSha256": "6c03a21747211d3b2b933c6ea8cbbc7032a1170b9816bccfa4e3eb54e96a1a9a",
+      "metadataCid": "QmXJhaqjpT7ar7VqdtHi7QudhczhV4iSjqMG3dSF88qTEL",
+      "note": "No verified source or ABI was returned by Blockscout at acquisition time."
+    }
+  ],
+  "apiSnapshots": [
+    {
+      "role": "runtime-config",
+      "source": "https://api.letscash.fun/api/config",
+      "file": "api/config.current.json",
+      "driftWarning": "Re-fetch immediately before relying on current addresses or launch enablement."
+    },
+    {
+      "role": "tokenomics-policy",
+      "source": "https://api.letscash.fun/api/tokenomics?surface=current",
+      "file": "api/tokenomics.current.json",
+      "driftWarning": "Balances and counters are expected to drift."
+    }
+  ]
+}

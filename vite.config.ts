@@ -44,9 +44,17 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      watch: {
+        // Solidity dependencies contain many nested tsconfig files. They are
+        // outside the site bundle and would otherwise trigger repeated Vite
+        // program reloads while Foundry installs or updates them.
+        ignored: ["**/contracts/**"],
+        ...(isCodexSeatbeltSandbox
+          ? { useFsEvents: false, usePolling: true }
+          : {}),
+      },
+    },
     plugins: [
       vinext(),
       sites(),

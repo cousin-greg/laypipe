@@ -9,8 +9,16 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".vinext/**",
+    "dist/**",
     "out/**",
     "build/**",
+    "outputs/**",
+    // Foundry installs third-party repositories under contracts/lib.
+    "contracts/lib/**",
+    "contracts/cache/**",
+    "contracts/out/**",
+    "contracts/broadcast/**",
     "next-env.d.ts",
   ]),
 ]);

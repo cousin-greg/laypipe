@@ -23,4 +23,17 @@ library PipedogProtocolConfig {
 
     address internal constant PERMIT2 =
         0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
+    /// @dev Canonical wrapped native asset reported by the live PIPEDOG pool.
+    address internal constant WETH =
+        0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73;
+
+    /// @dev Canonical PIPEDOG/WETH Uniswap v3 pool checked directly over RPC.
+    address internal constant PIPEDOG_WETH_V3_POOL =
+        0xB7f10f74B39291b9290b779978e19A7637C742D6;
+
+    address internal constant UNISWAP_V3_FACTORY =
+        0x1f7d7550B1b028f7571E69A784071F0205FD2EfA;
+
+    uint24 internal constant PIPEDOG_WETH_V3_FEE = 10_000;
 }

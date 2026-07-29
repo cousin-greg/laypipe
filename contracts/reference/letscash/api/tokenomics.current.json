@@ -1,0 +1,58 @@
+{
+  "fetchedAt": "2026-07-29T17:03:36.045Z",
+  "source": "https://api.letscash.fun/api/tokenomics?surface=current",
+  "driftWarning": "Current first-party API snapshot. Balances and counters are expected to drift.",
+  "behavioralTarget": "Platform revenue defaults: 25% token buy-to-sink, 25% token buy-to-treasury, 50% operations ETH.",
+  "response": {
+    "volumeEth": {
+      "allTime": 6351.1479980671775,
+      "day": 6351.147998067181
+    },
+    "feesEth": {
+      "allTime": 63.83683430389083,
+      "day": 63.836834303890825
+    },
+    "creatorsEth": 32.77041949676284,
+    "dividendsEth": 0,
+    "platformEth": 19.151050291166868,
+    "platformSweptEth": 17.995584840960905,
+    "selfBurnEth": 11.727532453768907,
+    "selfBurnPendingEth": 0.0705567376532475,
+    "selfBurnBountiesEth": 0.11727532453768838,
+    "selfBurnedTokens": 1809697029.0028045,
+    "trades": 122365,
+    "tokensLaunched": 1494,
+    "traders": 12088,
+    "daily": [
+      {
+        "t": 1785196800000,
+        "volEth": 3286.583580990483,
+        "feesEth": 33.03907032796109
+      },
+      {
+        "t": 1785283200000,
+        "volEth": 3064.564417076843,
+        "feesEth": 30.79776397592826
+      }
+    ],
+    "burn": {
+      "cashcatBurned": 222372.78365442753,
+      "ethSpent": 5.255815996824175,
+      "count": 191
+    },
+    "platformSplit": {
+      "cashcatToTreasury": 222374.03876878394,
+      "treasuryEthSpent": 5.255815996824175,
+      "burnTankEth": 5.0346003682e-8,
+      "treasuryTankEth": 5.0346003682e-8,
+      "unallocatedEth": 0,
+      "burnShareBps": 2500,
+      "treasuryShareBps": 2500,
+      "operationsShareBps": 5000,
+      "burnAllocatedEth": 5.308374207138422,
+      "treasuryAllocatedEth": 5.308374207138422,
+      "operationsAllocatedEth": 10.616748414276843,
+      "operationsPendingEth": 2.0969898660043724
+    }
+  }
+}
