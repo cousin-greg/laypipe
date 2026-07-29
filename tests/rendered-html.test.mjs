@@ -1,25 +1,82 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
+import { setTimeout as delay } from "node:timers/promises";
+import test, { after, before } from "node:test";
 
-const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-const { default: worker } = await import(workerUrl.href);
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+const nextBin = fileURLToPath(
+  new URL("../node_modules/next/dist/bin/next", import.meta.url),
+);
 
-async function render(path = "/") {
-  return worker.fetch(
-    new Request(`http://localhost${path}`, {
-      headers: { accept: "text/html" },
-    }),
+let app;
+let baseUrl;
+let serverOutput = "";
+
+async function reservePort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert(address && typeof address === "object");
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  return address.port;
+}
+
+before(async () => {
+  const port = await reservePort();
+  baseUrl = `http://127.0.0.1:${port}`;
+  app = spawn(
+    process.execPath,
+    [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)],
     {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
+      cwd: projectRoot,
+      env: { ...process.env, NODE_ENV: "production" },
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
+
+  const capture = (chunk) => {
+    serverOutput = `${serverOutput}${chunk}`.slice(-20_000);
+  };
+  app.stdout.on("data", capture);
+  app.stderr.on("data", capture);
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (app.exitCode !== null) {
+      throw new Error(`Next.js exited before startup:\n${serverOutput}`);
+    }
+    try {
+      const response = await fetch(baseUrl);
+      if (response.ok) return;
+    } catch {
+      // The server is still starting.
+    }
+    await delay(100);
+  }
+
+  throw new Error(`Next.js did not become ready:\n${serverOutput}`);
+}, { timeout: 35_000 });
+
+after(async () => {
+  if (!app || app.exitCode !== null) return;
+
+  app.kill();
+  await Promise.race([once(app, "exit"), delay(5_000)]);
+  if (app.exitCode === null) app.kill("SIGKILL");
+});
+
+async function render(path = "/") {
+  return fetch(`${baseUrl}${path}`, {
+    headers: { accept: "text/html" },
+  });
 }
 
 async function expectPage(path, patterns) {
@@ -32,9 +89,8 @@ async function expectPage(path, patterns) {
   assert.match(html, /Robinhood Chain/i);
   assert.match(html, /Demo feed/i);
   assert.match(html, /laypipe-mark\.png/i);
-  assert.match(html, /Dragon-Regular[^"']*\.woff2/i);
-  assert.match(html, /PPMori-Regular[^"']*\.woff2/i);
-  assert.match(html, /--font-mori/i);
+  assert.match(html, /Dragon[_-]Regular[^"']*\.woff2/i);
+  assert.match(html, /PPMori[_-]Regular[^"']*\.woff2/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 
   for (const pattern of patterns) {

@@ -38,6 +38,10 @@ npm test
 npm run lint
 ```
 
+Production is hosted on Vercel. The repository intentionally has no Sites or
+Cloudflare Worker deployment binding; the standard Next.js scripts are the
+single build path used locally, in CI, and by Vercel.
+
 The Board currently uses clearly marked fixture data. Switch
 `demoMarketAdapter` to `createApiMarketAdapter` only after the event indexer and
 reviewed deployment addresses are available.
