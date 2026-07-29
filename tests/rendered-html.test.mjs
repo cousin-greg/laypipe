@@ -88,10 +88,11 @@ async function expectPage(path, patterns) {
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
   assert.match(html, /Demo feed/i);
-  assert.match(html, /laypipe-mark\.png/i);
+  assert.match(html, /pipedog-cutout\.png/i);
   assert.match(html, /Dragon[_-]Regular[^"']*\.woff2/i);
   assert.match(html, /PPMori[_-]Regular[^"']*\.woff2/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
+  assert.doesNotMatch(html, /buybacks?/i);
 
   for (const pattern of patterns) {
     assert.match(html, pattern, `${path} should contain ${pattern}`);
@@ -108,6 +109,7 @@ test("server-renders the board with explicit preview data", async () => {
     /Hot/i,
     /Largest/i,
     /Biggest mover/i,
+    /0\.3% protocol lane routes 25% to 0xdead/i,
   ]);
 
   assert.doesNotMatch(html, /Preview market/i);
@@ -118,15 +120,39 @@ test("server-renders the board with explicit preview data", async () => {
 
 test("server-renders all product routes", async () => {
   const routes = [
-    ["/launch", /Factory deployment and audit are still pending/i],
-    ["/my", /Connect to inspect your pipes/i],
-    ["/rewards", /No live sweeps/i],
-    ["/tokenomics", /Every trade feeds a visible pipe/i],
-    ["/docs", /Contract registry/i],
+    [
+      "/launch",
+      [
+        /Factory deployment, audit, and curve calibration are still pending/i,
+        /exact PIPEDOG allowance/i,
+        /Native ETH is used for network gas only/i,
+      ],
+    ],
+    [
+      "/my",
+      [/Connect to inspect your pipes/i, /claimable PIPEDOG/i],
+    ],
+    [
+      "/rewards",
+      [/No live sweeps/i, /Keeper bounties are PIPEDOG-denominated/i],
+    ],
+    [
+      "/tokenomics",
+      [/Every trade feeds a visible pipe/i, /Collected in PIPEDOG/i],
+    ],
+    [
+      "/docs",
+      [
+        /Contract registry/i,
+        /initialize its PIPEDOG pair/i,
+        /Native ETH pays network gas only/i,
+        /Not production-calibrated/i,
+      ],
+    ],
   ];
 
-  for (const [path, pattern] of routes) {
-    await expectPage(path, [pattern]);
+  for (const [path, patterns] of routes) {
+    await expectPage(path, patterns);
   }
 });
 
@@ -135,18 +161,21 @@ test("server-renders demo and live protocol token detail routes", async () => {
     /interface fixture/i,
     /Pool not deployed/i,
     /Self-burn/i,
+    /exact PIPEDOG approval/i,
   ]);
 
   await expectPage("/token/pipedog", [
     /LayPipe protocol token/i,
     /PIPEDOG is live on Robinhood Chain/i,
     /Pending contract deployment/i,
+    /verified direct distributions/i,
     /0x5Cb6F181081301b44905F3ae15419112ecaBd8A6/i,
   ]);
 });
 
-test("metadata uses the current social-card dimensions", async () => {
+test("metadata uses the canonical PIPEDOG social-card dimensions", async () => {
   const html = await expectPage("/", []);
-  assert.match(html, /property="og:image:width" content="1728"/i);
-  assert.match(html, /property="og:image:height" content="910"/i);
+  assert.match(html, /property="og:image:width" content="1200"/i);
+  assert.match(html, /property="og:image:height" content="630"/i);
+  assert.match(html, /The original PIPEDOG beside a green pipe and burn furnace/i);
 });

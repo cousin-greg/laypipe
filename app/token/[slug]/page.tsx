@@ -31,8 +31,8 @@ function PipedogPage() {
       <aside className="preview-notice token-notice">
         <span>Protocol asset</span>
         <p>
-          PIPEDOG is live on Robinhood Chain. LayPipe buyback routing to
-          treasury and the 0xdead sink is still pending deployment.
+          PIPEDOG is live on Robinhood Chain. LayPipe’s direct routing to
+          0xdead, treasury, and operations is still pending deployment.
         </p>
         <a
           href={`https://robinhoodchain.blockscout.com/token/${PIPEDOG_CA}`}
@@ -59,9 +59,9 @@ function PipedogPage() {
           <span className="status-pill">LayPipe protocol token</span>
           <h1>PIPEDOG</h1>
           <p>
-            The curious dog at the end of the pipe. LayPipe’s intended protocol
-            share buys PIPEDOG for the 0xdead sink and treasury while routing
-            the operations lane in ETH.
+            The curious dog at the end of the pipe. PIPEDOG is LayPipe’s quote,
+            payment, fee, and paired asset. The gross protocol share routes 25%
+            directly to 0xdead, 25% to treasury, and 50% to operations.
           </p>
           <div className="pipedog-ca">
             <span>Contract address</span>
@@ -93,14 +93,15 @@ function PipedogPage() {
           <span>LayPipe route status</span>
           <strong>Pending contract deployment</strong>
           <p>
-            The interface will display verified buybacks, cumulative PIPEDOG
-            sent to 0xdead, and treasury acquisitions after the fee router and
-            indexer are connected. PIPEDOG has no native burn method, so
-            0xdead transfers do not reduce ERC-20 totalSupply.
+            The interface will display verified direct distributions and
+            cumulative PIPEDOG sent to 0xdead, treasury, operations, and
+            eligible keepers after the fee router and indexer are connected.
+            PIPEDOG has no native burn method, so 0xdead transfers do not
+            reduce ERC-20 totalSupply.
           </p>
         </div>
         <div className="route-pipe" aria-hidden="true">
-          <span>Fees</span>
+          <span>PIPEDOG fees</span>
           <i />
           <span>Router</span>
           <i />
@@ -201,7 +202,7 @@ export default async function TokenPage({
             <span>You pay</span>
             <div>
               <input value="0.00" readOnly aria-label="Trade amount" />
-              <strong>ETH</strong>
+              <strong>PIPEDOG</strong>
             </div>
           </label>
           <div className="trade-quote">
@@ -211,7 +212,10 @@ export default async function TokenPage({
           <button className="button button-disabled" type="button" disabled>
             Pool not deployed
           </button>
-          <p>Trading activates only for verified LayPipe pools.</p>
+          <p>
+            Trading activates only for verified LayPipe pools. A live buy needs
+            an exact PIPEDOG approval; native ETH pays gas only.
+          </p>
         </aside>
       </div>
 
@@ -248,7 +252,8 @@ export default async function TokenPage({
         <div>
           <span>Fee route</span>
           <h2>
-            1% enters the pipe. 0.3% supports the PIPEDOG protocol lane.
+            1% enters in PIPEDOG. The 0.3% protocol lane splits 25% / 25% /
+            50%.
           </h2>
         </div>
         <div className="route-pipe" aria-hidden="true">

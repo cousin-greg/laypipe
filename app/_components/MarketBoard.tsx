@@ -329,26 +329,44 @@ export function MarketBoard() {
           <p className="eyebrow">THE ROBINHOOD CHAIN PIPELINE</p>
           <h1>LAY SOME PIPE, DOG.</h1>
           <p>
-            Browse fresh launches, see where fees flow, and follow the public
-            route from every trade to PIPEDOG buybacks for treasury and the
-            0xdead sink.
+            Browse fresh launches and trade every curve in PIPEDOG. The 0.3%
+            protocol lane routes 25% to 0xdead, 25% to treasury, and 50% to
+            operations.
           </p>
         </div>
-        <div className="board-intro-art" aria-label="PIPEDOG in the LayPipe">
-          <div className="sun-disc" aria-hidden="true" />
-          <div className="pipe-horizon" aria-hidden="true">
-            <span />
-            <span />
-          </div>
+        <div
+          className="board-intro-art"
+          aria-label="The original PIPEDOG entering a green pipe connected to a burn furnace"
+        >
           <Image
-            src="/brand/laypipe-mark.png"
-            alt="PIPEDOG detective sitting inside a green pipe"
-            width={540}
-            height={540}
+            className="board-intro-dog"
+            src="/brand/pipedog-cutout.png"
+            alt="The original PIPEDOG detective"
+            width={386}
+            height={351}
             priority
             unoptimized
           />
-          <p>fees enter here</p>
+          <Image
+            className="board-intro-machine"
+            src="/brand/pipe-furnace.png"
+            alt=""
+            width={1536}
+            height={1024}
+            priority
+            unoptimized
+          />
+          <Image
+            className="board-intro-machine board-intro-machine-front"
+            src="/brand/pipe-furnace.png"
+            alt=""
+            width={1536}
+            height={1024}
+            aria-hidden="true"
+            priority
+            unoptimized
+          />
+          <p>PIPEDOG in · 25% to 0xdead</p>
         </div>
       </section>
 
@@ -625,10 +643,10 @@ export function MarketBoard() {
         {tokens.length === 0 ? (
           <div className="empty-state">
             <Image
-              src="/brand/laypipe-mark.png"
+              src="/brand/pipedog-cutout.png"
               alt=""
-              width={140}
-              height={140}
+              width={386}
+              height={351}
               unoptimized
             />
             <h3>The launch feed is empty.</h3>
@@ -637,10 +655,10 @@ export function MarketBoard() {
         ) : visibleTokens.length === 0 ? (
           <div className="empty-state">
             <Image
-              src="/brand/laypipe-mark.png"
+              src="/brand/pipedog-cutout.png"
               alt=""
-              width={140}
-              height={140}
+              width={386}
+              height={351}
               unoptimized
             />
             <h3>No matching coins.</h3>

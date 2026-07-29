@@ -4,38 +4,30 @@ pragma solidity ^0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from
+    "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
-import {IUniswapV3Pool} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IUniswapV3Factory} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
 import {PipedogProtocolConfig} from "../src/PipedogProtocolConfig.sol";
 
-/// @notice Read-only deployment gate for the live Robinhood Chain wiring.
+/// @notice Read-only gate for the canonical PIPEDOG quote deployment.
 contract PreflightRobinhood is Script {
     error WrongChain(uint256 actual, uint256 expected);
     error MissingCode(address target);
-    error InvalidPoolPair(address token0, address token1);
-    error InvalidPoolFee(uint24 actual, uint24 expected);
-    error InvalidPoolFactory(address actual, address expected);
-    error FactoryPoolMismatch(address actual, address expected);
-    error EmptyPool();
-    error InvalidTokenSupply();
+    error InvalidPipedogMetadata();
+    error InvalidPipedogCodehash(bytes32 actual, bytes32 expected);
 
     function run() external view {
         validate();
-        console2.log("Laypipe Robinhood preflight passed");
+        console2.log("Laypipe PIPEDOG-quote preflight passed");
         console2.log("chainId", block.chainid);
         console2.log(
             "poolManager", PipedogProtocolConfig.POOL_MANAGER
         );
+        console2.log("quote token", PipedogProtocolConfig.PIPEDOG);
         console2.log(
-            "PIPEDOG", PipedogProtocolConfig.PIPEDOG
-        );
-        console2.log(
-            "PIPEDOG/WETH v3 pool",
-            PipedogProtocolConfig.PIPEDOG_WETH_V3_POOL
+            "quote totalSupply",
+            PipedogProtocolConfig.PIPEDOG_TOTAL_SUPPLY
         );
     }
 
@@ -45,57 +37,36 @@ contract PreflightRobinhood is Script {
                 block.chainid, PipedogProtocolConfig.CHAIN_ID
             );
         }
-
         _requireCode(PipedogProtocolConfig.POOL_MANAGER);
         _requireCode(PipedogProtocolConfig.PIPEDOG);
-        _requireCode(PipedogProtocolConfig.WETH);
-        _requireCode(PipedogProtocolConfig.PIPEDOG_WETH_V3_POOL);
-        _requireCode(PipedogProtocolConfig.UNISWAP_V3_FACTORY);
 
-        // Force an interface read on PoolManager too, rather than treating
-        // non-empty bytecode as sufficient.
-        IPoolManager(PipedogProtocolConfig.POOL_MANAGER).protocolFeesAccrued(
-            Currency.wrap(PipedogProtocolConfig.WETH)
-        );
-
-        IUniswapV3Pool pool =
-            IUniswapV3Pool(PipedogProtocolConfig.PIPEDOG_WETH_V3_POOL);
-        address token0 = pool.token0();
-        address token1 = pool.token1();
-        bool correctPair =
-            (
-                token0 == PipedogProtocolConfig.WETH
-                    && token1 == PipedogProtocolConfig.PIPEDOG
-            )
-                || (
-                    token1 == PipedogProtocolConfig.WETH
-                        && token0 == PipedogProtocolConfig.PIPEDOG
-                );
-        if (!correctPair) revert InvalidPoolPair(token0, token1);
-
-        uint24 fee = pool.fee();
-        if (fee != PipedogProtocolConfig.PIPEDOG_WETH_V3_FEE) {
-            revert InvalidPoolFee(
-                fee, PipedogProtocolConfig.PIPEDOG_WETH_V3_FEE
+        bytes32 actualCodehash;
+        address tokenAddress = PipedogProtocolConfig.PIPEDOG;
+        assembly ("memory-safe") {
+            actualCodehash := extcodehash(tokenAddress)
+        }
+        if (actualCodehash != PipedogProtocolConfig.PIPEDOG_CODEHASH) {
+            revert InvalidPipedogCodehash(
+                actualCodehash, PipedogProtocolConfig.PIPEDOG_CODEHASH
             );
         }
-        address factory = pool.factory();
-        if (factory != PipedogProtocolConfig.UNISWAP_V3_FACTORY) {
-            revert InvalidPoolFactory(
-                factory, PipedogProtocolConfig.UNISWAP_V3_FACTORY
-            );
-        }
-        address canonical = IUniswapV3Factory(factory).getPool(
-            token0, token1, fee
-        );
-        if (canonical != address(pool)) {
-            revert FactoryPoolMismatch(canonical, address(pool));
-        }
-        if (pool.liquidity() == 0) revert EmptyPool();
+
+        IERC20Metadata token = IERC20Metadata(tokenAddress);
         if (
-            IERC20(PipedogProtocolConfig.PIPEDOG).totalSupply() == 0
-                || IERC20(PipedogProtocolConfig.WETH).totalSupply() == 0
-        ) revert InvalidTokenSupply();
+            token.decimals() != PipedogProtocolConfig.PIPEDOG_DECIMALS
+                || keccak256(bytes(token.symbol()))
+                    != keccak256(bytes("PIPEDOG"))
+                || keccak256(bytes(token.name()))
+                    != keccak256(bytes("pipedog"))
+                || token.totalSupply()
+                    != PipedogProtocolConfig.PIPEDOG_TOTAL_SUPPLY
+                || IERC20(tokenAddress).balanceOf(address(0)) != 0
+        ) revert InvalidPipedogMetadata();
+
+        // Exercise the PoolManager interface against the actual quote
+        // currency rather than accepting bytecode presence alone.
+        IPoolManager(PipedogProtocolConfig.POOL_MANAGER)
+            .protocolFeesAccrued(Currency.wrap(tokenAddress));
     }
 
     function _requireCode(address target) private view {

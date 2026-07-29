@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
+// ============================================================================
+// QUARANTINED RESEARCH ARTIFACT — NOT PART OF THE LAYPIPE PROTOCOL
+// This carried-forward distributor retains incompatible native-asset/WETH
+// assumptions. The canonical LayPipe stack uses PIPEDOG for quote, payment,
+// fees, and pairing. The factory does not import or deploy this contract,
+// dividend mode is hard-disabled, and canonical ABI generation excludes it.
+// Do not deploy, integrate, or expose this source as an available launch mode.
+// ============================================================================
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";

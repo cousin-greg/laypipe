@@ -2,84 +2,182 @@
 
 ## Deployment status
 
-These contracts are unaudited and not deployed. Passing tests and a successful
-fork simulation are not substitutes for an independent audit.
+These contracts are unaudited and not deployed. Passing unit, invariant, or
+fork tests and completing a no-broadcast simulation are necessary evidence,
+not substitutes for an independent audit or authorization to deploy.
 
-## Dividend mode is intentionally closed
+## Curve economics are not calibrated
 
-The carried-forward dividend distributor uses open enrollment. Its payout
-denominator covers enrolled balances, but the contract cannot prove that the
-submitted holder set is complete. An incomplete round could therefore
-over-reward enrolled holders.
+The start tick and all PIPEDOG-denominated limits require explicit economic
+review. No production values are supplied in `.env.example`.
 
-For this reason:
+For equal-decimal PIPEDOG/token pools, tick `204200` implies roughly
+737,649,301 launched tokens per PIPEDOG. At a 1,000,000,000-token supply that
+is an initial FDV of about 1.356 PIPEDOG. It is retained only as a regression
+warning and must not be treated as a default.
 
-- `LaypipeFactory.setDividendLaunchEnabled(true)` always reverts with
-  `DividendModeUnderReview`;
-- the deployment script does not deploy or wire a distributor;
-- the distributor source and ABI remain research/parity artifacts only.
+`scripts/calibrate-curve.mjs` aligns a target to tick spacing, but it does not
+model executable depth, price impact, fee effects, MEV, demand, or market
+quality. A separate economic simulation and review are required.
 
-An audited complete-holder or cryptographic-proof design is required before a
-future UUPS factory implementation may expose new dividend launches.
+## Permanent one-sided pools
 
-## PIPEDOG is sequestered, not supply-burned
+Each launch receives one token-only v4 position. The non-upgradeable hook
+rejects later additions, all removals, and donations. There is no graduation
+state machine.
 
-PIPEDOG has no callable `burn()` in the target path. Bought tokens sent to
-`0xdead` remain included in `totalSupply`. Any UI, indexer, or marketing copy
-must report `pipedogSequestered`, sink balance, or circulating removal rather
-than claiming that total supply decreased.
+This simplifies custody and prevents liquidity extraction, but it also means:
 
-## Public market-order MEV
+- pool depth cannot be topped up or repaired;
+- a bad start tick or supply choice is permanent for that launch;
+- an exhausted or illiquid curve cannot be migrated by the current protocol;
+- a future factory upgrade cannot alter existing hook-enforced liquidity.
 
-Self-burns and platform buys intentionally execute without a price oracle or
-minimum output. Moving the price upward is part of the mechanism, but public
-orders can be sandwiched. Per-call caps, one call per lane/pool per block, and
-keeper bounties bound and distribute this exposure; they do not eliminate it.
-Caps should be reviewed against live liquidity before deployment and monitored
-afterward.
+Do not describe these launches as graduating to another venue. Adding
+graduation requires a separately designed and audited state machine.
+
+## PIPEDOG assumptions
+
+The protocol pins canonical PIPEDOG on Robinhood Chain:
+
+`0x5Cb6F181081301b44905F3ae15419112ecaBd8A6`
+
+The preflight checks deployed bytecode and metadata. Runtime transfers assume
+an exact-transfer, non-rebasing, 18-decimal ERC-20. Balance-delta guards reject
+short receipts and unexpected transfer behavior.
+
+PIPEDOG does not expose permit in the supported flow. Users must make a
+separate exact approval for the factory or swap router. Those entrypoints
+reject allowances above or below the requested amount and successful calls
+consume the allowance to zero. Never request an unlimited approval to the
+upgradeable factory. A malicious future factory upgrade could spend any
+allowance still granted to its proxy address.
+
+Native ETH and WETH are not operational quote or payment assets. Native
+recovery functions exist only because value can be force-sent to a contract.
+
+## Token ordering and vanity mining
+
+PIPEDOG must be `currency0`. A valid launched token address must both end in
+`0xcc` and be numerically greater than the PIPEDOG address. The factory checks
+both conditions after deterministic address prediction, and the hook and swap
+router independently check pool ordering.
+
+Off-chain salt miners must enforce both constraints. Finding the suffix alone
+is insufficient.
+
+## Slippage, partial fills, and MEV
+
+Factory first buys and public router swaps take caller-defined minimum output.
+The hook rejects quote-specified partial fills so fees are not charged against
+PIPEDOG that did not trade. Poor minimum-output settings still expose users to
+ordinary price movement and sandwiching.
+
+Exact-output fees use full-precision ceiling gross-up so the configured rate
+is measured against total PIPEDOG flow. Without that gross-up, a nominal 1%
+fee on a net amount would produce an effective gross rate of about 0.9901%.
+
+Self-burns intentionally have no minimum output. They are permissionless,
+publicly visible market orders and can be sandwiched. The immutable
+PIPEDOG-per-call cap and one-call-per-pool-per-block rule bound each attempt;
+they do not eliminate MEV. Configure the cap against actual pool depth and
+monitor realized burn execution.
+
+The platform revenue router performs no market swap. Its sequestration and
+treasury calls transfer PIPEDOG directly, so the old WETH/PIPEDOG buyback MEV
+model does not apply.
+
+## Sequestration is not a supply burn
+
+The platform lane sends PIPEDOG directly to
+`0x000000000000000000000000000000000000dEaD`. This removes tokens from
+practical circulation but leaves ERC-20 `totalSupply` unchanged. Interfaces,
+events, analytics, and marketing must report sink balance or PIPEDOG
+sequestered, not a reduction in total supply.
+
+This differs from self-burn mode. A self-burn pool buys its launched token and
+calls that token's real `burn()`, reducing the launched token's `totalSupply`.
+
+## Permissionless maintenance
+
+Hook fees remain PoolManager claims until `sweep(poolId)` is called. Fee sweeps
+pay no bounty, so dormant pools need protocol-funded or creator-motivated
+automation.
+
+Revenue sequestration and treasury routing pay a configured PIPEDOG bounty
+from their respective processed lanes. Self-burns pay their bounty from the
+bounded PIPEDOG fuel chunk. Caps, once-per-block gates, and bounties are
+deployment parameters and need operational review.
+
+Hook sweep and creator claim transfers are atomic exact PIPEDOG transfers.
+There is no deferred platform payout tab. A broken or incompatible treasury
+destination causes the sweep to revert rather than parking the platform share.
 
 ## Administrative trust
 
-- Factory owner: may upgrade the launcher for future launches, change launch
-  fee/config enablement, rotate infrastructure, and recover assets held by the
-  factory address itself. Native recovery goes to the configured treasury and
-  ERC20 recovery goes to the owner; the recovery function cannot transfer
-  PoolManager liquidity, hook claims, creator tabs, or token-holder balances.
-  Existing token bytecode, pool fee config, and the non-upgradeable
-  liquidity-lock hook remain separate.
-- Hook owner: may rotate only the platform treasury destination. Creator
-  balances and fee-stream ownership remain creator-controlled.
-- Revenue-router owner: may pause buy lanes, rotate treasury/operations
-  destinations, tune order caps, and migrate platform-owned ETH to a successor.
-- Creator: may claim or transfer that pool's creator fee stream.
+- **Factory owner:** may upgrade the launcher for future calls, change launch
+  fee and config enablement, rotate compatible infrastructure while launches
+  are paused, and recover assets held by the factory. Factory-held PIPEDOG goes
+  to the protocol treasury; unrelated ERC-20s and force-sent native currency
+  go to the owner. Recovery cannot reach PoolManager liquidity, hook claims,
+  creator tabs, allowances, or user balances.
+- **Hook owner:** may rotate only the platform treasury destination. The hook
+  is not upgradeable. Creator balances and creator-stream ownership remain
+  creator-controlled.
+- **Revenue-router owner:** may pause the sequestration and treasury lanes,
+  rotate treasury/operations destinations, change their per-call caps, recover
+  unrelated assets, and migrate all router-held PIPEDOG to a successor.
+- **Self-burner and swap router:** have no owner or withdrawal path for
+  operational assets. Their protocol bindings and bounty/cap parameters are
+  immutable.
+- **Launched token:** is an ownerless clone after initialization.
+
+The 25/25/50 constants govern normal revenue allocation, but owner migration
+can move all remaining PIPEDOG to a successor. Treat the split as a trusted
+operating policy, not an irrevocable custody guarantee.
+
+Hook rotation automatically pauses launches and clears the old
+hook-bound self-burner. Treasury changes require launch to be paused and the
+factory and hook destinations to agree before re-enabling.
 
 The deployment script uses two-step ownership and leaves launch disabled.
-Until `FINAL_OWNER` accepts, the deployment key remains the current owner. Plan
-and execute acceptance promptly; do not fund or enable the system beforehand.
+Until `FINAL_OWNER` accepts, the deployment signer remains the current owner.
+Do not fund or enable the system before ownership acceptance is complete.
 
-The router's 25/25/50 constants govern normal allocation, but owner migration
-can move all remaining ETH to a successor. Treat the split as an
-administrator-trusted operating policy rather than an irrevocable custody
-guarantee.
+## Dividend artifact is quarantined
 
-Hook rotation automatically disables launches and clears old-hook-bound helper
-contracts. Treasury changes require launch to be paused and the hook and
-factory destinations to be aligned before re-enabling.
+`LaypipeDividendDistributor.sol` is not compatible with the canonical PIPEDOG
+quote stack and remains only as source-comparison research. The factory does
+not import or store a distributor, `dividendDistributor()` is always zero,
+`dividendLaunchEnabled()` is always false, and enabling it reverts.
 
-## Source-parity boundary
+The deployment script never deploys it, and canonical ABI generation removes
+its stale ABI. It is not a dormant feature flag and must not be exposed in a
+frontend. A future dividend design requires a new audited implementation,
+complete-holder or proof-based accounting, and explicit PIPEDOG semantics.
 
-The live LetsCash hook, token, dividend distributor, and an earlier self-burner
-have verified MIT source. The active factory implementation, active
-self-burner, and 25/25/50 revenue splitter do not. Their Laypipe counterparts
-are clean-room compatibility implementations based on public ABI, chain reads,
-receipts/events, and first-party API behavior; they are not claimed to be
-source-identical.
+## Source-provenance boundary
 
-Re-run the reference fetch, source-fidelity check, live preflight, clean build,
-full tests, and deployment simulation immediately before an audit handoff.
+The LetsCash hook, token, dividend distributor, and an earlier self-burner have
+verified MIT source. The current LetsCash factory, self-burner, and revenue
+splitter were unverified when captured.
 
-## Secrets
+`PipedogHook` and `LaypipeSelfBurner` are reviewed derivatives, not
+source-identical copies: their native-value assumptions were replaced with
+canonical PIPEDOG claims, settlement, and exact-transfer checks, among other
+documented deltas. `LaypipeToken` differs from its mechanical baseline only in
+PIPEDOG-specific documentation. `LaypipeFactory`, `LaypipeSwapRouter`, and
+`PipedogRevenueRouter` are clean-room LayPipe implementations.
 
-Keep the deployment key only in the ignored `contracts/.env`. Never commit
-`.env`, broadcast/cache artifacts, keystores, mnemonic phrases, or Safe signing
-material.
+Run the reference fetch, source-fidelity check, full build/test suite, live
+preflight, ABI generation, and no-broadcast deployment simulation immediately
+before an audit handoff.
+
+## Secrets and broadcasts
+
+Keep the deployment key only in ignored local configuration. Never commit or
+print `.env`, deployment keys, keystores, mnemonics, Safe signing material, or
+broadcast/cache artifacts.
+
+Never add `--broadcast` without explicit authorization and an independent
+audit.

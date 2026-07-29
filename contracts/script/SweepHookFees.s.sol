@@ -7,30 +7,26 @@ import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PipedogHook} from "../src/PipedogHook.sol";
 
 /// @notice Permissionless keeper entrypoint for converting a Laypipe pool's
-/// pending Uniswap v4 claims into creator credit and platform ETH.
+/// pending Uniswap v4 claims into creator credit and platform PIPEDOG.
 /// @dev This script intentionally reads no private key. Use a hardware wallet,
 /// a named Foundry keystore, or an explicitly unlocked keeper account through
 /// Forge's standard wallet flags when broadcasting.
 contract SweepHookFees is Script {
     error InvalidHook(address hook);
 
-    function run()
-        external
-        returns (uint256 creatorAmount, uint256 platformAmount)
-    {
+    function run() external returns (uint256 creatorAmount, uint256 platformAmount) {
         address hookAddress = vm.envAddress("LAYPIPE_HOOK");
         if (hookAddress.code.length == 0) revert InvalidHook(hookAddress);
 
         PoolId poolId = PoolId.wrap(vm.envBytes32("POOL_ID"));
-        uint256 minimumPending =
-            vm.envOr("MIN_PENDING_WEI", uint256(0));
-        PipedogHook hook = PipedogHook(payable(hookAddress));
+        uint256 minimumPending = vm.envOr("MIN_PENDING_PIPEDOG_WEI", uint256(0));
+        PipedogHook hook = PipedogHook(hookAddress);
         uint256 amount = hook.pending(poolId);
 
         console2.log("hook", hookAddress);
         console2.logBytes32(PoolId.unwrap(poolId));
-        console2.log("pending fee claims", amount);
-        console2.log("minimum pending threshold", minimumPending);
+        console2.log("pending PIPEDOG fee claims", amount);
+        console2.log("minimum pending PIPEDOG threshold", minimumPending);
 
         if (amount == 0 || amount < minimumPending) {
             console2.log("nothing above threshold; no transaction created");
@@ -42,7 +38,7 @@ contract SweepHookFees is Script {
         vm.stopBroadcast();
 
         console2.log("creator amount credited", creatorAmount);
-        console2.log("platform ETH forwarded or deferred", platformAmount);
+        console2.log("platform PIPEDOG forwarded", platformAmount);
         console2.log("pending after sweep", hook.pending(poolId));
     }
 }

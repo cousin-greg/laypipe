@@ -8,6 +8,11 @@ library PipedogProtocolConfig {
 
     address internal constant PIPEDOG =
         0x5Cb6F181081301b44905F3ae15419112ecaBd8A6;
+    bytes32 internal constant PIPEDOG_CODEHASH =
+        0xc0d0d825734a0b6d070991217c8c0fb8530b574e839d2ff7685341fd9d707912;
+    uint256 internal constant PIPEDOG_TOTAL_SUPPLY =
+        12_345_678_912 ether;
+    uint8 internal constant PIPEDOG_DECIMALS = 18;
 
     address internal constant POOL_MANAGER =
         0x8366a39CC670B4001A1121B8F6A443A643e40951;

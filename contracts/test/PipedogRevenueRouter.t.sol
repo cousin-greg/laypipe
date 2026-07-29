@@ -3,183 +3,170 @@ pragma solidity ^0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {StdInvariant} from "forge-std/StdInvariant.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IUniswapV3Pool} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IUniswapV3Factory} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {
-    PipedogRevenueRouter,
-    IPipedogWETH9
-} from "../src/PipedogRevenueRouter.sol";
-import {
-    MockERC20,
-    MockWETH,
-    MockV3Factory,
-    MockV3Pool,
-    RejectNative
-} from "./mocks/RevenueRouterMocks.sol";
+import {PipedogRevenueRouter} from "../src/PipedogRevenueRouter.sol";
+import {FeeOnTransferERC20, MockERC20, ReentrantERC20, RejectNative} from "./mocks/RevenueRouterMocks.sol";
 
 contract PipedogRevenueRouterTest is Test {
-    uint24 internal constant FEE = 10_000;
+    uint16 internal constant BOUNTY_BPS = 100;
+    uint256 internal constant SEQUESTER_CAP = 100 ether;
+    uint256 internal constant TREASURY_CAP = 100 ether;
+
+    address internal constant DONOR = address(0xD0A0);
     address internal constant TREASURY = address(0xA11CE);
     address internal constant OPERATIONS = address(0xB0B);
     address internal constant KEEPER = address(0xCA11);
+    address internal constant SUCCESSOR = address(0x5ACC);
+    address internal constant RECIPIENT = address(0xD00D);
 
     MockERC20 internal pipedog;
-    MockWETH internal weth;
-    MockV3Factory internal factory;
-    MockV3Pool internal pool;
     PipedogRevenueRouter internal router;
 
     function setUp() public {
         pipedog = new MockERC20("Pipedog", "PIPEDOG");
-        weth = new MockWETH();
-        factory = new MockV3Factory();
-        pool = new MockV3Pool(
-            address(weth),
-            address(pipedog),
-            FEE,
-            address(factory),
-            pipedog,
-            true
-        );
-        factory.configure(address(weth), address(pipedog), FEE, address(pool));
-        pipedog.mint(address(pool), 1_000_000_000 ether);
-
-        router = new PipedogRevenueRouter(
-            IUniswapV3Pool(address(pool)),
-            IUniswapV3Factory(address(factory)),
-            FEE,
-            IERC20(address(pipedog)),
-            IPipedogWETH9(address(weth)),
-            TREASURY,
-            OPERATIONS,
-            0.1 ether,
-            0.1 ether,
-            address(this)
-        );
-        vm.deal(address(this), 100 ether);
+        router = _deployRouter(IERC20(address(pipedog)), SEQUESTER_CAP, TREASURY_CAP, BOUNTY_BPS);
+        pipedog.mint(DONOR, 1_000_000 ether);
     }
 
-    function testAllocateUsesImmutable252550PolicyAndEveryWei() public {
-        _fund(1 ether + 3);
-        router.allocate();
+    function testAllocateUsesExact252550PolicyIncludingRounding() public {
+        _deposit(1 ether + 3);
 
         assertEq(router.sequesterTank(), 0.25 ether);
-        assertEq(router.treasuryBuyTank(), 0.25 ether);
+        assertEq(router.treasuryTank(), 0.25 ether);
         assertEq(router.operationsTab(), 0.5 ether + 3);
         assertEq(router.totalRevenueAllocated(), 1 ether + 3);
         assertEq(router.unallocated(), 0);
+
+        // A seven-wei direct donation allocates 1 / 1 / 5. Operations
+        // deliberately receives both rounding remainders.
+        vm.prank(DONOR);
+        pipedog.transfer(address(router), 7);
+        assertEq(router.unallocated(), 7);
+        router.allocate();
+
+        assertEq(router.sequesterTank(), 0.25 ether + 1);
+        assertEq(router.treasuryTank(), 0.25 ether + 1);
+        assertEq(router.operationsTab(), 0.5 ether + 8);
+        assertEq(router.totalRevenueAllocated(), 1 ether + 10);
+        assertEq(router.unallocated(), 0);
+        _assertAccountingIdentity(router, pipedog);
     }
 
-    function testBuyLanesPayBountyAndDoNotReducePipedogSupply() public {
-        _fund(1 ether);
+    function testFuzzAllocationNeverLosesAWei(uint96 seed) public {
+        uint256 amount = bound(uint256(seed), 1, 100_000 ether);
+        _deposit(amount);
+
+        uint256 expectedSequester = amount / 4;
+        uint256 expectedTreasury = amount / 4;
+        uint256 expectedOperations = amount - expectedSequester - expectedTreasury;
+
+        assertEq(router.sequesterTank(), expectedSequester);
+        assertEq(router.treasuryTank(), expectedTreasury);
+        assertEq(router.operationsTab(), expectedOperations);
+        assertEq(router.sequesterTank() + router.treasuryTank() + router.operationsTab(), amount);
+        _assertAccountingIdentity(router, pipedog);
+    }
+
+    function testPermissionlessRoutesApplyCapsBountiesAndOncePerBlock() public {
+        _deposit(800 ether);
         uint256 supplyBefore = pipedog.totalSupply();
 
         vm.prank(KEEPER);
-        uint256 sequestered = router.buyAndSequester();
-        assertEq(sequestered, 0.198 ether);
-        assertEq(
-            pipedog.balanceOf(router.SEQUESTER_SINK()), 0.198 ether
-        );
-        assertEq(KEEPER.balance, 0.001 ether);
-        assertEq(router.sequesterTank(), 0.15 ether);
-        assertEq(router.totalEthSequestered(), 0.099 ether);
+        assertEq(router.sequesterPipedog(), 99 ether);
+        assertEq(pipedog.balanceOf(router.SEQUESTER_SINK()), 99 ether);
+        assertEq(pipedog.balanceOf(KEEPER), 1 ether);
+        assertEq(router.sequesterTank(), 100 ether);
 
+        vm.expectRevert(PipedogRevenueRouter.AlreadyProcessedThisBlock.selector);
         vm.prank(KEEPER);
-        uint256 treasuryBought = router.buyForTreasury();
-        assertEq(treasuryBought, 0.198 ether);
-        assertEq(pipedog.balanceOf(TREASURY), 0.198 ether);
-        assertEq(KEEPER.balance, 0.002 ether);
-        assertEq(router.treasuryBuyTank(), 0.15 ether);
+        router.sequesterPipedog();
 
-        // The sink grows, but PIPEDOG itself has no burn() in this path.
-        assertEq(pipedog.totalSupply(), supplyBefore);
-        assertEq(router.totalKeeperBounties(), 0.002 ether);
-    }
-
-    function testBountyBoundaryChunkEndingInNinetyNineCannotOverdraw()
-        public
-    {
-        router.setMaxSequesterPerCall(199);
-        _fund(796); // 25% lane is exactly the 199-wei boundary chunk
+        // Each permissionless lane has an independent per-block guard.
         vm.prank(KEEPER);
-        assertEq(router.buyAndSequester(), 396);
-        assertEq(router.totalEthSequestered(), 198);
-        assertEq(router.totalKeeperBounties(), 1);
-        assertEq(router.sequesterTank(), 0);
-    }
+        assertEq(router.routeTreasuryPipedog(), 99 ether);
+        assertEq(pipedog.balanceOf(TREASURY), 99 ether);
+        assertEq(pipedog.balanceOf(KEEPER), 2 ether);
+        assertEq(router.treasuryTank(), 100 ether);
 
-    function testFuzzFullFillBountyNeverExceedsGrossChunk(uint96 seed)
-        public
-    {
-        uint256 chunk = bound(uint256(seed), 1, 10 ether);
-        router.setMaxSequesterPerCall(chunk);
-        _fund(chunk * 4);
-
+        vm.expectRevert(PipedogRevenueRouter.AlreadyProcessedThisBlock.selector);
         vm.prank(KEEPER);
-        router.buyAndSequester();
-
-        assertLe(
-            router.totalEthSequestered()
-                + router.totalKeeperBounties(),
-            chunk
-        );
-        assertEq(
-            address(router).balance,
-            router.sequesterTank() + router.treasuryBuyTank()
-                + router.operationsTab()
-        );
-    }
-
-    function testEachBuyLaneCanRunOnlyOncePerBlock() public {
-        _fund(2 ether);
-        vm.prank(KEEPER);
-        router.buyAndSequester();
-        vm.expectRevert(
-            PipedogRevenueRouter.AlreadyProcessedThisBlock.selector
-        );
-        vm.prank(KEEPER);
-        router.buyAndSequester();
-
-        // The independent treasury lane is still available in this block.
-        vm.prank(KEEPER);
-        router.buyForTreasury();
-        vm.expectRevert(
-            PipedogRevenueRouter.AlreadyProcessedThisBlock.selector
-        );
-        vm.prank(KEEPER);
-        router.buyForTreasury();
+        router.routeTreasuryPipedog();
 
         vm.roll(block.number + 1);
-        vm.prank(KEEPER);
-        router.buyAndSequester();
+        vm.startPrank(KEEPER);
+        assertEq(router.sequesterPipedog(), 99 ether);
+        assertEq(router.routeTreasuryPipedog(), 99 ether);
+        vm.stopPrank();
+
+        assertEq(pipedog.balanceOf(router.SEQUESTER_SINK()), 198 ether);
+        assertEq(pipedog.balanceOf(TREASURY), 198 ether);
+        assertEq(pipedog.balanceOf(KEEPER), 4 ether);
+        assertEq(router.totalPipedogSequestered(), 198 ether);
+        assertEq(router.totalPipedogTreasuryRouted(), 198 ether);
+        assertEq(router.totalKeeperBounties(), 4 ether);
+        assertEq(router.sequesterTank(), 0);
+        assertEq(router.treasuryTank(), 0);
+
+        // Sending tokens to the conventional sink does not change ERC20
+        // totalSupply.
+        assertEq(pipedog.totalSupply(), supplyBefore);
+        _assertAccountingIdentity(router, pipedog);
     }
 
-    function testOperationsCollectionIsPermissionlessButDestinationFixed()
-        public
-    {
-        _fund(1 ether);
-        uint256 beforeBalance = OPERATIONS.balance;
+    function testBountyRoundsDownWithoutOverdrawingGrossChunk() public {
+        MockERC20 token = new MockERC20("Pipedog", "PIPEDOG");
+        PipedogRevenueRouter localRouter = _deployRouter(IERC20(address(token)), 199, 199, 100);
+        token.mint(DONOR, 796);
+
+        vm.startPrank(DONOR);
+        token.approve(address(localRouter), 796);
+        localRouter.deposit(796);
+        vm.stopPrank();
+
         vm.prank(KEEPER);
-        uint256 paid = router.collectOperations();
-        assertEq(paid, 0.5 ether);
-        assertEq(OPERATIONS.balance - beforeBalance, 0.5 ether);
-        assertEq(router.totalOperationsCollected(), 0.5 ether);
+        assertEq(localRouter.sequesterPipedog(), 198);
+        assertEq(token.balanceOf(localRouter.SEQUESTER_SINK()), 198);
+        assertEq(token.balanceOf(KEEPER), 1);
+        assertEq(localRouter.sequesterTank(), 0);
+        assertEq(localRouter.totalKeeperBounties(), 1);
+        _assertAccountingIdentity(localRouter, token);
     }
 
-    function testPauseStopsMarketOrdersButNotOperationsCollection() public {
-        _fund(1 ether);
+    function testOperationsCollectionPaysPipedogToFixedDestination() public {
+        _deposit(100 ether);
+        vm.prank(KEEPER);
+        assertEq(router.collectOperations(), 50 ether);
+
+        assertEq(pipedog.balanceOf(OPERATIONS), 50 ether);
+        assertEq(router.totalPipedogOperationsCollected(), 50 ether);
+        assertEq(router.operationsTab(), 0);
+        assertEq(router.collectOperations(), 0);
+        assertEq(OPERATIONS.balance, 0);
+        _assertAccountingIdentity(router, pipedog);
+    }
+
+    function testPauseStopsRoutingButNotDepositsOrOperations() public {
+        _deposit(400 ether);
         router.pause();
+
         vm.expectRevert();
-        router.buyAndSequester();
-        assertEq(router.collectOperations(), 0.5 ether);
+        router.sequesterPipedog();
+        vm.expectRevert();
+        router.routeTreasuryPipedog();
+
+        // Pausing keeper routes does not strand incoming revenue or the
+        // operations lane.
+        _deposit(100 ether);
+        assertEq(router.collectOperations(), 250 ether);
+
         router.unpause();
-        router.buyAndSequester();
+        assertEq(router.sequesterPipedog(), 99 ether);
+        assertEq(router.routeTreasuryPipedog(), 99 ether);
+        _assertAccountingIdentity(router, pipedog);
     }
 
-    function testOnlyOwnerCanChangeDestinationsCapsAndMigrate() public {
+    function testOnlyOwnerCanChangeDestinationsCapsAndPause() public {
         vm.startPrank(KEEPER);
         vm.expectRevert();
         router.setTreasury(address(1));
@@ -188,193 +175,257 @@ contract PipedogRevenueRouterTest is Test {
         vm.expectRevert();
         router.setMaxSequesterPerCall(1);
         vm.expectRevert();
-        router.migrate(address(1));
+        router.setMaxTreasuryRoutePerCall(1);
+        vm.expectRevert();
+        router.pause();
+        vm.expectRevert();
+        router.migrate(SUCCESSOR);
         vm.stopPrank();
 
         router.setTreasury(address(0x1234));
         router.setOperationsWallet(address(0x5678));
         router.setMaxSequesterPerCall(0.2 ether);
-        router.setMaxTreasuryBuyPerCall(0.3 ether);
+        router.setMaxTreasuryRoutePerCall(0.3 ether);
+
         assertEq(router.treasury(), address(0x1234));
         assertEq(router.operationsWallet(), address(0x5678));
+        assertEq(router.maxSequesterPerCall(), 0.2 ether);
+        assertEq(router.maxTreasuryRoutePerCall(), 0.3 ether);
+
+        vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
+        router.setTreasury(address(router));
+        vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
+        router.setOperationsWallet(address(0));
+        vm.expectRevert(PipedogRevenueRouter.ZeroCap.selector);
+        router.setMaxSequesterPerCall(0);
+        vm.expectRevert(PipedogRevenueRouter.ZeroCap.selector);
+        router.setMaxTreasuryRoutePerCall(0);
     }
 
-    function testCallbackRejectsOutsiderAndCanonicalPoolOutsideSwap()
-        public
-    {
-        vm.expectRevert(PipedogRevenueRouter.NotPool.selector);
-        router.uniswapV3SwapCallback(1, -1, "");
+    function testMigrationAllocatesFreshDonationAndPreservesAccounting() public {
+        _deposit(400 ether);
 
-        vm.prank(address(pool));
-        vm.expectRevert(PipedogRevenueRouter.NotActiveSwap.selector);
-        router.uniswapV3SwapCallback(1, -1, "");
+        // Regression: migration must allocate direct PIPEDOG transfers before
+        // clearing the pots, or totalMigrated can exceed accounted revenue.
+        vm.prank(DONOR);
+        pipedog.transfer(address(router), 3);
+        assertEq(router.unallocated(), 3);
+        assertEq(router.totalRevenueAllocated(), 400 ether);
+
+        router.migrate(SUCCESSOR);
+
+        assertEq(pipedog.balanceOf(SUCCESSOR), 400 ether + 3);
+        assertEq(pipedog.balanceOf(address(router)), 0);
+        assertEq(router.sequesterTank(), 0);
+        assertEq(router.treasuryTank(), 0);
+        assertEq(router.operationsTab(), 0);
+        assertEq(router.totalRevenueAllocated(), 400 ether + 3);
+        assertEq(router.totalMigrated(), 400 ether + 3);
+        assertEq(router.unallocated(), 0);
+        _assertAccountingIdentity(router, pipedog);
     }
 
-    function testMaliciousPoolCannotOverdrawOrDoubleCallback() public {
-        _fund(2 ether);
-        pool.setMode(MockV3Pool.Mode.OVERCHARGE);
-        vm.expectRevert(PipedogRevenueRouter.SwapInputTooHigh.selector);
-        router.buyAndSequester();
+    function testRecoveryProtectsPipedogAndHandlesUnrelatedAssets() public {
+        MockERC20 accidental = new MockERC20("Accidental", "OOPS");
+        accidental.mint(address(router), 77 ether);
 
-        pool.setMode(MockV3Pool.Mode.DOUBLE_CALLBACK);
-        vm.roll(block.number + 1);
-        vm.expectRevert(PipedogRevenueRouter.SwapInputTooHigh.selector);
-        router.buyAndSequester();
+        router.recoverToken(IERC20(address(accidental)), RECIPIENT);
+        assertEq(accidental.balanceOf(RECIPIENT), 77 ether);
+
+        vm.expectRevert(PipedogRevenueRouter.ProtectedToken.selector);
+        router.recoverToken(IERC20(address(pipedog)), RECIPIENT);
+
+        vm.deal(address(router), 2 ether);
+        router.recoverNative(payable(RECIPIENT));
+        assertEq(RECIPIENT.balance, 2 ether);
+        assertEq(address(router).balance, 0);
+
+        // The router has no operational native-value entry point.
+        vm.deal(address(this), 1 ether);
+        (bool accepted,) = address(router).call{value: 1}("");
+        assertFalse(accepted);
     }
 
-    function testWrongDeltaReturnMismatchAndEmptyOutputRevert() public {
-        _fund(3 ether);
-
-        pool.setMode(MockV3Pool.Mode.WRONG_SIGN);
-        vm.expectRevert(PipedogRevenueRouter.InvalidSwapDelta.selector);
-        router.buyAndSequester();
-
-        pool.setMode(MockV3Pool.Mode.RETURN_MISMATCH);
-        vm.roll(block.number + 1);
-        vm.expectRevert(PipedogRevenueRouter.InvalidSwapDelta.selector);
-        router.buyAndSequester();
-
-        pool.setMode(MockV3Pool.Mode.EMPTY_OUTPUT);
-        vm.roll(block.number + 1);
-        vm.expectRevert(PipedogRevenueRouter.InvalidSwapDelta.selector);
-        router.buyAndSequester();
-    }
-
-    function testConstructorRejectsNonCanonicalPool() public {
-        MockV3Factory wrongFactory = new MockV3Factory();
-        wrongFactory.configure(
-            address(weth), address(pipedog), FEE, address(0xBAD)
-        );
-        vm.expectRevert(PipedogRevenueRouter.InvalidPool.selector);
-        new PipedogRevenueRouter(
-            IUniswapV3Pool(address(pool)),
-            IUniswapV3Factory(address(wrongFactory)),
-            FEE,
-            IERC20(address(pipedog)),
-            IPipedogWETH9(address(weth)),
-            TREASURY,
-            OPERATIONS,
-            1,
-            1,
-            address(this)
-        );
-    }
-
-    function testRevertingOperationsWalletDoesNotBlockBuyLanes() public {
+    function testNativeRecoveryFailureRevertsWithoutLosingFunds() public {
         RejectNative rejector = new RejectNative();
-        router.setOperationsWallet(address(rejector));
-        _fund(1 ether);
-        vm.expectRevert(PipedogRevenueRouter.NativeTransferFailed.selector);
-        router.collectOperations();
+        vm.deal(address(router), 1 ether);
 
-        router.buyAndSequester();
-        assertEq(
-            pipedog.balanceOf(router.SEQUESTER_SINK()), 0.198 ether
+        vm.expectRevert(PipedogRevenueRouter.NativeRecoveryFailed.selector);
+        router.recoverNative(payable(address(rejector)));
+        assertEq(address(router).balance, 1 ether);
+    }
+
+    function testFeeOnTransferPipedogFailsExactPullAndPushChecks() public {
+        FeeOnTransferERC20 taxed = new FeeOnTransferERC20(100);
+        PipedogRevenueRouter localRouter = _deployRouter(IERC20(address(taxed)), 100, 100, 0);
+        taxed.mint(DONOR, 400);
+
+        vm.startPrank(DONOR);
+        taxed.approve(address(localRouter), 100);
+        vm.expectRevert(abi.encodeWithSelector(PipedogRevenueRouter.QuoteTransferMismatch.selector, 100, 99));
+        localRouter.deposit(100);
+        vm.stopPrank();
+
+        assertEq(taxed.balanceOf(DONOR), 400);
+        assertEq(taxed.balanceOf(address(localRouter)), 0);
+
+        // Minting directly to the router bypasses the pull check and exercises
+        // the symmetric outgoing exact-transfer guard.
+        taxed.mint(address(localRouter), 400);
+        localRouter.allocate();
+        vm.expectRevert(abi.encodeWithSelector(PipedogRevenueRouter.QuoteTransferMismatch.selector, 100, 99));
+        localRouter.sequesterPipedog();
+        assertEq(taxed.balanceOf(address(localRouter)), 400);
+        assertEq(localRouter.sequesterTank(), 100);
+    }
+
+    function testDepositBlocksTokenCallbackReentrancy() public {
+        ReentrantERC20 reentrant = new ReentrantERC20();
+        PipedogRevenueRouter localRouter = _deployRouter(IERC20(address(reentrant)), 100 ether, 100 ether, 0);
+        reentrant.mint(DONOR, 100 ether);
+        reentrant.configureReentry(address(localRouter));
+        reentrant.armReentry();
+
+        vm.startPrank(DONOR);
+        reentrant.approve(address(localRouter), 100 ether);
+        localRouter.deposit(100 ether);
+        vm.stopPrank();
+
+        assertTrue(reentrant.reentryAttempted());
+        assertFalse(reentrant.reentrySucceeded());
+        assertEq(reentrant.reentryRevertSelector(), bytes4(keccak256("ReentrancyGuardReentrantCall()")));
+        assertEq(reentrant.balanceOf(address(localRouter)), 100 ether);
+        assertEq(localRouter.totalRevenueAllocated(), 100 ether);
+        assertEq(reentrant.allowance(DONOR, address(localRouter)), 0);
+    }
+
+    function testConstructorRejectsInvalidPolicyInputs() public {
+        vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
+        new PipedogRevenueRouter(IERC20(address(0xBEEF)), TREASURY, OPERATIONS, 1, 1, 0, address(this));
+
+        vm.expectRevert(PipedogRevenueRouter.ZeroCap.selector);
+        new PipedogRevenueRouter(IERC20(address(pipedog)), TREASURY, OPERATIONS, 0, 1, 0, address(this));
+
+        vm.expectRevert(PipedogRevenueRouter.InvalidBounty.selector);
+        new PipedogRevenueRouter(IERC20(address(pipedog)), TREASURY, OPERATIONS, 1, 1, 1_001, address(this));
+    }
+
+    function _deposit(uint256 amount) internal {
+        vm.startPrank(DONOR);
+        pipedog.approve(address(router), amount);
+        router.deposit(amount);
+        assertEq(pipedog.allowance(DONOR, address(router)), 0);
+        vm.stopPrank();
+    }
+
+    function _deployRouter(IERC20 token, uint256 sequesterCap, uint256 treasuryCap, uint16 bountyBps)
+        internal
+        returns (PipedogRevenueRouter deployed)
+    {
+        deployed = new PipedogRevenueRouter(
+            token, TREASURY, OPERATIONS, sequesterCap, treasuryCap, bountyBps, address(this)
         );
     }
 
-    function _fund(uint256 amount) internal {
-        (bool ok,) = address(router).call{value: amount}("");
-        assertTrue(ok);
+    function _assertAccountingIdentity(PipedogRevenueRouter target, IERC20 token) internal view {
+        uint256 accountedInbound = target.totalRevenueAllocated() + target.unallocated();
+        uint256 heldOrRouted = token.balanceOf(address(target)) + target.totalPipedogSequestered()
+            + target.totalPipedogTreasuryRouted() + target.totalPipedogOperationsCollected()
+            + target.totalKeeperBounties() + target.totalMigrated();
+        assertEq(accountedInbound, heldOrRouted);
     }
-
-    receive() external payable {}
 }
 
 contract RevenueRouterHandler {
-    PipedogRevenueRouter public immutable router;
+    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    constructor(PipedogRevenueRouter router_) {
+    MockERC20 internal immutable pipedog;
+    PipedogRevenueRouter internal immutable router;
+
+    constructor(MockERC20 pipedog_, PipedogRevenueRouter router_) {
+        pipedog = pipedog_;
         router = router_;
     }
 
     function deposit(uint96 seed) external {
-        uint256 amount = uint256(seed) % 2 ether;
-        if (amount == 0 || address(this).balance < amount) return;
-        (bool ok,) = address(router).call{value: amount}("");
-        require(ok);
+        uint256 amount = (uint256(seed) % 1_000 ether) + 1;
+        if (pipedog.balanceOf(address(this)) < amount) return;
+        pipedog.approve(address(router), amount);
+        router.deposit(amount);
+    }
+
+    function donate(uint96 seed) external {
+        uint256 amount = (uint256(seed) % 1_000 ether) + 1;
+        if (pipedog.balanceOf(address(this)) < amount) return;
+        pipedog.transfer(address(router), amount);
     }
 
     function allocate() external {
         router.allocate();
     }
 
-    function sequester() external {
-        try router.buyAndSequester() {} catch {}
+    function sequester(uint8 jump) external {
+        vm.roll(block.number + 1 + uint256(jump % 3));
+        try router.sequesterPipedog() {} catch {}
     }
 
-    function treasuryBuy() external {
-        try router.buyForTreasury() {} catch {}
+    function routeTreasury(uint8 jump) external {
+        vm.roll(block.number + 1 + uint256(jump % 3));
+        try router.routeTreasuryPipedog() {} catch {}
     }
 
     function collectOperations() external {
         try router.collectOperations() {} catch {}
     }
-
-    receive() external payable {}
 }
 
 contract PipedogRevenueRouterInvariantTest is StdInvariant, Test {
+    address internal constant TREASURY = address(0xA11CE);
+    address internal constant OPERATIONS = address(0xB0B);
+
+    MockERC20 internal pipedog;
     PipedogRevenueRouter internal router;
     RevenueRouterHandler internal handler;
+    uint256 internal initialSupply;
 
     function setUp() public {
-        MockERC20 pipedog = new MockERC20("Pipedog", "PIPEDOG");
-        MockWETH weth = new MockWETH();
-        MockV3Factory factory = new MockV3Factory();
-        MockV3Pool pool = new MockV3Pool(
-            address(weth),
-            address(pipedog),
-            10_000,
-            address(factory),
-            pipedog,
-            true
-        );
-        factory.configure(
-            address(weth), address(pipedog), 10_000, address(pool)
-        );
-        pipedog.mint(address(pool), type(uint128).max);
-
+        pipedog = new MockERC20("Pipedog", "PIPEDOG");
         router = new PipedogRevenueRouter(
-            IUniswapV3Pool(address(pool)),
-            IUniswapV3Factory(address(factory)),
-            10_000,
-            IERC20(address(pipedog)),
-            IPipedogWETH9(address(weth)),
-            address(0xA11CE),
-            address(0xB0B),
-            0.1 ether,
-            0.1 ether,
-            address(this)
+            IERC20(address(pipedog)), TREASURY, OPERATIONS, 1_000 ether, 1_000 ether, 100, address(this)
         );
-        handler = new RevenueRouterHandler(router);
-        vm.deal(address(handler), 10_000 ether);
+        handler = new RevenueRouterHandler(pipedog, router);
+        pipedog.mint(address(handler), type(uint128).max);
+        initialSupply = pipedog.totalSupply();
         targetContract(address(handler));
     }
 
-    function invariantEveryAllocatedWeiIsPresentOrAccountedAsOutflow()
-        public
-        view
-    {
-        uint256 left =
-            router.totalRevenueAllocated() + router.unallocated();
-        uint256 right = address(router).balance
-            + router.totalEthSequestered()
-            + router.totalEthTreasuryBought()
-            + router.totalOperationsCollected()
+    function invariantEveryAllocatedWeiIsHeldOrRecordedAsOutflow() public view {
+        uint256 accountedInbound = router.totalRevenueAllocated() + router.unallocated();
+        uint256 heldOrRouted = pipedog.balanceOf(address(router)) + router.totalPipedogSequestered()
+            + router.totalPipedogTreasuryRouted() + router.totalPipedogOperationsCollected()
             + router.totalKeeperBounties() + router.totalMigrated();
-        assertEq(left, right);
+        assertEq(accountedInbound, heldOrRouted);
     }
 
-    function invariantPotsNeverExceedBalance() public view {
-        uint256 pots = router.sequesterTank() + router.treasuryBuyTank()
-            + router.operationsTab();
-        assertLe(pots, address(router).balance);
+    function invariantPotsAndFreshRevenueExactlyEqualRouterBalance() public view {
+        uint256 accountedBalance =
+            router.sequesterTank() + router.treasuryTank() + router.operationsTab() + router.unallocated();
+        assertEq(accountedBalance, pipedog.balanceOf(address(router)));
+    }
+
+    function invariantDestinationsMatchCumulativeRouting() public view {
+        assertEq(pipedog.balanceOf(router.SEQUESTER_SINK()), router.totalPipedogSequestered());
+        assertEq(pipedog.balanceOf(TREASURY), router.totalPipedogTreasuryRouted());
+        assertEq(pipedog.balanceOf(OPERATIONS), router.totalPipedogOperationsCollected());
+    }
+
+    function invariantSequestrationNeverChangesTotalSupply() public view {
+        assertEq(pipedog.totalSupply(), initialSupply);
     }
 
     function invariantRevenueSharesAreImmutable() public view {
         assertEq(router.SEQUESTER_SHARE_BPS(), 2_500);
-        assertEq(router.TREASURY_BUY_SHARE_BPS(), 2_500);
+        assertEq(router.TREASURY_SHARE_BPS(), 2_500);
         assertEq(router.OPERATIONS_SHARE_BPS(), 5_000);
     }
 }

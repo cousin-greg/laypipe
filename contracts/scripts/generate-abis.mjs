@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
@@ -7,13 +7,19 @@ const contracts = [
   ["LaypipeFactory.sol", "LaypipeFactory"],
   ["PipedogHook.sol", "PipedogHook"],
   ["LaypipeSelfBurner.sol", "LaypipeSelfBurner"],
-  ["LaypipeDividendDistributor.sol", "LaypipeDividendDistributor"],
+  ["LaypipeSwapRouter.sol", "LaypipeSwapRouter"],
   ["PipedogRevenueRouter.sol", "PipedogRevenueRouter"],
   ["LaypipeToken.sol", "LaypipeToken"],
 ];
+const quarantined = ["LaypipeDividendDistributor"];
 
 const output = join(ROOT, "abi");
 await mkdir(output, { recursive: true });
+
+for (const name of quarantined) {
+  await rm(join(output, `${name}.json`), { force: true });
+  console.log(`excluded quarantined abi/${name}.json`);
+}
 
 for (const [source, name] of contracts) {
   const artifactPath = join(ROOT, "out", source, `${name}.json`);

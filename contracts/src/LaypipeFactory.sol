@@ -24,7 +24,6 @@ import {LiquidityAmounts} from "./lib/LiquidityAmounts.sol";
 import {PipedogHook} from "./PipedogHook.sol";
 import {LaypipeToken} from "./LaypipeToken.sol";
 import {LaypipeSelfBurner} from "./LaypipeSelfBurner.sol";
-import {LaypipeDividendDistributor} from "./LaypipeDividendDistributor.sol";
 
 /// @title LaypipeFactory
 /// @notice Clean-room implementation of the public LetsCash launch-factory
@@ -93,21 +92,23 @@ contract LaypipeFactory is
     }
 
     error LaunchPaused();
-    error DividendLaunchPaused();
     error DividendModeUnderReview();
     error InvalidConfig();
     error DisabledConfig();
     error InvalidCreator();
-    error InvalidValue();
     error InfrastructureNotReady();
     error NotPoolManager();
     error FirstBuySlippage();
     error EtherTransferFailed();
-    error UnsupportedMode();
     error InvalidInfrastructure();
     error InvalidRounds();
     error TokenAddressCollision();
     error InvalidVanitySuffix(address predictedToken);
+    error InvalidTokenOrdering(address predictedToken, address quoteToken);
+    error QuoteAllowanceMismatch(uint256 expected, uint256 actual);
+    error QuoteTransferMismatch(uint256 expected, uint256 actual);
+    error SeedRequiresQuote();
+    error ResidualQuoteBalance(uint256 expected, uint256 actual);
     error ValueTooLarge();
 
     /// @dev Signature intentionally matches the current LetsCash launch event
@@ -122,7 +123,8 @@ contract LaypipeFactory is
         address hook,
         address feeRecipient
     );
-    event LaunchFeeForwarded(address indexed treasury, uint256 amount);
+    event LaunchFeeRouted(address indexed treasury, uint256 amount);
+    event FirstBuyRefunded(address indexed creator, uint256 amount);
     event LaunchConfigAdded(uint256 indexed configId, LaunchConfig config);
     event LaunchConfigEnabled(uint256 indexed configId, bool enabled);
     event LaunchEnabledSet(bool enabled);
@@ -130,7 +132,6 @@ contract LaypipeFactory is
     event HookSet(address indexed oldHook, address indexed newHook);
     event TokenImplementationSet(address indexed oldImplementation, address indexed newImplementation);
     event SelfBurnerSet(address indexed oldBurner, address indexed newBurner);
-    event DividendDistributorSet(address indexed oldDistributor, address indexed newDistributor);
     event TreasurySet(address indexed oldTreasury, address indexed newTreasury);
     event LaunchFeeSet(uint256 oldFee, uint256 newFee);
     event LaunchLiquiditySeeded(
@@ -142,14 +143,13 @@ contract LaypipeFactory is
     event Swept(address indexed asset, address indexed recipient, uint256 amount);
 
     IPoolManager public poolManager;
+    IERC20 public quoteToken;
     PipedogHook public hook;
     LaypipeToken public tokenImplementation;
     LaypipeSelfBurner public selfBurner;
-    LaypipeDividendDistributor public dividendDistributor;
-    address payable public treasury;
+    address public treasury;
     uint256 public launchFee;
     bool public launchEnabled;
-    bool public dividendLaunchEnabled;
 
     LaunchConfig[] private _launchConfigs;
 
@@ -159,17 +159,21 @@ contract LaypipeFactory is
 
     function initialize(
         IPoolManager poolManager_,
-        address payable treasury_,
+        IERC20 quoteToken_,
+        address treasury_,
         address owner_,
         uint256 launchFee_
     ) external initializer {
         if (
             address(poolManager_) == address(0) || treasury_ == address(0)
-                || owner_ == address(0) || address(poolManager_).code.length == 0
+                || owner_ == address(0)
+                || address(poolManager_).code.length == 0
+                || address(quoteToken_).code.length == 0
         ) revert InvalidInfrastructure();
         __Ownable_init(owner_);
         __Ownable2Step_init();
         poolManager = poolManager_;
+        quoteToken = quoteToken_;
         treasury = treasury_;
         launchFee = launchFee_;
     }
@@ -180,35 +184,9 @@ contract LaypipeFactory is
         uint256 firstBuyIn,
         uint256 firstBuyMinOut,
         bytes32 salt
-    ) external payable nonReentrant returns (address token, PoolId poolId) {
+    ) external nonReentrant returns (address token, PoolId poolId) {
         return _launch(
-            params,
-            configId,
-            firstBuyIn,
-            firstBuyMinOut,
-            salt,
-            false,
-            _emptyDividendParams()
-        );
-    }
-
-    function launchDividend(
-        TokenParams calldata params,
-        uint256 configId,
-        uint256 firstBuyIn,
-        uint256 firstBuyMinOut,
-        bytes32 salt,
-        LaypipeDividendDistributor.DividendParams calldata dividendParams
-    ) external payable nonReentrant returns (address token, PoolId poolId) {
-        if (!dividendLaunchEnabled) revert DividendLaunchPaused();
-        return _launch(
-            params,
-            configId,
-            firstBuyIn,
-            firstBuyMinOut,
-            salt,
-            true,
-            dividendParams
+            params, configId, firstBuyIn, firstBuyMinOut, salt
         );
     }
 
@@ -217,9 +195,7 @@ contract LaypipeFactory is
         uint256 configId,
         uint256 firstBuyIn,
         uint256 firstBuyMinOut,
-        bytes32 salt,
-        bool dividend,
-        LaypipeDividendDistributor.DividendParams memory dividendParams
+        bytes32 salt
     ) private returns (address token, PoolId poolId) {
         if (!launchEnabled) revert LaunchPaused();
         if (configId >= _launchConfigs.length) revert InvalidConfig();
@@ -231,14 +207,11 @@ contract LaypipeFactory is
         if (params.creator == address(0) || params.creator != msg.sender) {
             revert InvalidCreator();
         }
-        if (msg.value != launchFee + firstBuyIn) revert InvalidValue();
         if (
             address(hook) == address(0) || address(tokenImplementation) == address(0)
                 || (config.selfBurn && address(selfBurner) == address(0))
-                || (dividend && address(dividendDistributor) == address(0))
         ) revert InfrastructureNotReady();
-        _requireLiveBindings(config.selfBurn, dividend);
-        if (dividend && config.selfBurn) revert UnsupportedMode();
+        _requireLiveBindings(config.selfBurn);
 
         bytes32 derivedSalt = _derivedSalt(params, configId, msg.sender, salt);
         address predictedToken = Clones.predictDeterministicAddress(
@@ -247,6 +220,16 @@ contract LaypipeFactory is
         if (uint8(uint160(predictedToken)) != VANITY_SUFFIX) {
             revert InvalidVanitySuffix(predictedToken);
         }
+        if (
+            uint160(predictedToken) <= uint160(address(quoteToken))
+        ) {
+            revert InvalidTokenOrdering(
+                predictedToken, address(quoteToken)
+            );
+        }
+
+        uint256 quoteFloor =
+            _pullQuoteExact(msg.sender, launchFee + firstBuyIn);
         token = Clones.cloneDeterministic(address(tokenImplementation), derivedSalt);
         if (token == address(0)) revert TokenAddressCollision();
 
@@ -274,7 +257,7 @@ contract LaypipeFactory is
         );
 
         PoolKey memory key = PoolKey({
-            currency0: Currency.wrap(address(0)),
+            currency0: Currency.wrap(address(quoteToken)),
             currency1: Currency.wrap(token),
             fee: 0,
             tickSpacing: config.tickSpacing,
@@ -282,11 +265,8 @@ contract LaypipeFactory is
         });
         poolId = key.toId();
 
-        address feeRecipient = dividend
-            ? address(dividendDistributor)
-            : config.selfBurn
-                ? address(selfBurner)
-                : params.creator;
+        address feeRecipient =
+            config.selfBurn ? address(selfBurner) : params.creator;
         hook.register(
             poolId,
             feeRecipient,
@@ -299,11 +279,8 @@ contract LaypipeFactory is
         LaypipeToken(token).initializePool(PoolId.unwrap(poolId));
 
         if (config.selfBurn) selfBurner.register(poolId, key);
-        if (dividend) {
-            dividendDistributor.register(poolId, token, dividendParams);
-        }
 
-        uint256 firstBuyOut = abi.decode(
+        (uint256 firstBuyOut, uint256 firstBuySpent) = abi.decode(
             poolManager.unlock(
                 abi.encode(
                     UnlockData({
@@ -317,16 +294,22 @@ contract LaypipeFactory is
                     })
                 )
             ),
-            (uint256)
+            (uint256, uint256)
         );
 
         uint256 dust = IERC20(token).balanceOf(address(this));
         if (dust > 0) LaypipeToken(token).burn(dust);
 
-        if (launchFee > 0) {
-            (bool paid,) = treasury.call{value: launchFee}("");
-            if (!paid) revert EtherTransferFailed();
-            emit LaunchFeeForwarded(treasury, launchFee);
+        if (firstBuySpent < firstBuyIn) {
+            uint256 refund = firstBuyIn - firstBuySpent;
+            _pushQuoteExact(params.creator, refund);
+            emit FirstBuyRefunded(params.creator, refund);
+        }
+        _pushQuoteExact(treasury, launchFee);
+        emit LaunchFeeRouted(treasury, launchFee);
+        uint256 endingBalance = quoteToken.balanceOf(address(this));
+        if (endingBalance != quoteFloor) {
+            revert ResidualQuoteBalance(quoteFloor, endingBalance);
         }
 
         emit TokenLaunched(
@@ -345,10 +328,11 @@ contract LaypipeFactory is
         if (msg.sender != address(poolManager)) revert NotPoolManager();
         UnlockData memory operation = abi.decode(data, (UnlockData));
         (uint128 liquidity, uint256 seededTokenAmount) = _seedLiquidity(operation);
-        uint256 firstBuyOut = _executeFirstBuy(operation);
+        (uint256 firstBuyOut, uint256 firstBuySpent) =
+            _executeFirstBuy(operation);
         uint256 dust = operation.supply - seededTokenAmount;
         emit LaunchLiquiditySeeded(operation.key.toId(), liquidity, seededTokenAmount, dust);
-        return abi.encode(firstBuyOut);
+        return abi.encode(firstBuyOut, firstBuySpent);
     }
 
     function _seedLiquidity(UnlockData memory operation)
@@ -379,15 +363,9 @@ contract LaypipeFactory is
         );
         int128 amount0 = liquidityDelta.amount0();
         int128 amount1 = liquidityDelta.amount1();
-        if (amount0 < 0) {
-            operation.key.currency0.settle(
-                poolManager, address(this), uint256(uint128(-amount0)), false
-            );
-        } else if (amount0 > 0) {
-            operation.key.currency0.take(
-                poolManager, address(this), uint256(uint128(amount0)), false
-            );
-        }
+        // Initial liquidity is launched-token-only. Any PIPEDOG delta means
+        // the configured tick/range no longer describes the intended curve.
+        if (amount0 != 0) revert SeedRequiresQuote();
         if (amount1 < 0) {
             seededTokenAmount = uint256(uint128(-amount1));
             operation.key.currency1.settle(
@@ -402,7 +380,7 @@ contract LaypipeFactory is
 
     function _executeFirstBuy(UnlockData memory operation)
         private
-        returns (uint256 firstBuyOut)
+        returns (uint256 firstBuyOut, uint256 quoteSpent)
     {
         if (operation.firstBuyIn > 0) {
             if (operation.firstBuyIn > uint256(type(int256).max)) revert ValueTooLarge();
@@ -418,10 +396,15 @@ contract LaypipeFactory is
             int128 swapAmount0 = swapDelta.amount0();
             int128 swapAmount1 = swapDelta.amount1();
             if (swapAmount0 >= 0 || swapAmount1 <= 0) revert FirstBuySlippage();
-            uint256 ethSpent = uint256(uint128(-swapAmount0));
+            quoteSpent = uint256(uint128(-swapAmount0));
             firstBuyOut = uint256(uint128(swapAmount1));
             if (firstBuyOut < operation.firstBuyMinOut) revert FirstBuySlippage();
-            operation.key.currency0.settle(poolManager, address(this), ethSpent, false);
+            if (quoteSpent > operation.firstBuyIn) {
+                revert FirstBuySlippage();
+            }
+            operation.key.currency0.settle(
+                poolManager, address(this), quoteSpent, false
+            );
             operation.key.currency1.take(
                 poolManager, operation.firstBuyRecipient, firstBuyOut, false
             );
@@ -453,7 +436,10 @@ contract LaypipeFactory is
         for (uint256 i = start; i < start + rounds; ++i) {
             salt = bytes32(i);
             token = predictTokenAddress(params, configId, sender, salt);
-            if (uint8(uint160(token)) == VANITY_SUFFIX) return (salt, token);
+            if (
+                uint8(uint160(token)) == VANITY_SUFFIX
+                    && uint160(token) > uint160(address(quoteToken))
+            ) return (salt, token);
         }
         return (bytes32(0), address(0));
     }
@@ -518,18 +504,26 @@ contract LaypipeFactory is
             // with a complete-set/proof design ships in a future upgrade.
             revert DividendModeUnderReview();
         }
-        dividendLaunchEnabled = enabled;
         emit DividendLaunchEnabledSet(enabled);
+    }
+
+    function dividendLaunchEnabled() external pure returns (bool) {
+        return false;
+    }
+
+    function dividendDistributor() external pure returns (address) {
+        return address(0);
     }
 
     function setHook(PipedogHook newHook) external onlyOwner {
         if (
             address(newHook).code.length == 0 || newHook.factory() != address(this)
                 || address(newHook.poolManager()) != address(poolManager)
+                || address(newHook.quoteToken()) != address(quoteToken)
                 || newHook.treasury() != treasury
         ) revert InvalidInfrastructure();
 
-        // Burners and the dividend distributor bind their hook immutably.
+        // The self-burner binds its hook immutably.
         // A hook rotation must never leave new launches pointing at helpers
         // that will claim against the old hook. Atomically pause launches and
         // clear those dependants; the owner can deploy/rebind replacements,
@@ -539,20 +533,9 @@ contract LaypipeFactory is
                 launchEnabled = false;
                 emit LaunchEnabledSet(false);
             }
-            if (dividendLaunchEnabled) {
-                dividendLaunchEnabled = false;
-                emit DividendLaunchEnabledSet(false);
-            }
             if (address(selfBurner) != address(0)) {
                 emit SelfBurnerSet(address(selfBurner), address(0));
-                selfBurner = LaypipeSelfBurner(payable(address(0)));
-            }
-            if (address(dividendDistributor) != address(0)) {
-                emit DividendDistributorSet(
-                    address(dividendDistributor), address(0)
-                );
-                dividendDistributor =
-                    LaypipeDividendDistributor(payable(address(0)));
+                selfBurner = LaypipeSelfBurner(address(0));
             }
         }
         emit HookSet(address(hook), address(newHook));
@@ -570,28 +553,14 @@ contract LaypipeFactory is
             address(newBurner).code.length == 0 || newBurner.factory() != address(this)
                 || address(newBurner.hook()) != address(hook)
                 || address(newBurner.poolManager()) != address(poolManager)
+                || address(newBurner.quoteToken())
+                    != address(quoteToken)
         ) revert InvalidInfrastructure();
         emit SelfBurnerSet(address(selfBurner), address(newBurner));
         selfBurner = newBurner;
     }
 
-    function setDividendDistributor(LaypipeDividendDistributor newDistributor)
-        external
-        onlyOwner
-    {
-        if (
-            address(newDistributor).code.length == 0
-                || newDistributor.factory() != address(this)
-                || address(newDistributor.hook()) != address(hook)
-                || address(newDistributor.poolManager()) != address(poolManager)
-        ) revert InvalidInfrastructure();
-        emit DividendDistributorSet(
-            address(dividendDistributor), address(newDistributor)
-        );
-        dividendDistributor = newDistributor;
-    }
-
-    function setTreasury(address payable newTreasury) external onlyOwner {
+    function setTreasury(address newTreasury) external onlyOwner {
         if (
             newTreasury == address(0) || launchEnabled
                 || (
@@ -608,31 +577,66 @@ contract LaypipeFactory is
         launchFee = newFee;
     }
 
-    /// @notice Recovers assets accidentally left on the factory itself.
-    /// @dev Native ETH goes through the configured treasury so it follows the
-    ///      platform revenue policy; ERC20s go to the owner because the
-    ///      revenue router intentionally has no arbitrary-token recovery path.
-    ///      This can only transfer balances owned by this factory. It cannot
-    ///      pull PoolManager liquidity, hook claims, creator tabs, or assets
-    ///      held by launched tokens. `nonReentrant` also prevents an owner from
-    ///      entering while launch temporarily holds first-buy ETH or seed
-    ///      tokens.
+    /// @notice Recovers assets accidentally held by the factory itself.
+    /// @dev PIPEDOG is protocol revenue and goes to treasury. Other ERC20s and
+    ///      force-sent native currency go to the owner. This function cannot
+    ///      reach PoolManager liquidity, hook claims, or user balances.
     function sweep(address asset) external onlyOwner nonReentrant {
         address recipient;
         uint256 amount;
         if (asset == address(0)) {
-            recipient = treasury;
+            recipient = owner();
             amount = address(this).balance;
             if (amount > 0) {
                 (bool paid,) = payable(recipient).call{value: amount}("");
                 if (!paid) revert EtherTransferFailed();
             }
         } else {
-            recipient = owner();
+            recipient = asset == address(quoteToken)
+                ? treasury
+                : owner();
             amount = IERC20(asset).balanceOf(address(this));
-            if (amount > 0) IERC20(asset).safeTransfer(recipient, amount);
+            if (amount > 0) {
+                if (asset == address(quoteToken)) {
+                    _pushQuoteExact(recipient, amount);
+                } else {
+                    IERC20(asset).safeTransfer(recipient, amount);
+                }
+            }
         }
         emit Swept(asset, recipient, amount);
+    }
+
+    function _pullQuoteExact(address from, uint256 amount)
+        private
+        returns (uint256 floor)
+    {
+        uint256 approved =
+            quoteToken.allowance(from, address(this));
+        if (approved != amount) {
+            revert QuoteAllowanceMismatch(amount, approved);
+        }
+        floor = quoteToken.balanceOf(address(this));
+        if (amount == 0) return floor;
+        quoteToken.safeTransferFrom(from, address(this), amount);
+        uint256 received = quoteToken.balanceOf(address(this)) - floor;
+        if (received != amount) {
+            revert QuoteTransferMismatch(amount, received);
+        }
+    }
+
+    function _pushQuoteExact(address recipient, uint256 amount) private {
+        if (amount == 0) return;
+        uint256 senderBefore = quoteToken.balanceOf(address(this));
+        uint256 recipientBefore = quoteToken.balanceOf(recipient);
+        quoteToken.safeTransfer(recipient, amount);
+        uint256 sent =
+            senderBefore - quoteToken.balanceOf(address(this));
+        uint256 received =
+            quoteToken.balanceOf(recipient) - recipientBefore;
+        if (sent != amount || received != amount) {
+            revert QuoteTransferMismatch(amount, received);
+        }
     }
 
     function _requireInfrastructure() private view {
@@ -640,14 +644,12 @@ contract LaypipeFactory is
             address(hook) == address(0) || address(tokenImplementation) == address(0)
                 || treasury == address(0) || hook.factory() != address(this)
                 || address(hook.poolManager()) != address(poolManager)
+                || address(hook.quoteToken()) != address(quoteToken)
                 || hook.treasury() != treasury
         ) revert InfrastructureNotReady();
     }
 
-    function _requireLiveBindings(bool needsSelfBurner, bool needsDividend)
-        private
-        view
-    {
+    function _requireLiveBindings(bool needsSelfBurner) private view {
         _requireInfrastructure();
         if (
             needsSelfBurner
@@ -657,16 +659,8 @@ contract LaypipeFactory is
                         || address(selfBurner.hook()) != address(hook)
                         || address(selfBurner.poolManager())
                             != address(poolManager)
-                )
-        ) revert InfrastructureNotReady();
-        if (
-            needsDividend
-                && (
-                    address(dividendDistributor) == address(0)
-                        || dividendDistributor.factory() != address(this)
-                        || address(dividendDistributor.hook()) != address(hook)
-                        || address(dividendDistributor.poolManager())
-                            != address(poolManager)
+                        || address(selfBurner.quoteToken())
+                            != address(quoteToken)
                 )
         ) revert InfrastructureNotReady();
     }
@@ -696,15 +690,5 @@ contract LaypipeFactory is
             && config.launchFeeRate == FIXED_FEE_RATE && config.launchFeeDecay == 0;
     }
 
-    function _emptyDividendParams()
-        private
-        pure
-        returns (LaypipeDividendDistributor.DividendParams memory params)
-    {}
-
     function _authorizeUpgrade(address) internal override onlyOwner {}
-
-    receive() external payable {
-        if (msg.sender != address(poolManager)) revert NotPoolManager();
-    }
 }

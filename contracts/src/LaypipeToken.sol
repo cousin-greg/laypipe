@@ -7,7 +7,8 @@ import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/
 /// @dev The fee engine that charges this token's pool. Declared here rather
 ///      than imported so the token depends on the one function it reads.
 interface IPoolFeeSource {
-    /// @return the pool's fee right now, in pips of the ETH side (1e6 = 100%)
+    /// @return the pool's fee right now, in pips of the PIPEDOG side
+    ///         (1e6 = 100%)
     function currentFeeRate(bytes32 poolId, address swapper) external view returns (uint256);
 }
 
@@ -76,7 +77,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     ///         to it, so this is the floor rather than what is being charged at
     ///         any given moment — read `buyTaxRate` for that.
     ///
-    ///         The tax itself is charged pool-side by the hook, in ETH — the
+    ///         The tax itself is charged pool-side by the hook, in PIPEDOG; the
     ///         token has no transfer tax and can never grow one.
     uint24 public taxBps;
 
@@ -90,7 +91,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     Socials private _socials;
 
     /// @notice Uniswap v4 pool id (v4 pools are ids inside the PoolManager,
-    ///         not standalone contracts). The pair currency is native ETH.
+    ///         not standalone contracts). The pair currency is PIPEDOG.
     bytes32 public poolId;
     uint256 public launchBlock;
     /// @notice The fee engine charging this token's pool, recorded at launch.
@@ -269,7 +270,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
 
     /// @notice The tax being charged **right now**, in basis points — the
     ///         selectors tax scanners probe. Identical both ways: the pool
-    ///         charges the same rate on buys and sells, always in ETH.
+    ///         charges the same rate on buys and sells, always in PIPEDOG.
     ///
     ///         A launch window can open above the steady-state rate and decay
     ///         down to it, so this is read live from the pool's fee engine
@@ -286,7 +287,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
         return (taxRatePips() + PIPS_PER_BP - 1) / PIPS_PER_BP;
     }
 
-    /// @notice The tax being charged right now, in pips of the ETH side
+    /// @notice The tax being charged right now, in pips of the PIPEDOG side
     ///         (1e6 = 100%). This is the exact figure the pool works in;
     ///         `buyTaxRate` is this rounded into basis points.
     ///

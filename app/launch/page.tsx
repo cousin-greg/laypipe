@@ -27,18 +27,18 @@ export default function LaunchPage() {
     <main className="inner-page content-width">
       <section className="page-heading launch-heading">
         <div>
-          <p className="eyebrow">ONE TRANSACTION. ONE-WAY LIQUIDITY.</p>
+          <p className="eyebrow">ONE LAUNCH. ONE-WAY LIQUIDITY.</p>
           <h1>Launch a coin into the pipe.</h1>
           <p>
-            Issue the full supply, seed its Uniswap v4 pool, lock liquidity,
-            and choose where your creator lane flows.
+            Issue the full supply, seed its PIPEDOG-quoted Uniswap v4 pool,
+            lock liquidity, and choose where your creator lane flows.
           </p>
         </div>
         <Image
-          src="/brand/laypipe-mark.png"
-          alt="PIPEDOG watching over a green pipe"
-          width={260}
-          height={260}
+          src="/brand/pipedog-cutout.png"
+          alt="The original PIPEDOG detective"
+          width={386}
+          height={351}
           unoptimized
         />
       </section>
@@ -46,10 +46,12 @@ export default function LaunchPage() {
       <aside className="readiness-banner" role="status">
         <span>Preview only</span>
         <div>
-          <strong>Factory deployment and audit are still pending.</strong>
+          <strong>
+            Factory deployment, audit, and curve calibration are still pending.
+          </strong>
           <p>
             You can complete and review the launch flow, but the interface will
-            not request a transaction or accept funds.
+            not request an approval, transaction, or funds.
           </p>
         </div>
       </aside>
@@ -131,7 +133,7 @@ export default function LaunchPage() {
               <span>02</span>
               <div>
                 <h2>Route the creator lane</h2>
-                <p>The 0.3% protocol lane always supports PIPEDOG.</p>
+                <p>The 0.3% protocol lane is routed directly in PIPEDOG.</p>
               </div>
             </div>
 
@@ -144,7 +146,7 @@ export default function LaunchPage() {
               >
                 <i aria-hidden="true">↗</i>
                 <strong>Creator fees</strong>
-                <span>0.7% of every trade becomes claimable ETH.</span>
+                <span>0.7% of every trade becomes claimable PIPEDOG.</span>
               </button>
               <button
                 type="button"
@@ -153,7 +155,9 @@ export default function LaunchPage() {
               >
                 <i aria-hidden="true">↓</i>
                 <strong>Self-burn</strong>
-                <span>0.7% buys and permanently burns your own coin.</span>
+                <span>
+                  0.7% uses PIPEDOG to buy and permanently burn your own coin.
+                </span>
               </button>
             </fieldset>
           </div>
@@ -178,8 +182,13 @@ export default function LaunchPage() {
                   onChange={(event) => setFirstBuy(event.target.value)}
                   required
                 />
-                <i>ETH</i>
+                <i>PIPEDOG</i>
               </div>
+              <small>
+                Live launches require the exact PIPEDOG allowance shown in the
+                receipt. PIPEDOG has no permit; never approve an unlimited
+                amount.
+              </small>
             </label>
           </div>
 
@@ -187,7 +196,8 @@ export default function LaunchPage() {
             Review launch
           </button>
           <p className="form-disclaimer">
-            Reviewing does not connect a wallet or submit a transaction.
+            Reviewing does not connect a wallet, request approval, or submit a
+            transaction. Native ETH is used for network gas only.
           </p>
         </form>
 
@@ -216,15 +226,19 @@ export default function LaunchPage() {
             </div>
             <div>
               <dt>Creator lane</dt>
-              <dd>{mode === "self-burn" ? "0.7% self-burn" : "0.7% ETH"}</dd>
+              <dd>
+                {mode === "self-burn"
+                  ? "0.7% PIPEDOG self-burn"
+                  : "0.7% PIPEDOG"}
+              </dd>
             </div>
             <div>
               <dt>Protocol lane</dt>
-              <dd>0.3% → PIPEDOG router</dd>
+              <dd>0.3% PIPEDOG → direct router</dd>
             </div>
             <div>
               <dt>First buy</dt>
-              <dd>{firstBuy || "0"} ETH</dd>
+              <dd>{firstBuy || "0"} PIPEDOG</dd>
             </div>
           </dl>
           <div className="locked-liquidity">

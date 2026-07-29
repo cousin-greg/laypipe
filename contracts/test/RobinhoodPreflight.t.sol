@@ -5,16 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
-import {IUniswapV3Pool} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {IUniswapV3Factory} from
-    "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import {PreflightRobinhood} from "../script/PreflightRobinhood.s.sol";
-import {
-    PipedogRevenueRouter,
-    IPipedogWETH9
-} from "../src/PipedogRevenueRouter.sol";
-import {PipedogProtocolConfig} from "../src/PipedogProtocolConfig.sol";
+import {PreflightRobinhood} from
+    "../script/PreflightRobinhood.s.sol";
+import {PipedogRevenueRouter} from
+    "../src/PipedogRevenueRouter.sol";
+import {PipedogProtocolConfig} from
+    "../src/PipedogProtocolConfig.sol";
 
 interface ILiveLetsCashFactory {
     struct LaunchConfig {
@@ -62,8 +58,11 @@ contract RobinhoodPreflightTest is Test {
         0xCa8B8e3ffE1f48A3555059AacBb962BFB668f522;
     address internal constant LIVE_REVENUE_SPLITTER =
         0x6D3d822F6e625c59804F47cf2Cc1d53B8301016F;
-    address internal constant POOL_MANAGER =
-        0x8366a39CC670B4001A1121B8F6A443A643e40951;
+
+    address internal constant DEPOSITOR = address(0xD3F0517);
+    address internal constant KEEPER = address(0xCA11);
+    address internal constant TREASURY = address(0x7EA5);
+    address internal constant OPERATIONS = address(0x0B5);
 
     function setUp() public {
         vm.createSelectFork(
@@ -75,11 +74,74 @@ contract RobinhoodPreflightTest is Test {
         );
     }
 
-    function testCanonicalPipedogPoolPreflightPasses() public {
+    function testCanonicalPipedogPreflightPasses() public {
         new PreflightRobinhood().validate();
     }
 
-    function testLiveFactoryObservablePolicyMatchesCleanRoomTarget()
+    function testCanonicalPipedogExactAllowanceAndDirectRouting()
+        public
+    {
+        IERC20 pipedog = IERC20(PipedogProtocolConfig.PIPEDOG);
+        uint256 supplyBefore = pipedog.totalSupply();
+        // The preflight pins the exact non-proxy PIPEDOG bytecode. Its OZ
+        // balances mapping is slot zero; direct fork storage avoids this
+        // public RPC's broken response to Foundry's slot-discovery probes.
+        vm.store(
+            address(pipedog),
+            keccak256(abi.encode(DEPOSITOR, uint256(0))),
+            bytes32(uint256(1 ether))
+        );
+
+        PipedogRevenueRouter router =
+            new PipedogRevenueRouter(
+                pipedog,
+                TREASURY,
+                OPERATIONS,
+                1 ether,
+                1 ether,
+                100,
+                address(this)
+            );
+        _setPipedogBalance(address(router), 0);
+        _setPipedogBalance(router.SEQUESTER_SINK(), 0);
+        _setPipedogBalance(KEEPER, 0);
+        _setPipedogBalance(TREASURY, 0);
+        _setPipedogBalance(OPERATIONS, 0);
+        _setPipedogAllowance(DEPOSITOR, address(router), 0);
+        vm.prank(DEPOSITOR);
+        pipedog.approve(address(router), 1 ether);
+        vm.prank(DEPOSITOR);
+        router.deposit(1 ether);
+        assertEq(pipedog.allowance(DEPOSITOR, address(router)), 0);
+
+        uint256 sinkBefore =
+            pipedog.balanceOf(router.SEQUESTER_SINK());
+        vm.prank(KEEPER);
+        uint256 sequestered = router.sequesterPipedog();
+        vm.prank(KEEPER);
+        uint256 treasuryRouted =
+            router.routeTreasuryPipedog();
+        uint256 operationsPaid = router.collectOperations();
+
+        assertEq(sequestered, 0.2475 ether);
+        assertEq(treasuryRouted, 0.2475 ether);
+        assertEq(operationsPaid, 0.5 ether);
+        assertEq(
+            pipedog.balanceOf(router.SEQUESTER_SINK())
+                - sinkBefore,
+            sequestered
+        );
+        assertEq(pipedog.balanceOf(TREASURY), treasuryRouted);
+        assertEq(pipedog.balanceOf(OPERATIONS), operationsPaid);
+        assertEq(pipedog.balanceOf(KEEPER), 0.005 ether);
+        assertEq(pipedog.balanceOf(address(router)), 0);
+        assertEq(pipedog.totalSupply(), supplyBefore);
+    }
+
+    /// @dev Differential reference only. These deployed LetsCash contracts
+    /// still describe the original native-asset system; they are not Laypipe
+    /// deployment dependencies and their 204200 tick is not endorsed.
+    function testReferenceLetsCashObservablePolicySnapshot()
         public
         view
     {
@@ -89,85 +151,42 @@ contract RobinhoodPreflightTest is Test {
         assertFalse(live.dividendLaunchEnabled());
         assertGe(live.launchConfigCount(), 18);
         assertEq(live.hook(), LIVE_HOOK);
-        assertEq(address(live.poolManager()), POOL_MANAGER);
+        assertEq(
+            address(live.poolManager()),
+            PipedogProtocolConfig.POOL_MANAGER
+        );
         assertEq(live.selfBurner(), LIVE_SELF_BURNER);
         assertEq(
-            live.dividendDistributor(), LIVE_DIVIDEND_DISTRIBUTOR
+            live.dividendDistributor(),
+            LIVE_DIVIDEND_DISTRIBUTOR
         );
         assertEq(live.treasury(), LIVE_REVENUE_SPLITTER);
 
-        _assertConfig(live.getLaunchConfig(16), false);
-        _assertConfig(live.getLaunchConfig(17), true);
+        _assertReferenceConfig(live.getLaunchConfig(16), false);
+        _assertReferenceConfig(live.getLaunchConfig(17), true);
 
         ILiveLetsCashHook liveHook = ILiveLetsCashHook(LIVE_HOOK);
         assertEq(liveHook.factory(), LIVE_FACTORY);
-        assertEq(address(liveHook.poolManager()), POOL_MANAGER);
+        assertEq(
+            address(liveHook.poolManager()),
+            PipedogProtocolConfig.POOL_MANAGER
+        );
         assertEq(liveHook.treasury(), LIVE_REVENUE_SPLITTER);
 
         uint160 expectedFlags = Hooks.BEFORE_INITIALIZE_FLAG
             | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-            | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG
-            | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_DONATE_FLAG
+            | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
+            | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+            | Hooks.BEFORE_DONATE_FLAG
             | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
             | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
         assertEq(
-            uint160(LIVE_HOOK) & Hooks.ALL_HOOK_MASK, expectedFlags
+            uint160(LIVE_HOOK) & Hooks.ALL_HOOK_MASK,
+            expectedFlags
         );
     }
 
-    function testRevenueRouterBuysCanonicalPipedogIntoDeadSinkWithoutBurningSupply()
-        public
-    {
-        address keeper = address(0xCA11);
-        PipedogRevenueRouter router = new PipedogRevenueRouter(
-            IUniswapV3Pool(
-                PipedogProtocolConfig.PIPEDOG_WETH_V3_POOL
-            ),
-            IUniswapV3Factory(
-                PipedogProtocolConfig.UNISWAP_V3_FACTORY
-            ),
-            PipedogProtocolConfig.PIPEDOG_WETH_V3_FEE,
-            IERC20(PipedogProtocolConfig.PIPEDOG),
-            IPipedogWETH9(PipedogProtocolConfig.WETH),
-            address(0xA11CE),
-            address(0xB0B),
-            0.001 ether,
-            0.001 ether,
-            address(this)
-        );
-
-        vm.deal(address(this), 0.004 ether);
-        (bool funded,) =
-            address(router).call{value: 0.004 ether}("");
-        assertTrue(funded);
-
-        IERC20 pipedog = IERC20(PipedogProtocolConfig.PIPEDOG);
-        uint256 sinkBefore =
-            pipedog.balanceOf(router.SEQUESTER_SINK());
-        uint256 supplyBefore = pipedog.totalSupply();
-        uint256 keeperBefore = keeper.balance;
-
-        vm.prank(keeper);
-        uint256 bought = router.buyAndSequester();
-
-        assertGt(bought, 0);
-        assertEq(
-            pipedog.balanceOf(router.SEQUESTER_SINK()) - sinkBefore,
-            bought
-        );
-        assertEq(pipedog.totalSupply(), supplyBefore);
-        assertEq(router.totalPipedogSequestered(), bought);
-        assertGt(router.totalEthSequestered(), 0);
-        assertEq(pipedog.balanceOf(address(router)), 0);
-        assertGt(keeper.balance - keeperBefore, 0);
-        assertEq(
-            address(router).balance,
-            router.sequesterTank() + router.treasuryBuyTank()
-                + router.operationsTab()
-        );
-    }
-
-    function _assertConfig(
+    function _assertReferenceConfig(
         ILiveLetsCashFactory.LaunchConfig memory config,
         bool selfBurn
     ) private pure {
@@ -180,5 +199,29 @@ contract RobinhoodPreflightTest is Test {
         assertEq(config.launchFeeDecay, 0);
         assertTrue(config.enabled);
         assertEq(config.selfBurn, selfBurn);
+    }
+
+    function _setPipedogBalance(address account, uint256 amount)
+        private
+    {
+        vm.store(
+            PipedogProtocolConfig.PIPEDOG,
+            keccak256(abi.encode(account, uint256(0))),
+            bytes32(amount)
+        );
+    }
+
+    function _setPipedogAllowance(
+        address owner,
+        address spender,
+        uint256 amount
+    ) private {
+        bytes32 ownerSlot =
+            keccak256(abi.encode(owner, uint256(1)));
+        vm.store(
+            PipedogProtocolConfig.PIPEDOG,
+            keccak256(abi.encode(spender, ownerSlot)),
+            bytes32(amount)
+        );
     }
 }

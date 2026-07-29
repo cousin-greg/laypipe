@@ -78,7 +78,7 @@ const dragon = localFont({
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#fff7dc" },
-    { media: "(prefers-color-scheme: dark)", color: "#151a16" },
+    { media: "(prefers-color-scheme: dark)", color: "#07150c" },
   ],
   colorScheme: "light dark",
 };
@@ -94,9 +94,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(origin),
-    title: "laypipe.fun — Launch and trade on Robinhood Chain",
+    title: "laypipe.fun — Launch and trade with PIPEDOG",
     description:
-      "A Robinhood Chain launch board where trading fees fund public PIPEDOG buybacks to treasury and the 0xdead sink.",
+      "A Robinhood Chain launch board where every coin pairs and trades with PIPEDOG and protocol fees route directly to 0xdead, treasury, and operations.",
     applicationName: "laypipe.fun",
     icons: {
       icon: "/brand/favicon.png",
@@ -106,16 +106,16 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "laypipe.fun — The Robinhood Chain coin pipeline",
       description:
-        "Launch a coin, lock its liquidity, and route protocol fees through public PIPEDOG buybacks to treasury and 0xdead.",
+        "Launch a coin against PIPEDOG, lock its liquidity, and route the protocol fee lane directly to 0xdead, treasury, and operations.",
       url: origin,
       siteName: "laypipe.fun",
       type: "website",
       images: [
         {
           url: socialImage,
-          width: 1728,
-          height: 910,
-          alt: "LayPipe dog-in-pipe mark with sunny Robinhood Chain pipeworks",
+          width: 1200,
+          height: 630,
+          alt: "The original PIPEDOG beside a green pipe and burn furnace for laypipe.fun",
         },
       ],
     },
@@ -123,7 +123,7 @@ export async function generateMetadata(): Promise<Metadata> {
       card: "summary_large_image",
       title: "laypipe.fun — The Robinhood Chain coin pipeline",
       description:
-        "Sunshine launch infrastructure with public PIPEDOG buybacks to treasury and 0xdead.",
+        "Sunshine launch infrastructure where every coin trades in PIPEDOG and protocol fees route directly.",
       images: [socialImage],
     },
   };
@@ -135,7 +135,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`${mori.variable} ${dragon.variable}`}
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -144,9 +149,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body
-        className={`${mori.variable} ${dragon.variable}`}
-      >
+      <body>
         <SiteShell>{children}</SiteShell>
       </body>
     </html>

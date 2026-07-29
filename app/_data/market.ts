@@ -256,7 +256,7 @@ export const protocolPreviewStats = [
   { label: "Demo launches", value: "12", note: "sample set" },
   { label: "Demo 24h volume", value: "$204K", note: "illustrative" },
   { label: "PIPEDOG → 0xdead", value: "—", note: "router pending" },
-  { label: "Fees routed", value: "—", note: "indexer pending" },
+  { label: "PIPEDOG fees routed", value: "—", note: "indexer pending" },
 ];
 
 export function findDemoToken(slug: string) {

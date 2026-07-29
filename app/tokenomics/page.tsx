@@ -10,9 +10,9 @@ export default function TokenomicsPage() {
           <p className="eyebrow">ONE PERCENT. FULLY ROUTED.</p>
           <h1>Every trade feeds a visible pipe.</h1>
           <p>
-            LayPipe adapts the LetsCash fee machine around PIPEDOG. The launch
-            mode controls 70% of fees; the remaining 30% enters the protocol
-            router.
+            Every LayPipe launch pairs and trades against PIPEDOG. The launch
+            mode controls 70% of each PIPEDOG fee; the remaining 30% enters the
+            direct protocol router.
           </p>
         </div>
         <Image
@@ -28,7 +28,7 @@ export default function TokenomicsPage() {
         <div className="fee-source">
           <span>Every buy + sell</span>
           <strong>1.00%</strong>
-          <small>Collected in ETH by the v4 hook</small>
+          <small>Collected in PIPEDOG by the v4 hook</small>
         </div>
         <div className="fee-pipe" aria-hidden="true">
           <i />
@@ -38,7 +38,8 @@ export default function TokenomicsPage() {
             <span>Creator lane</span>
             <strong>0.70%</strong>
             <p>
-              Paid as claimable ETH or used to buy and burn the launched token.
+              Paid as claimable PIPEDOG or used to buy and burn the launched
+              token.
             </p>
             <div className="branch-choice">
               <span>Creator fees</span>
@@ -49,9 +50,9 @@ export default function TokenomicsPage() {
             <span>Protocol lane</span>
             <strong>0.30%</strong>
             <p>
-              Routed through the LayPipe splitter: equal PIPEDOG buy lanes for
-              0xdead and treasury, with the remaining half paid as operations
-              ETH.
+              The gross PIPEDOG share splits directly: 25% to 0xdead, 25% to
+              treasury, and 50% to operations. Eligible keeper bounties are
+              deducted from the permissionless lanes.
             </p>
             <div className="protocol-mini-split">
               <span style={{ width: "25%" }}>25% → 0xdead</span>
@@ -83,8 +84,9 @@ export default function TokenomicsPage() {
           <span>Permissionless</span>
           <h2>Anyone can sweep.</h2>
           <p>
-            Public keepers can move accrued ETH. PIPEDOG router actions pay a
-            1% bounty; unbountied hook sweeps require production monitoring.
+            Public keepers can move accrued PIPEDOG. Eligible route and
+            self-burn actions pay configured PIPEDOG bounties; unbountied hook
+            sweeps require production monitoring.
           </p>
         </article>
       </section>
@@ -110,9 +112,11 @@ export default function TokenomicsPage() {
           <strong>This describes the intended LayPipe contracts.</strong>
           <p>
             PIPEDOG does not expose a native burn method. The 0xdead lane
-            permanently sequesters purchased tokens but does not decrement
-            ERC-20 totalSupply. Final addresses and permissions must match the
-            reviewed deployment before the interface is marked live.
+            permanently sequesters directly routed tokens but does not
+            decrement ERC-20 totalSupply. The contracts are not deployed or
+            audited, and the curve economics are not production-calibrated.
+            Final addresses and permissions must match the reviewed deployment
+            before the interface is marked live.
           </p>
         </div>
       </aside>

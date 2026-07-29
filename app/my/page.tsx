@@ -9,7 +9,7 @@ export default function MyTokensPage() {
           <p className="eyebrow">YOUR LAUNCHES</p>
           <h1>My tokens</h1>
           <p>
-            Creator positions, claimable ETH, self-burn totals, and launch
+            Creator positions, claimable PIPEDOG, self-burn totals, and launch
             controls will live here.
           </p>
         </div>
@@ -18,10 +18,10 @@ export default function MyTokensPage() {
       <section className="wallet-empty-state">
         <div className="empty-pipe-art">
           <Image
-            src="/brand/laypipe-mark.png"
-            alt="PIPEDOG detective checking an empty pipe"
-            width={310}
-            height={310}
+            src="/brand/pipedog-cutout.png"
+            alt="The original PIPEDOG detective"
+            width={386}
+            height={351}
             unoptimized
           />
         </div>
@@ -53,7 +53,9 @@ export default function MyTokensPage() {
         <article>
           <span>02</span>
           <h3>Creator claims</h3>
-          <p>Accrued ETH and a public claim transaction with receipt status.</p>
+          <p>
+            Accrued PIPEDOG and a public claim transaction with receipt status.
+          </p>
         </article>
         <article>
           <span>03</span>

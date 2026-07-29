@@ -4,11 +4,14 @@ pragma solidity ^0.8.26;
 import {BaseHook} from "uniswap-hooks/base/BaseHook.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Hooks} from "v4-core/src/libraries/Hooks.sol";
 import {SafeCast} from "v4-core/src/libraries/SafeCast.sol";
+import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
@@ -17,28 +20,27 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "v4-cor
 import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
 
 /// @title PipedogHook
-/// @notice The fee engine for Pipedog pools. Takes the trading fee from the
-///         ETH side of every swap — skimmed from the ETH input on buys and the
-///         ETH output on sells, for both exact-input and exact-output swaps —
-///         so fees only ever exist in ETH. An optional launch window charges a
-///         higher fee that decays linearly to the base rate.
+/// @notice The fee engine for Laypipe pools. Takes the trading fee from the
+///         PIPEDOG side of every exact-input and exact-output swap. PIPEDOG is
+///         always currency0; launch addresses are mined above its address.
 ///
 ///         Fees move in two lanes: `sweep(poolId)` is permissionless and pays
 ///         the platform share to the treasury while crediting the creator
 ///         share to the creator's unclaimed balance; `claim(poolId)` — fee
-///         recipient only — sweeps, then pays the whole balance out as ETH.
+///         recipient only — sweeps, then pays the balance in PIPEDOG.
 ///
 ///         Trust model — not upgradeable. Only the factory can register pools
 ///         or add liquidity. Unclaimed creator balances can only ever move to
 ///         the creator; the owner can only redirect the platform's own share.
 contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback {
     using SafeCast for int256;
+    using SafeERC20 for IERC20;
 
     struct PoolConfig {
         address creator; // receives the fee stream; can hand off via updateCreator
         uint40 launchTime;
         uint16 creatorFeeBps; // creator's share of fees, fixed at launch
-        uint24 baseFeeRate; // steady-state fee, pips of the ETH side (1e6 = 100%)
+        uint24 baseFeeRate; // steady-state fee, pips of the PIPEDOG side
         uint24 launchFeeRate; // fee at launch, decays to baseFeeRate; == base when off
         uint32 launchFeeDecay; // decay window in seconds; 0 = off
         bool exists;
@@ -51,22 +53,20 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     error InvalidPoolKey();
     error InvalidFeeConfig();
     error ZeroAddress();
-    error EthTransferFailed();
+    error QuoteTransferMismatch(uint256 expected, uint256 actual);
     error LiquidityLocked();
     error LiquidityAlreadySeeded();
     error DonationsLocked();
     error PartialFillRejected();
 
     event PoolRegistered(PoolId indexed poolId, address indexed creator, PoolConfig config);
-    /// @notice The exact ETH fee taken by a single swap — indexers mirror fees
+    /// @notice The exact PIPEDOG fee taken by a swap — indexers mirror fees
     ///         from this rather than inferring them from swap amounts.
     event FeeAccrued(PoolId indexed poolId, uint256 amount);
     event FeesSwept(PoolId indexed poolId, address indexed caller, uint256 creatorAmount, uint256 platformAmount);
     event CreatorFeesClaimed(PoolId indexed poolId, address indexed creator, uint256 amount);
     event CreatorUpdated(PoolId indexed poolId, address indexed oldCreator, address indexed newCreator);
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
-    event PlatformPayoutDeferred(uint256 amount);
-    event PlatformPayoutCollected(address indexed treasury, uint256 amount);
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant FEE_DENOMINATOR = 1e6;
@@ -75,6 +75,8 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
 
     /// @notice The only address allowed to register pools and add liquidity.
     address public immutable factory;
+    /// @notice Canonical PIPEDOG quote/payment token.
+    IERC20 public immutable quoteToken;
     /// @notice Receives the platform share of swept fees. Owner-settable.
     address public treasury;
 
@@ -83,21 +85,26 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     ///         Every later add reverts — even from the factory, even after a
     ///         factory upgrade — so a launched pool's depth is frozen for good.
     mapping(PoolId => bool) public seeded;
-    /// @notice ETH fees collected but not yet swept, per pool (held as claims).
+    /// @notice PIPEDOG fees not yet swept, held as PoolManager claims.
     mapping(PoolId => uint256) public pending;
-    /// @notice Creator's swept-but-unclaimed ETH, per pool.
+    /// @notice Creator's swept-but-unclaimed PIPEDOG, per pool.
     mapping(PoolId => uint256) public tab;
-    /// @notice Platform ETH that could not be pushed to the treasury (e.g. a
-    ///         misconfigured receiver) — parked here so a broken treasury can
-    ///         never block creator claims. Collectable once fixed.
-    uint256 public platformTab;
-
-    constructor(IPoolManager poolManager_, address factory_, address treasury_, address owner_)
+    constructor(
+        IPoolManager poolManager_,
+        address factory_,
+        IERC20 quoteToken_,
+        address treasury_,
+        address owner_
+    )
         BaseHook(poolManager_)
         Ownable(owner_)
     {
-        if (factory_ == address(0) || treasury_ == address(0)) revert ZeroAddress();
+        if (
+            factory_ == address(0) || treasury_ == address(0)
+                || address(quoteToken_).code.length == 0
+        ) revert ZeroAddress();
         factory = factory_;
+        quoteToken = quoteToken_;
         treasury = treasury_;
     }
 
@@ -158,6 +165,10 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         emit PoolRegistered(poolId, creator, config);
     }
 
+    function isRegistered(PoolId poolId) external view returns (bool) {
+        return poolConfigs[poolId].exists;
+    }
+
     /// @dev True iff this swap is the pool's one exempt first buy: a
     ///      factory-originated swap, in the launch block, not yet consumed.
     function _isExemptFirstBuy(PoolId poolId, address swapper, PoolConfig memory config)
@@ -169,7 +180,7 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
             && block.timestamp == config.launchTime;
     }
 
-    /// @notice Current fee rate for a pool in pips of the ETH side. During the
+    /// @notice Current fee rate for a pool in pips of the PIPEDOG side. During
     ///         launch window the rate decays linearly from launchFeeRate to
     ///         baseFeeRate. The creator's first buy pays the base rate only —
     ///         a single, self-consuming exemption (see firstBuyExemptionSpent).
@@ -199,12 +210,17 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
 
     // —————————————————————————— hook callbacks ——————————————————————————
 
-    /// @dev Only the factory may create pools with this hook, only with native
-    ///      ETH as currency0 and a zero LP fee (all fees flow through the hook).
+    /// @dev Only the factory may create pools with this hook, only with
+    ///      canonical PIPEDOG as currency0 and a zero LP fee.
     function _beforeInitialize(address sender, PoolKey calldata key, uint160) internal view override returns (bytes4) {
         if (sender != factory) revert NotFactory();
         if (!poolConfigs[key.toId()].exists) revert UnknownPool();
-        if (!key.currency0.isAddressZero() || key.fee != 0) revert InvalidPoolKey();
+        if (
+            Currency.unwrap(key.currency0) != address(quoteToken)
+                || Currency.unwrap(key.currency1) == address(0)
+                || uint160(Currency.unwrap(key.currency1))
+                    <= uint160(address(quoteToken)) || key.fee != 0
+        ) revert InvalidPoolKey();
         return this.beforeInitialize.selector;
     }
 
@@ -252,54 +268,79 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         revert DonationsLocked();
     }
 
-    /// @dev ETH is the specified currency on exact-in buys and exact-out sells:
-    ///      the fee is known pre-swap and skimmed here.
+    /// @dev PIPEDOG is the specified currency on exact-in buys and exact-out
+    ///      sells, so the fee is known pre-swap and skimmed here. Exact-output
+    ///      fees are grossed up so the configured rate applies to total
+    ///      PIPEDOG moved rather than only the recipient's net amount.
     function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        bool ethSpecified = (params.amountSpecified < 0) == params.zeroForOne;
-        if (!ethSpecified) return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        bool quoteSpecified = (params.amountSpecified < 0) == params.zeroForOne;
+        if (!quoteSpecified) return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
 
         PoolId poolId = key.toId();
         uint256 amount = uint256(
             params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified
         );
-        uint256 fee = (amount * currentFeeRate(poolId, sender)) / FEE_DENOMINATOR;
+        uint256 rate = currentFeeRate(poolId, sender);
+        uint256 fee = params.amountSpecified > 0
+            ? FullMath.mulDivRoundingUp(
+                amount, rate, FEE_DENOMINATOR - rate
+            )
+            : FullMath.mulDiv(amount, rate, FEE_DENOMINATOR);
         // exactly one FeeAccrued per swap, on the hook that owns its fee side —
         // emitted even when the fee rounds to zero, so an off-chain indexer can
         // map events to swaps one-to-one by order within a transaction
         emit FeeAccrued(poolId, fee);
         if (fee == 0) return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
 
-        poolManager.mint(address(this), 0, fee); // id 0 = native ETH
+        poolManager.mint(
+            address(this),
+            Currency.wrap(address(quoteToken)).toId(),
+            fee
+        );
         pending[poolId] += fee;
         return (this.beforeSwap.selector, toBeforeSwapDelta(int256(fee).toInt128(), 0), 0);
     }
 
-    /// @dev ETH is the unspecified currency on exact-out buys and exact-in
-    ///      sells: the fee is taken from the actual ETH moved by the swap.
+    /// @dev PIPEDOG is the unspecified currency on exact-out buys and
+    ///      exact-in sells; the fee is based on actual quote moved. Exact-out
+    ///      buys gross the fee up from the pool's net input.
     function _afterSwap(address sender, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
         internal
         override
         returns (bytes4, int128)
     {
-        bool ethSpecified = (params.amountSpecified < 0) == params.zeroForOne;
-        if (ethSpecified) {
-            // _beforeSwap charged the fee on the full specified ETH amount; a
+        bool quoteSpecified = (params.amountSpecified < 0) == params.zeroForOne;
+        if (quoteSpecified) {
+            // _beforeSwap charged the fee on the full specified quote amount; a
             // price-limited swap that only partially fills would therefore be
-            // taxed on ETH that never traded. Refuse those outright: on a full
+            // taxed on PIPEDOG that never traded. Refuse partial fills:
             // fill the pool moves exactly the post-fee specified amount, so
             // anything less means the price limit cut the swap short.
             uint256 specified = uint256(
                 params.amountSpecified < 0 ? -params.amountSpecified : params.amountSpecified
             );
-            uint256 fee = (specified * currentFeeRate(key.toId(), sender)) / FEE_DENOMINATOR;
+            uint256 specifiedRate =
+                currentFeeRate(key.toId(), sender);
+            uint256 specifiedFee = params.amountSpecified > 0
+                ? FullMath.mulDivRoundingUp(
+                    specified,
+                    specifiedRate,
+                    FEE_DENOMINATOR - specifiedRate
+                )
+                : FullMath.mulDiv(
+                    specified, specifiedRate, FEE_DENOMINATOR
+                );
             int128 amt0 = delta.amount0();
-            uint256 poolEthMoved = uint256(uint128(amt0 < 0 ? -amt0 : amt0));
-            uint256 fullFill = params.amountSpecified < 0 ? specified - fee : specified + fee;
-            if (poolEthMoved != fullFill) revert PartialFillRejected();
+            uint256 poolQuoteMoved =
+                uint256(uint128(amt0 < 0 ? -amt0 : amt0));
+            uint256 fullFill = params.amountSpecified < 0
+                ? specified - specifiedFee
+                : specified + specifiedFee;
+            if (poolQuoteMoved != fullFill) revert PartialFillRejected();
             // consume here — the last hook call for this swap — so _beforeSwap
             // and this branch computed the same (unconsumed) rate, and only the
             // NEXT factory swap loses the exemption
@@ -309,8 +350,16 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
 
         PoolId poolId = key.toId();
         int128 amount0 = delta.amount0();
-        uint256 ethMoved = uint256(uint128(amount0 < 0 ? -amount0 : amount0));
-        uint256 fee = (ethMoved * currentFeeRate(poolId, sender)) / FEE_DENOMINATOR;
+        uint256 quoteMoved =
+            uint256(uint128(amount0 < 0 ? -amount0 : amount0));
+        uint256 rate = currentFeeRate(poolId, sender);
+        uint256 fee = params.amountSpecified > 0
+            ? FullMath.mulDivRoundingUp(
+                quoteMoved, rate, FEE_DENOMINATOR - rate
+            )
+            : FullMath.mulDiv(
+                quoteMoved, rate, FEE_DENOMINATOR
+            );
         // last hook call for this swap — consume the one-shot exemption (only
         // the next factory swap is affected; this swap's fee already computed)
         _consumeFirstBuyExemption(poolId, sender);
@@ -318,23 +367,24 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         emit FeeAccrued(poolId, fee);
         if (fee == 0) return (this.afterSwap.selector, 0);
 
-        poolManager.mint(address(this), 0, fee);
+        poolManager.mint(
+            address(this),
+            Currency.wrap(address(quoteToken)).toId(),
+            fee
+        );
         pending[poolId] += fee;
         return (this.afterSwap.selector, int256(fee).toInt128());
     }
 
     // —————————————————————————— fee payout ——————————————————————————
 
-    /// @notice Converts a pool's pending fees to ETH: platform share straight
-    ///         to the treasury, creator share onto the creator's unclaimed
-    ///         balance (paid out via `claim`). Callable by anyone.
+    /// @notice Redeems pending fee claims into PIPEDOG, routes the platform
+    ///         share, and credits the creator share. Callable by anyone.
     function sweep(PoolId poolId) external nonReentrant returns (uint256 creatorAmount, uint256 platformAmount) {
         return _sweep(poolId);
     }
 
-    /// @notice Pays the creator everything they are owed for a pool: sweeps
-    ///         first, then sends their full unclaimed balance as ETH. Only the
-    ///         current fee recipient can call this.
+    /// @notice Pays the creator everything owed for a pool in PIPEDOG.
     function claim(PoolId poolId) external nonReentrant returns (uint256 amount) {
         PoolConfig storage config = poolConfigs[poolId];
         if (!config.exists) revert UnknownPool();
@@ -342,14 +392,10 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
 
         _sweep(poolId);
 
-        // cache the recipient before any external call: a creator contract
-        // could updateCreator from its ETH-receiving fallback, and reading
-        // config.creator again after the transfer would then pay one address
-        // but name another in the event. The payment and the event must agree.
         address recipient = config.creator;
         amount = tab[poolId];
         tab[poolId] = 0;
-        _payEth(recipient, amount);
+        _pushExact(recipient, amount);
         emit CreatorFeesClaimed(poolId, recipient, amount);
     }
 
@@ -361,29 +407,28 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         if (amount == 0) return (0, 0);
         pending[poolId] = 0;
 
-        // Redeem the claims for real ETH into this contract.
+        // Redeem ERC6909 claims for canonical PIPEDOG.
         poolManager.unlock(abi.encode(amount));
 
         creatorAmount = (amount * config.creatorFeeBps) / BPS_DENOMINATOR;
         platformAmount = amount - creatorAmount;
         tab[poolId] += creatorAmount;
-        // push the platform share, but never let a broken treasury take
-        // creator payouts hostage: on failure it parks in platformTab
-        if (platformAmount > 0) {
-            (bool paid,) = treasury.call{value: platformAmount}("");
-            if (!paid) {
-                platformTab += platformAmount;
-                emit PlatformPayoutDeferred(platformAmount);
-            }
-        }
+        _pushExact(treasury, platformAmount);
         emit FeesSwept(poolId, msg.sender, creatorAmount, platformAmount);
     }
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
         uint256 amount = abi.decode(data, (uint256));
-        poolManager.burn(address(this), 0, amount);
-        poolManager.take(Currency.wrap(address(0)), address(this), amount);
+        Currency quoteCurrency = Currency.wrap(address(quoteToken));
+        uint256 beforeBalance = quoteToken.balanceOf(address(this));
+        poolManager.burn(address(this), quoteCurrency.toId(), amount);
+        poolManager.take(quoteCurrency, address(this), amount);
+        uint256 received =
+            quoteToken.balanceOf(address(this)) - beforeBalance;
+        if (received != amount) {
+            revert QuoteTransferMismatch(amount, received);
+        }
         return "";
     }
 
@@ -400,15 +445,6 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         config.creator = newCreator;
     }
 
-    /// @notice Pays any parked platform ETH to the current treasury. Callable
-    ///         by anyone once the treasury can receive again.
-    function collectPlatform() external nonReentrant returns (uint256 amount) {
-        amount = platformTab;
-        platformTab = 0;
-        _payEth(treasury, amount);
-        emit PlatformPayoutCollected(treasury, amount);
-    }
-
     /// @notice Redirects the platform's share only; creator balances are unaffected.
     function setTreasury(address newTreasury) external onlyOwner {
         if (newTreasury == address(0)) revert ZeroAddress();
@@ -416,11 +452,17 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         treasury = newTreasury;
     }
 
-    function _payEth(address to, uint256 amount) private {
+    function _pushExact(address to, uint256 amount) private {
         if (amount == 0) return;
-        (bool ok,) = to.call{value: amount}("");
-        if (!ok) revert EthTransferFailed();
+        uint256 senderBefore = quoteToken.balanceOf(address(this));
+        uint256 recipientBefore = quoteToken.balanceOf(to);
+        quoteToken.safeTransfer(to, amount);
+        uint256 sent =
+            senderBefore - quoteToken.balanceOf(address(this));
+        uint256 received =
+            quoteToken.balanceOf(to) - recipientBefore;
+        if (sent != amount || received != amount) {
+            revert QuoteTransferMismatch(amount, received);
+        }
     }
-
-    receive() external payable {}
 }

@@ -4,8 +4,17 @@ const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
 
 const readiness = [
   { system: "Product interface", status: "Preview ready", tone: "ready" },
-  { system: "Factory + v4 hook", status: "Local tests pass", tone: "ready" },
-  { system: "Fee routers", status: "Local tests pass", tone: "ready" },
+  {
+    system: "Factory + v4 hook",
+    status: "Release suite pending",
+    tone: "pending",
+  },
+  {
+    system: "Curve economics",
+    status: "Not production-calibrated",
+    tone: "pending",
+  },
+  { system: "Direct fee router", status: "Release suite pending", tone: "pending" },
   {
     system: "Dividend launches",
     status: "Contract-disabled",
@@ -47,8 +56,9 @@ export default function DocsPage() {
             <h2>Overview</h2>
             <p>
               LayPipe is a Robinhood Chain coin launcher built around a Uniswap
-              v4 hook. Each launch creates a fixed-supply token, opens its pool,
-              and configures a permanent fee route in one flow.
+              v4 hook. Each launch creates a fixed-supply token, opens a
+              permanent one-sided PIPEDOG pool, and configures its fee route in
+              one flow.
             </p>
             <div className="docs-note">
               <strong>Current state</strong>
@@ -64,15 +74,27 @@ export default function DocsPage() {
             <h2>Launches</h2>
             <p>
               The intended factory creates a token with a fixed one-billion
-              supply and deposits the whole supply into its v4 pool. The hook
-              prevents liquidity removal.
+              supply and deposits the whole supply into its PIPEDOG-quoted v4
+              pool. The hook prevents liquidity removal; there is no separate
+              graduation or migration step.
             </p>
             <ol>
-              <li>Choose the token identity and optional first buy.</li>
+              <li>Choose the token identity and optional PIPEDOG first buy.</li>
               <li>Select creator-fee or self-burn mode.</li>
-              <li>Create the token and initialize its ETH pair.</li>
+              <li>
+                Approve only the exact PIPEDOG launch fee and first-buy amount.
+              </li>
+              <li>Create the token and initialize its PIPEDOG pair.</li>
               <li>Lock the liquidity path and emit indexable launch events.</li>
             </ol>
+            <div className="docs-note">
+              <strong>Approval is a separate wallet action</strong>
+              <p>
+                PIPEDOG has no permit support. A live wallet must grant the
+                exact ERC-20 allowance required for that launch or buy, never
+                an unlimited approval. Native ETH pays network gas only.
+              </p>
+            </div>
             <div className="docs-note">
               <strong>Dividend launches are closed</strong>
               <p>
@@ -82,23 +104,34 @@ export default function DocsPage() {
                 complete-holder reward design receives a separate review.
               </p>
             </div>
+            <div className="docs-note">
+              <strong>Curve economics need production calibration</strong>
+              <p>
+                The permanent v4 launch curve is implemented locally, but its
+                starting price, depth, and execution bounds still need
+                fork-backed liquidity testing before any production release.
+              </p>
+            </div>
           </section>
 
           <section id="fees">
             <span className="docs-number">03</span>
             <h2>Trading fees</h2>
             <p>
-              A fixed 1% fee is collected in ETH. The creator lane receives
+              A fixed 1% fee is collected in PIPEDOG. The creator lane receives
               0.7%; the LayPipe protocol router receives 0.3%.
             </p>
             <div className="docs-columns">
               <div>
                 <strong>Creator-fee mode</strong>
-                <p>The launch owner can claim accrued ETH.</p>
+                <p>The launch owner can claim accrued PIPEDOG.</p>
               </div>
               <div>
                 <strong>Self-burn mode</strong>
-                <p>Accrued ETH buys and burns the launched coin.</p>
+                <p>
+                  Accrued PIPEDOG buys the launched coin from its own pool and
+                  permanently burns the received tokens.
+                </p>
               </div>
             </div>
           </section>
@@ -108,29 +141,32 @@ export default function DocsPage() {
             <h2>Permissionless keepers</h2>
             <p>
               Hook sweeps and protocol-router actions are public. The router’s
-              two PIPEDOG market-order lanes pay a fixed 1% keeper bounty.
-              Sweeping platform fees out of an inactive launch pool is
-              unbountied, so production operations must monitor and trigger
-              that step when creators stop claiming.
+              two permissionless routing lanes can pay a configured PIPEDOG
+              keeper bounty deducted from the lane being processed. Sweeping
+              platform fees out of an inactive launch pool is unbountied, so
+              production operations must monitor and trigger that step when
+              creators stop claiming.
             </p>
             <div className="docs-note">
-              <strong>Public orders expose execution risk</strong>
+              <strong>Self-burn orders expose execution risk</strong>
               <p>
-                Buybacks and self-burns use capped, visible market orders
-                without an oracle or minimum output. The caps limit order size,
-                but do not eliminate sandwiching or price movement. Review
-                those limits against live liquidity before enabling launches.
+                Self-burns use capped, visible PIPEDOG market orders without an
+                oracle or minimum output. The caps limit order size, but do not
+                eliminate sandwiching or price movement. Review those limits
+                against live liquidity before enabling launches. Protocol
+                PIPEDOG distributions are direct transfers, not market orders.
               </p>
             </div>
             <div className="docs-note">
               <strong>What “PIPEDOG burn” means</strong>
               <p>
-                The protocol lane buys PIPEDOG and sends one 25% share directly
-                to 0x000000000000000000000000000000000000dEaD, buys another
-                25% share for treasury, and routes 50% as operations ETH.
-                PIPEDOG has no native burn function, so the dead-address lane
-                removes tokens from usable circulation without reducing
-                ERC-20 totalSupply.
+                The gross protocol lane is already PIPEDOG. It assigns 25%
+                directly to 0x000000000000000000000000000000000000dEaD, 25%
+                to treasury, and 50% to operations. Eligible keeper bounties
+                are deducted from the two permissionless routing lanes.
+                PIPEDOG has no native burn function, so the dead-address
+                transfer removes tokens from usable circulation without
+                reducing ERC-20 totalSupply.
               </p>
             </div>
           </section>
@@ -148,8 +184,9 @@ export default function DocsPage() {
               <p>
                 The factory can be upgraded for future launches, the hook
                 owner can change the platform-fee destination, and the router
-                owner can pause or migrate platform ETH. Production ownership
-                should move to a reviewed Safe or timelock before launch.
+                owner can pause or migrate platform PIPEDOG. Production
+                ownership should move to a reviewed Safe or timelock before
+                launch.
               </p>
             </div>
             <div className="readiness-table">

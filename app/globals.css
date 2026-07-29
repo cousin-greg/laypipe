@@ -64,41 +64,25 @@ body {
   margin: 0;
   background:
     radial-gradient(
-      circle at 88% 5rem,
-      color-mix(in srgb, var(--sun) 24%, transparent) 0,
+      circle at 88% 7rem,
+      color-mix(in srgb, var(--sun) 22%, transparent) 0 8rem,
       transparent 24rem
     ),
-    linear-gradient(
-      90deg,
-      transparent 0 49.9%,
-      color-mix(in srgb, var(--rule) 24%, transparent) 50%,
-      transparent 50.1%
+    radial-gradient(
+      circle at 8% 34rem,
+      color-mix(in srgb, var(--sky) 13%, transparent) 0,
+      transparent 28rem
     ),
-    var(--bg);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--sky) 6%, var(--bg)) 0,
+      var(--bg) 36rem,
+      color-mix(in srgb, var(--sun) 3%, var(--bg)) 100%
+    );
   color: var(--ink);
   font-family: var(--mori);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-}
-
-body::before {
-  position: fixed;
-  z-index: 80;
-  inset: 0;
-  opacity: 0.045;
-  pointer-events: none;
-  content: "";
-  background:
-    repeating-linear-gradient(
-      0deg,
-      transparent 0 3px,
-      currentColor 3px 4px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 6px,
-      currentColor 6px 7px
-    );
 }
 
 a {
@@ -228,7 +212,7 @@ dd {
   min-height: 36px;
   padding-inline: 13px;
   border-radius: 8px;
-  font-size: 0.68rem;
+  font-size: 0.7rem;
 }
 
 .app-header {
@@ -312,7 +296,7 @@ dd {
   padding: 0 11px;
   border-bottom: 3px solid transparent;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 750;
 }
 
@@ -504,67 +488,46 @@ dd {
   border: 2px solid var(--border);
   border-radius: 32px 32px 12px 12px;
   background:
-    linear-gradient(180deg, transparent 0 69%, var(--grass) 69% 100%),
-    var(--sky);
+    radial-gradient(
+      circle at 78% 28%,
+      color-mix(in srgb, var(--sun) 18%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--sky) 76%, var(--surface)) 0 68%,
+      color-mix(in srgb, var(--grass) 78%, var(--surface)) 68% 100%
+    );
   box-shadow: 9px 9px 0 var(--shadow);
-}
-
-.board-intro-art .sun-disc {
-  position: absolute;
-  top: 28px;
-  right: 36px;
-  width: 126px;
-  height: 126px;
-  border: 2px solid var(--border);
-  border-radius: 50%;
-  background: var(--sun);
-  box-shadow: 0 0 0 18px color-mix(in srgb, var(--sun) 22%, transparent);
 }
 
 .board-intro-art > img {
   position: absolute;
-  z-index: 3;
-  bottom: -72px;
-  left: 50%;
-  width: min(88%, 470px);
   height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 16px 16px rgba(35, 40, 30, 0.22));
+}
+
+.board-intro-art .board-intro-dog {
+  z-index: 2;
+  bottom: 43%;
+  left: 9%;
+  width: min(46%, 225px);
+  filter: drop-shadow(0 11px 9px rgba(35, 40, 30, 0.24));
+}
+
+.board-intro-art .board-intro-machine {
+  z-index: 1;
+  bottom: -3%;
+  left: 50%;
+  width: 108%;
+  filter: drop-shadow(0 16px 14px rgba(35, 40, 30, 0.2));
   transform: translateX(-50%);
 }
 
-.pipe-horizon {
-  position: absolute;
-  right: -22px;
-  bottom: 60px;
-  left: -22px;
-  height: 70px;
-  border: 3px solid var(--border);
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.22),
-      transparent 36%
-    ),
-    var(--green);
-}
-
-.pipe-horizon span {
-  position: absolute;
-  top: -15px;
-  width: 22px;
-  height: 94px;
-  border: 3px solid var(--border);
-  border-radius: 7px;
-  background: var(--green);
-}
-
-.pipe-horizon span:first-child {
-  left: 12%;
-}
-
-.pipe-horizon span:last-child {
-  right: 12%;
+.board-intro-art .board-intro-machine-front {
+  z-index: 3;
+  clip-path: polygon(0 52%, 46% 52%, 46% 100%, 0 100%);
+  filter: none;
 }
 
 .board-intro-art > p {
@@ -579,6 +542,8 @@ dd {
   background: var(--surface);
   font-size: 0.62rem;
   font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   transform: rotate(-3deg);
 }
 
@@ -676,7 +641,7 @@ dd {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -705,7 +670,7 @@ dd {
   display: block;
   margin: 0;
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.64rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -719,9 +684,11 @@ dd {
 
 .featured-name h2 {
   margin-bottom: 2px;
-  font-family: var(--dragon);
-  font-size: clamp(2.6rem, 4vw, 4.2rem);
-  line-height: 0.9;
+  font-family: var(--mori);
+  font-size: clamp(2rem, 3.2vw, 3.15rem);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1;
 }
 
 .featured-name p {
@@ -761,8 +728,9 @@ dd {
     ),
     var(--token-accent);
   color: #fffaf0;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-weight: 800;
+  letter-spacing: 0.02em;
   box-shadow: 4px 4px 0 var(--border);
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
   transform: rotate(-3deg);
@@ -803,10 +771,11 @@ dd {
   min-height: 330px;
   flex-direction: column;
   padding: 34px 34px 22px;
-  background:
-    linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 100% 25%,
-    linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 12.5% 100%,
-    color-mix(in srgb, var(--sky) 10%, var(--surface));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sky) 14%, var(--surface)) 0%,
+    var(--surface) 100%
+  );
 }
 
 .chart-heading {
@@ -824,7 +793,7 @@ dd {
 .chart-heading span,
 .panel-title span {
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.64rem;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -913,7 +882,7 @@ dd {
 .token-card-stats dt {
   margin-bottom: 5px;
   color: var(--muted);
-  font-size: 0.59rem;
+  font-size: 0.62rem;
   font-weight: 750;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -936,7 +905,7 @@ dd {
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 0.56rem;
+  font-size: 0.59rem;
   font-weight: 850;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -982,8 +951,10 @@ dd {
 
 .protocol-strip strong {
   margin-block: 4px 2px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .protocol-strip small {
@@ -1075,7 +1046,7 @@ dd {
   top: 7px;
   left: 11px;
   color: var(--faint);
-  font-size: 0.5rem;
+  font-size: 0.55rem;
   font-weight: 800;
   letter-spacing: 0.07em;
   pointer-events: none;
@@ -1091,7 +1062,7 @@ dd {
   border-radius: 8px;
   background: var(--surface-2);
   color: var(--ink);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 
@@ -1212,8 +1183,11 @@ dd {
   margin-top: 24px;
   padding: 8px 7px 0;
   border-bottom: 1px solid var(--rule);
-  background:
-    linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 100% 50%;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sky) 9%, transparent),
+    transparent
+  );
 }
 
 .token-price-line {
@@ -1292,7 +1266,7 @@ dd {
   border-bottom: 1px solid var(--rule);
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 0.56rem;
+  font-size: 0.62rem;
   letter-spacing: 0.07em;
   text-align: left;
   text-transform: uppercase;
@@ -1302,7 +1276,7 @@ dd {
   height: 72px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--rule);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 
@@ -1381,8 +1355,10 @@ dd {
 
 .empty-state h3 {
   margin: 10px 0 5px;
-  font-family: var(--dragon);
-  font-size: 2.2rem;
+  font-family: var(--mori);
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 .empty-state p {
@@ -1665,13 +1641,11 @@ dd {
   padding: 14px;
   border: 1.5px dashed var(--border);
   border-radius: 10px;
-  background:
-    repeating-linear-gradient(
-      135deg,
-      transparent 0 7px,
-      color-mix(in srgb, var(--sun) 7%, transparent) 7px 14px
-    ),
-    var(--surface-2);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--sun) 9%, var(--surface-2)),
+    var(--surface-2)
+  );
   cursor: pointer;
   text-align: center;
 }
@@ -1790,7 +1764,7 @@ dd {
   border-radius: 15px;
   background: var(--green);
   color: #fffaf0;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 1.4rem;
   font-weight: 800;
   box-shadow: 4px 4px 0 var(--border);
@@ -1798,8 +1772,10 @@ dd {
 
 .receipt-coin h2 {
   margin-bottom: 7px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
 }
 
 .receipt-coin p {
@@ -1999,8 +1975,10 @@ dd {
 .reward-grid article > strong {
   display: block;
   margin: 23px 0 10px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 3.4rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
 }
 
 .reward-grid p {
@@ -2056,8 +2034,9 @@ dd {
   border-radius: 50%;
   background: var(--sun);
   color: #28281f;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 2rem;
+  font-weight: 800;
 }
 
 .keeper-pipe span {
@@ -2104,10 +2083,10 @@ dd {
   border: 1.5px solid var(--border);
   border-radius: 20px;
   background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 39px,
-      color-mix(in srgb, var(--rule) 24%, transparent) 39px 40px
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--sun) 13%, transparent),
+      transparent 28rem
     ),
     var(--surface);
 }
@@ -2137,8 +2116,10 @@ dd {
 
 .fee-source strong {
   margin-block: 4px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 3.9rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
   line-height: 0.95;
 }
 
@@ -2193,8 +2174,10 @@ dd {
 .fee-branches article > strong {
   display: block;
   margin: 15px 0;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 4.4rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
   line-height: 0.85;
 }
 
@@ -2322,6 +2305,7 @@ dd {
 
 .docs-layout {
   display: grid;
+  min-width: 0;
   grid-template-columns: 190px minmax(0, 870px);
   align-items: start;
   gap: 60px;
@@ -2331,6 +2315,7 @@ dd {
   position: sticky;
   top: 130px;
   display: grid;
+  min-width: 0;
   gap: 4px;
   padding: 18px;
   border: 1px solid var(--rule);
@@ -2361,10 +2346,14 @@ dd {
 
 .docs-content {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  overflow-wrap: anywhere;
 }
 
 .docs-content > section {
+  min-width: 0;
   scroll-margin-top: 130px;
   padding: 32px;
   border: 1px solid var(--rule);
@@ -2612,10 +2601,11 @@ dd {
   min-height: 430px;
   flex-direction: column;
   padding: 25px;
-  background:
-    linear-gradient(var(--rule) 1px, transparent 1px) 0 0 / 100% 20%,
-    linear-gradient(90deg, var(--rule) 1px, transparent 1px) 0 0 / 12.5% 100%,
-    var(--surface);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sky) 12%, var(--surface)),
+    var(--surface)
+  );
 }
 
 .panel-title {
@@ -2834,7 +2824,8 @@ dd {
   margin: 22px 0 18px;
   font-family: var(--dragon);
   font-size: clamp(5rem, 9vw, 8rem);
-  line-height: 0.8;
+  letter-spacing: 0.02em;
+  line-height: 0.9;
 }
 
 .pipedog-profile > div:last-child > p {
@@ -3054,8 +3045,9 @@ dd {
     padding: 10px;
     border-radius: 6px;
     background: var(--surface-2);
-    font-size: 0.67rem;
+    font-size: 0.72rem;
     font-weight: 800;
+    line-height: 1.25;
   }
 
   .board-intro {
@@ -3271,6 +3263,7 @@ dd {
   .docs-nav {
     position: static;
     display: flex;
+    width: 100%;
     overflow-x: auto;
   }
 
@@ -3425,8 +3418,15 @@ dd {
     min-height: 315px;
   }
 
-  .board-intro-art > img {
-    bottom: -48px;
+  .board-intro-art .board-intro-dog {
+    bottom: 33%;
+    left: 7%;
+    width: min(48%, 190px);
+  }
+
+  .board-intro-art .board-intro-machine {
+    bottom: 0;
+    width: 116%;
   }
 
   .preview-notice {

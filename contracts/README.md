@@ -1,99 +1,154 @@
-# Laypipe protocol
+# LayPipe protocol
 
-Foundry implementation of the laypipe.fun launcher for Robinhood Chain. It
-recreates the observable LetsCash launch flow around PIPEDOG:
+Foundry implementation of the LayPipe launcher for Robinhood Chain. It adapts
+the observable LetsCash launch model so canonical PIPEDOG is the quote,
+payment, fee, and paired asset throughout the protocol.
 
-- fixed-supply `...cc` token clone;
-- atomic Uniswap v4 pool initialization, one-sided liquidity seed, and optional
-  first buy;
-- permanently locked launch liquidity;
-- fixed 1% fee collected in native ETH on buys and sells;
-- transferable creator fee stream;
-- standard and self-burn launch modes;
-- platform revenue routed through the fixed 25/25/50 PIPEDOG policy.
-
-Status: implementation and tests are complete, but the contracts are
-**unaudited and not deployed**. Do not broadcast the deployment script until an
-independent review is complete. See [SECURITY.md](./SECURITY.md).
-
-## PIPEDOG semantics
-
-PIPEDOG is fixed at:
+Canonical PIPEDOG:
 
 `0x5Cb6F181081301b44905F3ae15419112ecaBd8A6`
 
-PIPEDOG does not expose `burn()`. The platform lane therefore buys PIPEDOG and
-sends it to `0x000000000000000000000000000000000000dEaD`. This removes tokens
-from practical circulation but **does not reduce ERC-20 `totalSupply`**.
-Contracts, events, counters, and this documentation call that action
-`sequester`.
+Status: active implementation work. The contracts are **unaudited and not
+deployed**. A green local or fork test is not permission to broadcast. An
+independent audit and explicit deployment authorization are required before
+mainnet deployment. See [SECURITY.md](./SECURITY.md).
 
-This is distinct from a Laypipe token's self-burn mode. Launched tokens do
-expose `burn()`, so self-burn purchases genuinely reduce that token's
-`totalSupply`.
+## Protocol shape
 
-## Runtime policy
+- Each launch creates an ownerless, fixed-supply `...cc` token clone.
+- The token address is mined above the PIPEDOG address, making PIPEDOG
+  `currency0` and the launched token `currency1` for every pool.
+- The factory initializes a zero-LP-fee Uniswap v4 pool and seeds a single
+  launched-token-only position.
+- The non-upgradeable hook permanently rejects later liquidity additions,
+  liquidity removal, and donations.
+- There is no graduation threshold or migration state. The one-sided v4 pool
+  is the permanent trading venue.
+- Buys, sells, launch fees, trading fees, creator claims, keeper bounties, and
+  platform routing are all denominated in PIPEDOG.
+- Native ETH and WETH are not quote assets or operational payment paths.
 
-The enabled launch configs mirror the live observable LetsCash configs 16 and
-17:
+The canonical active launch configs use a 1% hook fee. Seventy percent of each
+trading fee is assigned to the creator lane and 30% to the platform lane.
+Standard launches let the creator claim the creator lane. Self-burn launches
+assign it to `LaypipeSelfBurner`, which buys and genuinely burns the launched
+token.
 
-| Setting | Value |
-| --- | ---: |
-| Supply | 1,000,000,000 tokens |
-| Tick spacing | 200 |
-| Start tick | 204,200 |
-| Trading fee | 10,000 pips = 1% |
-| Creator share of trading fee | 7,000 bps = 70% |
-| Platform share of trading fee | 3,000 bps = 30% |
-| Launch fee | 0.0005 ETH |
-| Address suffix | `0xcc` |
+For exact-output swaps, the hook grosses the fee up with ceiling division so
+the configured percentage applies to total PIPEDOG moved, matching the gross
+fee basis used by exact-input swaps.
 
-During normal operation, `PipedogRevenueRouter` assigns every new wei it
-receives:
+## Wallet flows and allowances
 
-| Lane | Share | Destination |
+PIPEDOG is treated as an exact-transfer, 18-decimal ERC-20 without permit.
+Frontends must use a separate, exact, single-use approval transaction:
+
+- launch: approve the factory for exactly `launchFee + firstBuyIn`;
+- buy: approve `LaypipeSwapRouter` for exactly `pipedogIn`;
+- sell: approve `LaypipeSwapRouter` for exactly `tokensIn` of the launched
+  token.
+
+The factory and public swap router reject both under-approval and
+over-approval, then consume the exact allowance to zero on success. Never
+request an unlimited allowance to the upgradeable factory. The launch, buy,
+and sell entrypoints are nonpayable. Supplying native value is not a substitute
+for the ERC-20 approval.
+
+Launches accept `firstBuyMinOut`; router buys and sells accept
+`minTokensOut` and `minPipedogOut`. Unspent exact-input amounts are refunded.
+The contracts verify balance deltas and reject fee-on-transfer or rebasing
+behavior.
+
+## Platform revenue policy
+
+Launch fees and the platform share of trading fees arrive at
+`PipedogRevenueRouter` directly as PIPEDOG. There is no circular
+WETH/PIPEDOG buyback.
+
+Every newly received amount is assigned:
+
+| Lane | Gross share | Destination |
 | --- | ---: | --- |
-| PIPEDOG sequestration | 25% | Market buy to `0xdead` |
-| Treasury acquisition | 25% | Market buy to treasury |
-| Operations | 50% | Operations wallet in ETH |
+| PIPEDOG sequestration | 25% | `0x000000000000000000000000000000000000dEaD` |
+| Treasury | 25% | Configured treasury wallet |
+| Operations | 50% | Configured operations wallet |
 
-Both buy lanes are permissionless, pay a 1% keeper bounty, cap each order, and
-run at most once per lane per block. The split percentages are constants. Admin
-can pause buys, rotate the two destination wallets, tune order caps, or migrate
-all platform-owned ETH to a successor router. The 25/25/50 split is therefore a
-fixed operating policy, not an irrevocable custody guarantee.
+`sequesterPipedog()` and `routeTreasuryPipedog()` are permissionless, capped,
+and limited to one successful call per lane per block. Each pays the configured
+keeper bounty from the processed 25% lane, so the dead sink or treasury
+receives the lane amount less its bounty. `collectOperations()` forwards the
+full operations tab and pays no bounty.
 
-## Contracts
+Sending PIPEDOG to `0xdead` removes it from practical circulation but does not
+change ERC-20 `totalSupply`. Code, events, and product copy should call this
+`sequester`, not a supply burn.
+
+The router owner can pause the two policy lanes, rotate destinations, change
+per-call caps, and migrate all router-held PIPEDOG to a successor. The
+25/25/50 split is therefore an administrator-trusted operating policy, not an
+irrevocable custody guarantee.
+
+## Curve calibration
+
+Supply, tick spacing, start tick, launch fee, routing caps, and bounties have no
+numeric defaults in `.env.example`. They must be explicitly reviewed in
+PIPEDOG units before a deployment rehearsal.
+
+For equal 18-decimal assets at the launch boundary:
+
+```text
+launched tokens per PIPEDOG = 1.0001 ^ startTick
+implied FDV in PIPEDOG      = launched token supply / tokens per PIPEDOG
+```
+
+Generate an aligned candidate tick:
+
+```powershell
+node scripts/calibrate-curve.mjs `
+  --supply 1000000000 `
+  --fdv 1000000 `
+  --tick-spacing 200
+```
+
+The same inputs may be provided with `LAYPIPE_SUPPLY_TOKENS`,
+`LAYPIPE_TARGET_FDV_PIPEDOG`, and `LAYPIPE_TICK_SPACING`.
+
+Tick `204200` is a legacy ETH-oriented value and an unsafe PIPEDOG example. At
+a 1,000,000,000-token supply it implies an initial FDV of only about
+**1.356 PIPEDOG**. Do not reuse it silently. The helper is a deterministic
+configuration aid, not an oracle, liquidity simulation, or economic
+endorsement.
+
+## Canonical contracts
 
 | Contract | Role | Provenance |
 | --- | --- | --- |
-| `LaypipeFactory` | UUPS launcher, config registry, deterministic `...cc` clones, atomic pool seed/first buy | Clean-room implementation of live public ABI and observed behavior; active LetsCash implementation is unverified |
-| `PipedogHook` | 1% ETH fee engine, sweep/claim/updateCreator, immutable liquidity lock | Mechanically name-adapted from fully verified MIT source with no intentional semantic delta |
-| `LaypipeToken` | Ownerless fixed-supply clone, metadata, real holder burn, closed-block checkpoints | Mechanically name-adapted from fully verified MIT source with no intentional semantic delta |
-| `LaypipeSelfBurner` | Claims creator lane, buys its own launched token, calls real `burn()` | Mechanically name-adapted from an earlier verified MIT source with no intentional semantic delta; current live burner is unverified |
-| `PipedogRevenueRouter` | Canonical 25/25/50 platform destination | Clean-room implementation of first-party API behavior; live splitter source is unverified |
-| `LaypipeDividendDistributor` | Research parity artifact only | Reviewed derivative of verified source; **not deployed and impossible to enable in this factory version** |
+| `LaypipeFactory` | UUPS launcher, config registry, deterministic `...cc` clones, pool seed, and optional first buy | Clean-room implementation based on public ABI and observed behavior |
+| `PipedogHook` | PIPEDOG fee engine, permanent liquidity lock, fee sweep/claim, and creator-stream transfer | Reviewed derivative of verified MIT LetsCash source; quote claims and payouts were changed from native value to exact PIPEDOG |
+| `LaypipeToken` | Ownerless fixed-supply clone, metadata, real holder burn, and closed-block checkpoints | Reviewed documentation-only PIPEDOG derivative of the verified MIT mechanical adaptation; executable semantics are unchanged |
+| `LaypipeSelfBurner` | Claims PIPEDOG creator fees, pays a bounded keeper bounty, buys the launched token, and calls its real `burn()` | Reviewed PIPEDOG-quote derivative of an earlier verified MIT LetsCash source |
+| `LaypipeSwapRouter` | Exact-allowance, slippage-checked PIPEDOG buy/sell entrypoint | Clean-room LayPipe implementation |
+| `PipedogRevenueRouter` | Direct 25/25/50 PIPEDOG platform policy | Clean-room LayPipe implementation |
 
-The canonical deployment script deploys only the factory, token implementation,
-hook, self-burner, and `PipedogRevenueRouter`. A historical single-burner
-adaptation is retained under `reference/` only; it is not a competing
-deployment surface.
+`LaypipeDividendDistributor.sol` is a quarantined research artifact. It retains
+incompatible native-asset assumptions, is not imported by the factory, is not
+deployed, cannot be enabled, and is excluded from canonical ABI generation.
+It is not part of the LayPipe protocol surface.
 
-### Factory recovery compatibility
+## Recovery boundaries
 
-`LaypipeFactory.sweep(address)` matches the observed live owner-only selector
-`0x01681a62` and empty return. Native ETH is sent to the configured factory
-treasury. The live factory also sends ERC20 recovery to its treasury, while
-Laypipe intentionally sends ERC20s to the current owner because its revenue
-router has no arbitrary-token recovery function and would otherwise strand
-them. Laypipe additionally emits `Swept` and uses its local
-`EtherTransferFailed` error. These are documented clean-room deltas, not claims
-of bytecode parity. The function can move only balances held by the factory
-address itself; it cannot reach PoolManager liquidity or user balances.
+`LaypipeFactory.sweep(address)` can move only balances held by the factory:
 
-## Verified reference acquisition
+- factory-held PIPEDOG goes to the configured protocol treasury;
+- unrelated ERC-20s and force-sent native currency go to the current owner.
 
-Reproduce the source and current first-party API snapshots:
+It cannot reach PoolManager liquidity, hook claims, creator tabs, user
+allowances, or user balances. Native recovery exists only for force-sent value;
+native currency is not accepted during normal operation.
+
+## Reference-source evidence
+
+Reproduce the verified-source baseline and check intentional deltas:
 
 ```powershell
 node scripts/fetch-reference-sources.mjs
@@ -102,58 +157,56 @@ node scripts/check-source-fidelity.mjs
 ```
 
 `adapt-verified-sources.mjs` writes only to
-`reference/letscash/adapted-baseline/`. It can never overwrite reviewed
-`src/` files. `adaptation-deltas.json` declares which mechanically adapted
-source files must remain text-identical to the generated baseline and which
-contain intentional reviewed changes.
+`reference/letscash/adapted-baseline/`; it must never overwrite reviewed
+`src/` files. `reference/letscash/adaptation-deltas.json` classifies exact
+mechanical adaptations and reviewed derivatives. Historical verified sources
+under `reference/letscash/src/` are evidence only and are never deployment
+inputs.
 
-The API snapshots include their acquisition time and a drift warning. Re-fetch
-before any deployment review. Exact verified source metadata, deployed bytecode
-hashes, and unavailable/unverified live components are recorded in
-`reference/letscash/manifest.json`.
+The source manifest and first-party API snapshots record acquisition time,
+verification status, bytecode hashes, and drift warnings. Re-fetch them before
+an audit handoff; remembered LetsCash state is not proof of current chain
+state.
 
-## Chain wiring
+## Robinhood Chain wiring
 
-The read-only preflight validates all of these against chain state:
+The read-only preflight validates:
 
-| Component | Address |
+| Component | Value |
 | --- | --- |
-| Robinhood Chain ID | `4663` |
+| Chain ID | `4663` |
 | PoolManager | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
-| WETH | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` |
 | PIPEDOG | `0x5Cb6F181081301b44905F3ae15419112ecaBd8A6` |
-| PIPEDOG/WETH v3 pool | `0xB7f10f74B39291b9290b779978e19A7637C742D6` |
-| v3 factory | `0x1f7d7550B1b028f7571E69A784071F0205FD2EfA` |
-| Pool fee | `10,000` = 1% |
 
-The router constructor independently verifies pool bytecode, pair, fee,
-reported factory, and canonical `factory.getPool` result. Its callback only
-honors the authenticated pool during a router-initiated swap and cannot collect
-more WETH than the transient per-swap allowance.
+It also pins PIPEDOG bytecode and verifies its name, symbol, 18 decimals, total
+supply, zero-address balance, and PoolManager interface compatibility. WETH
+and PIPEDOG/WETH reference constants are not dependencies of the canonical
+LayPipe routing path.
 
-## Permissionless fee sweeps
+## Permissionless maintenance
 
-Trading fees remain as v4 claims until somebody calls
-`PipedogHook.sweep(poolId)`. Active pools can be swept by normal automation;
-dormant pools need a gas-aware keeper. The keyless
-`script/SweepHookFees.s.sol` helper checks pending value and skips pools below
-an optional threshold. Hardware-wallet and unlocked-account commands are in
-[KEEPERS.md](./KEEPERS.md). The script never reads the deployment key or any
-other secret.
+Trading fees remain as Uniswap v4 claims until somebody calls
+`PipedogHook.sweep(poolId)`. Sweeping redeems PIPEDOG, credits the creator tab,
+and sends the platform share to the revenue router. The fee sweep itself pays
+no bounty.
 
-## Build and test
+The keyless `script/SweepHookFees.s.sol` helper reads only public inputs and
+skips pools below an optional PIPEDOG threshold. Revenue routing and
+self-burns have separate permissionless bounty flows. Operational details are
+in [KEEPERS.md](./KEEPERS.md).
 
-Foundry stable `1.7.1`, Solidity `0.8.28`, Cancun, optimizer 800 runs, and IR
-compilation were used. Compiler settings match the verified LetsCash hook
-metadata. Dependencies are pinned by commit in `scripts/install-deps.ps1`.
+## Build and release checks
 
-Fresh install and build:
+Foundry uses Solidity `0.8.28`, Cancun, optimizer 800 runs, and IR compilation.
+Dependencies are pinned by commit in `scripts/install-deps.ps1`.
+
+Fresh dependency install:
 
 ```powershell
 .\scripts\install-deps.ps1
 ```
 
-Normal verification:
+Complete release-candidate verification:
 
 ```powershell
 forge clean
@@ -164,37 +217,28 @@ node scripts\check-source-fidelity.mjs
 node scripts\generate-abis.mjs
 ```
 
-The current suite passes 32 tests:
+Committed frontend/indexer ABIs live in `abi/`. The generator exports only the
+canonical protocol surface and removes any stale dividend ABI.
 
-- 13 revenue-router unit/fuzz tests, including malicious callbacks and the
-  99-wei bounty-rounding boundary;
-- 3 invariants, 256 runs × 64 calls;
-- 12 factory/hook tests against the canonical live v4 PoolManager on a fork;
-- 1 launched-token historical checkpoint test;
-- 3 live preflight/differential tests, including an actual canonical
-  PIPEDOG/WETH v3 purchase into the dead sink with unchanged `totalSupply`.
+## No-broadcast deployment rehearsal
 
-Committed frontend/indexer ABIs live in `abi/`. Regenerate deterministically
-after every contract change with:
+Copy `.env.example` to the ignored `.env` and fill every blank. Economic values
+are PIPEDOG base units or explicit curve parameters:
 
-```powershell
-forge build
-node scripts\generate-abis.mjs
-```
+- `LAYPIPE_SUPPLY_WEI`
+- `LAYPIPE_TICK_SPACING`
+- `LAYPIPE_START_TICK`
+- `LAYPIPE_LAUNCH_FEE_PIPEDOG_WEI`
+- `MAX_SEQUESTER_PER_CALL_PIPEDOG_WEI`
+- `MAX_TREASURY_ROUTE_PER_CALL_PIPEDOG_WEI`
+- `MAX_SELF_BURN_PER_CALL_PIPEDOG_WEI`
+- `ROUTER_BOUNTY_BPS`
+- `SELF_BURN_BOUNTY_BPS`
 
-## Deployment dry run
+Keep `DEPLOYER_PRIVATE_KEY` only in ignored local configuration. Never print,
+commit, or pass it in the process list.
 
-Copy `.env.example` to the ignored `.env` and fill in:
-
-- `DEPLOYER_PRIVATE_KEY`;
-- `FINAL_OWNER` (preferably a Safe);
-- `TREASURY_WALLET`;
-- `OPERATIONS_WALLET`.
-
-The key is read inside the Forge script. It is never passed in the CLI process
-list or logged.
-
-Run the live read-only gate:
+Run the read-only chain gate:
 
 ```powershell
 forge script script/PreflightRobinhood.s.sol:PreflightRobinhood `
@@ -208,21 +252,12 @@ forge script script/DeployLaypipe.s.sol:DeployLaypipe `
   --rpc-url robinhood -vvv
 ```
 
-The script:
+The script deploys and wires the PIPEDOG revenue router, UUPS factory proxy,
+token implementation, mined-address hook, self-burner, and swap router. It adds
+standard and self-burn configs, transfers ownership in two steps, prints the
+implied PIPEDOG FDV, and leaves launch disabled.
 
-1. validates chain, token, WETH, pool, fee, factory, and pool liquidity;
-2. deploys the fixed 25/25/50 router;
-3. deploys the UUPS factory proxy with global launch disabled;
-4. mines and deploys the hook through canonical CREATE2 with exact v4 flags;
-5. wires the token implementation and self-burner;
-6. installs standard and self-burn configs;
-7. asserts factory ↔ hook ↔ router wiring;
-8. starts two-step ownership transfer to `FINAL_OWNER`.
-
-The final owner must accept ownership on the factory, hook, and router. Launch
-remains disabled until that owner reviews the deployment and explicitly calls
-`factory.setLaunchEnabled(true)`.
-
-Do not add `--broadcast` before an independent audit, source-verification plan,
-Safe acceptance transaction plan, and frontend/indexer address cutover are
-ready.
+The final owner must accept ownership on the factory, hook, and revenue router
+before any funding or enablement. Do not add `--broadcast` until an independent
+audit, source-verification plan, ownership-acceptance plan, economic review,
+and explicit authorization are complete.

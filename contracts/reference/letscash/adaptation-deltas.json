@@ -1,24 +1,35 @@
 {
   "schemaVersion": 1,
-  "warning": "adapted-baseline is generated comparison evidence only. Deployable src contains reviewed changes and must never be overwritten by the generator.",
+  "warning": "adapted-baseline is generated comparison evidence only. Deployable src contains reviewed changes and must never be overwritten by the generator. The dividend source is quarantined research and is not part of the canonical deployment or ABI surface.",
   "files": [
     {
       "file": "PipedogHook.sol",
-      "expectIdenticalToMechanicalBaseline": true,
-      "status": "verified-source mechanical adaptation",
-      "intentionalDeltas": []
+      "expectIdenticalToMechanicalBaseline": false,
+      "status": "reviewed PIPEDOG-quote derivative of verified-source mechanical adaptation",
+      "intentionalDeltas": [
+        "canonical PIPEDOG immutable quote, currency0 ordering, ERC6909 claim id, settlement, and payout replace native-value accounting",
+        "exact ERC20 balance-delta guards replace native transfers and the deferred platform payout path",
+        "launched-token address ordering validation and registered-pool view support the canonical swap router",
+        "exact-output quote fees are grossed up with full-precision ceiling math so the configured rate applies to gross PIPEDOG flow"
+      ]
     },
     {
       "file": "LaypipeToken.sol",
-      "expectIdenticalToMechanicalBaseline": true,
-      "status": "verified-source mechanical adaptation",
-      "intentionalDeltas": []
+      "expectIdenticalToMechanicalBaseline": false,
+      "status": "reviewed documentation-only PIPEDOG derivative of verified-source mechanical adaptation",
+      "intentionalDeltas": [
+        "NatSpec pairing and fee-unit descriptions name canonical PIPEDOG instead of native ETH; executable semantics are unchanged"
+      ]
     },
     {
       "file": "LaypipeSelfBurner.sol",
-      "expectIdenticalToMechanicalBaseline": true,
-      "status": "verified-source mechanical adaptation",
-      "intentionalDeltas": []
+      "expectIdenticalToMechanicalBaseline": false,
+      "status": "reviewed PIPEDOG-quote derivative of an earlier verified self-burner",
+      "intentionalDeltas": [
+        "canonical PIPEDOG creator claims, swap settlement, exact-transfer bounty payment, and no native receive path",
+        "deploy-time immutable PIPEDOG burn cap and bounty with an explicit maximum",
+        "reentrancy guard plus constructor, pool-key, quote-ordering, swap-delta, and input-range validation"
+      ]
     },
     {
       "file": "PipedogBuybackBurner.sol",
@@ -34,10 +45,11 @@
     {
       "file": "LaypipeDividendDistributor.sol",
       "expectIdenticalToMechanicalBaseline": false,
-      "status": "reviewed compatibility derivative",
+      "status": "quarantined research-only compatibility derivative; incompatible with the canonical PIPEDOG quote stack and excluded from deployment and ABI generation",
       "intentionalDeltas": [
         "closed-block balance and supply checkpoints replace incompatible earlier transfer-clock snapshot API",
-        "registration rejects tokens without the complete block-checkpoint marker"
+        "registration rejects tokens without the complete block-checkpoint marker",
+        "source-level quarantine notice marks native-asset logic as noncanonical and hard-disabled"
       ]
     },
     {

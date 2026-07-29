@@ -3,29 +3,9 @@
     "type": "constructor",
     "inputs": [
       {
-        "name": "pool_",
-        "type": "address",
-        "internalType": "contract IUniswapV3Pool"
-      },
-      {
-        "name": "v3Factory_",
-        "type": "address",
-        "internalType": "contract IUniswapV3Factory"
-      },
-      {
-        "name": "expectedPoolFee_",
-        "type": "uint24",
-        "internalType": "uint24"
-      },
-      {
         "name": "pipedog_",
         "type": "address",
         "internalType": "contract IERC20"
-      },
-      {
-        "name": "weth_",
-        "type": "address",
-        "internalType": "contract IPipedogWETH9"
       },
       {
         "name": "treasury_",
@@ -43,9 +23,14 @@
         "internalType": "uint256"
       },
       {
-        "name": "maxTreasuryBuyPerCall_",
+        "name": "maxTreasuryRoutePerCall_",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "bountyBps_",
+        "type": "uint16",
+        "internalType": "uint16"
       },
       {
         "name": "owner_",
@@ -56,12 +41,8 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
     "type": "function",
-    "name": "BOUNTY_BPS",
+    "name": "BPS_DENOMINATOR",
     "inputs": [],
     "outputs": [
       {
@@ -74,7 +55,7 @@
   },
   {
     "type": "function",
-    "name": "BPS_DENOMINATOR",
+    "name": "MAX_BOUNTY_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -126,7 +107,7 @@
   },
   {
     "type": "function",
-    "name": "TREASURY_BUY_SHARE_BPS",
+    "name": "TREASURY_SHARE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -153,29 +134,16 @@
   },
   {
     "type": "function",
-    "name": "buyAndSequester",
+    "name": "bountyBps",
     "inputs": [],
     "outputs": [
       {
-        "name": "pipedogSequestered",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "buyForTreasury",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "pipedogBought",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -188,6 +156,19 @@
         "internalType": "uint256"
       }
     ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -205,7 +186,7 @@
   },
   {
     "type": "function",
-    "name": "maxTreasuryBuyPerCall",
+    "name": "maxTreasuryRoutePerCall",
     "inputs": [],
     "outputs": [
       {
@@ -316,22 +297,66 @@
   },
   {
     "type": "function",
-    "name": "pool",
-    "inputs": [],
-    "outputs": [
+    "name": "recoverNative",
+    "inputs": [
       {
-        "name": "",
+        "name": "recipient",
         "type": "address",
-        "internalType": "contract IUniswapV3Pool"
+        "internalType": "address payable"
       }
     ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recoverToken",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "contract IERC20"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "renounceOwnership",
     "inputs": [],
     "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "routeTreasuryPipedog",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sequesterPipedog",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -362,7 +387,7 @@
   },
   {
     "type": "function",
-    "name": "setMaxTreasuryBuyPerCall",
+    "name": "setMaxTreasuryRoutePerCall",
     "inputs": [
       {
         "name": "newCap",
@@ -401,32 +426,6 @@
   },
   {
     "type": "function",
-    "name": "totalEthSequestered",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "totalEthTreasuryBought",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "totalKeeperBounties",
     "inputs": [],
     "outputs": [
@@ -453,7 +452,7 @@
   },
   {
     "type": "function",
-    "name": "totalOperationsCollected",
+    "name": "totalPipedogOperationsCollected",
     "inputs": [],
     "outputs": [
       {
@@ -479,7 +478,7 @@
   },
   {
     "type": "function",
-    "name": "totalPipedogTreasuryBought",
+    "name": "totalPipedogTreasuryRouted",
     "inputs": [],
     "outputs": [
       {
@@ -531,7 +530,7 @@
   },
   {
     "type": "function",
-    "name": "treasuryBuyTank",
+    "name": "treasuryTank",
     "inputs": [],
     "outputs": [
       {
@@ -557,59 +556,10 @@
   },
   {
     "type": "function",
-    "name": "uniswapV3SwapCallback",
-    "inputs": [
-      {
-        "name": "amount0Delta",
-        "type": "int256",
-        "internalType": "int256"
-      },
-      {
-        "name": "amount1Delta",
-        "type": "int256",
-        "internalType": "int256"
-      },
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "unpause",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "v3Factory",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IUniswapV3Factory"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "weth",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IPipedogWETH9"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "event",
@@ -632,7 +582,7 @@
   },
   {
     "type": "event",
-    "name": "MaxTreasuryBuyPerCallUpdated",
+    "name": "MaxTreasuryRoutePerCallUpdated",
     "inputs": [
       {
         "name": "oldCap",
@@ -670,7 +620,26 @@
   },
   {
     "type": "event",
-    "name": "OperationsCollected",
+    "name": "NativeRecovered",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OperationsPipedogCollected",
     "inputs": [
       {
         "name": "operationsWallet",
@@ -768,12 +737,6 @@
         "internalType": "address"
       },
       {
-        "name": "ethSpent",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
         "name": "pipedogSequestered",
         "type": "uint256",
         "indexed": false,
@@ -805,7 +768,7 @@
         "internalType": "uint256"
       },
       {
-        "name": "treasuryBuyAmount",
+        "name": "treasuryAmount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -821,7 +784,32 @@
   },
   {
     "type": "event",
-    "name": "TreasuryPipedogBought",
+    "name": "TokenRecovered",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TreasuryPipedogRouted",
     "inputs": [
       {
         "name": "caller",
@@ -836,13 +824,7 @@
         "internalType": "address"
       },
       {
-        "name": "ethSpent",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "pipedogBought",
+        "name": "pipedogRouted",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -895,11 +877,6 @@
   },
   {
     "type": "error",
-    "name": "EmptySwap",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "EnforcedPause",
     "inputs": []
   },
@@ -910,37 +887,12 @@
   },
   {
     "type": "error",
-    "name": "FeeTierMismatch",
+    "name": "InvalidBounty",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "InvalidPool",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidSwapDelta",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "MigrationFailed",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NativeTransferFailed",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotActiveSwap",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotPool",
+    "name": "NativeRecoveryFailed",
     "inputs": []
   },
   {
@@ -972,6 +924,27 @@
   },
   {
     "type": "error",
+    "name": "ProtectedToken",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "QuoteTransferMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
   },
@@ -985,16 +958,6 @@
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "SwapInputTooHigh",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TokenMismatch",
-    "inputs": []
   },
   {
     "type": "error",

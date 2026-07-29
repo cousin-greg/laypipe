@@ -5,10 +5,6 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
     "type": "function",
     "name": "BPS_DENOMINATOR",
     "inputs": [],
@@ -180,10 +176,10 @@
       {
         "name": "",
         "type": "address",
-        "internalType": "contract LaypipeDividendDistributor"
+        "internalType": "address"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -196,7 +192,7 @@
         "internalType": "bool"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -287,9 +283,14 @@
         "internalType": "contract IPoolManager"
       },
       {
+        "name": "quoteToken_",
+        "type": "address",
+        "internalType": "contract IERC20"
+      },
+      {
         "name": "treasury_",
         "type": "address",
-        "internalType": "address payable"
+        "internalType": "address"
       },
       {
         "name": "owner_",
@@ -411,7 +412,7 @@
         "internalType": "PoolId"
       }
     ],
-    "stateMutability": "payable"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -425,183 +426,6 @@
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "launchDividend",
-    "inputs": [
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct LaypipeFactory.TokenParams",
-        "components": [
-          {
-            "name": "name",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "symbol",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "logo",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "description",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "metadataURI",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "socials",
-            "type": "tuple",
-            "internalType": "struct LaypipeFactory.Socials",
-            "components": [
-              {
-                "name": "telegram",
-                "type": "string",
-                "internalType": "string"
-              },
-              {
-                "name": "twitter",
-                "type": "string",
-                "internalType": "string"
-              },
-              {
-                "name": "discord",
-                "type": "string",
-                "internalType": "string"
-              },
-              {
-                "name": "website",
-                "type": "string",
-                "internalType": "string"
-              },
-              {
-                "name": "extra",
-                "type": "string",
-                "internalType": "string"
-              }
-            ]
-          },
-          {
-            "name": "creator",
-            "type": "address",
-            "internalType": "address"
-          }
-        ]
-      },
-      {
-        "name": "configId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "firstBuyIn",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "firstBuyMinOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "dividendParams",
-        "type": "tuple",
-        "internalType": "struct LaypipeDividendDistributor.DividendParams",
-        "components": [
-          {
-            "name": "dividendToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "minBalance",
-            "type": "uint96",
-            "internalType": "uint96"
-          },
-          {
-            "name": "route",
-            "type": "uint8",
-            "internalType": "enum LaypipeDividendDistributor.Route"
-          },
-          {
-            "name": "v4Key",
-            "type": "tuple",
-            "internalType": "struct PoolKey",
-            "components": [
-              {
-                "name": "currency0",
-                "type": "address",
-                "internalType": "Currency"
-              },
-              {
-                "name": "currency1",
-                "type": "address",
-                "internalType": "Currency"
-              },
-              {
-                "name": "fee",
-                "type": "uint24",
-                "internalType": "uint24"
-              },
-              {
-                "name": "tickSpacing",
-                "type": "int24",
-                "internalType": "int24"
-              },
-              {
-                "name": "hooks",
-                "type": "address",
-                "internalType": "contract IHooks"
-              }
-            ]
-          },
-          {
-            "name": "v3Pool",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "adapter",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "adapterData",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "poolId",
-        "type": "bytes32",
-        "internalType": "PoolId"
-      }
-    ],
-    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -889,6 +713,19 @@
   },
   {
     "type": "function",
+    "name": "quoteToken",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IERC20"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "renounceOwnership",
     "inputs": [],
     "outputs": [],
@@ -906,19 +743,6 @@
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "setDividendDistributor",
-    "inputs": [
-      {
-        "name": "newDistributor",
-        "type": "address",
-        "internalType": "contract LaypipeDividendDistributor"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1023,7 +847,7 @@
       {
         "name": "newTreasury",
         "type": "address",
-        "internalType": "address payable"
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -1076,7 +900,7 @@
       {
         "name": "",
         "type": "address",
-        "internalType": "address payable"
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -1120,25 +944,6 @@
   },
   {
     "type": "event",
-    "name": "DividendDistributorSet",
-    "inputs": [
-      {
-        "name": "oldDistributor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newDistributor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "DividendLaunchEnabledSet",
     "inputs": [
       {
@@ -1146,6 +951,25 @@
         "type": "bool",
         "indexed": false,
         "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FirstBuyRefunded",
+    "inputs": [
+      {
+        "name": "creator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -1282,7 +1106,7 @@
   },
   {
     "type": "event",
-    "name": "LaunchFeeForwarded",
+    "name": "LaunchFeeRouted",
     "inputs": [
       {
         "name": "treasury",
@@ -1555,11 +1379,6 @@
   },
   {
     "type": "error",
-    "name": "DividendLaunchPaused",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "DividendModeUnderReview",
     "inputs": []
   },
@@ -1647,8 +1466,19 @@
   },
   {
     "type": "error",
-    "name": "InvalidValue",
-    "inputs": []
+    "name": "InvalidTokenOrdering",
+    "inputs": [
+      {
+        "name": "predictedToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteToken",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1700,8 +1530,56 @@
   },
   {
     "type": "error",
+    "name": "QuoteAllowanceMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "QuoteTransferMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ResidualQuoteBalance",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1713,6 +1591,11 @@
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "SeedRequiresQuote",
+    "inputs": []
   },
   {
     "type": "error",
@@ -1734,11 +1617,6 @@
         "internalType": "bytes32"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "UnsupportedMode",
-    "inputs": []
   },
   {
     "type": "error",

@@ -6,20 +6,20 @@ export type ProtocolConfig = {
   hook: string | null;
   feeRouter: string | null;
   poolManager: string | null;
-  protocolToken: string;
+  quoteToken: string;
 };
 
 export type ProtocolStats = {
   launches: number;
   volume24h: number;
-  feesRouted: number;
+  pipedogFeesRouted: number;
   pipedogSequestered: number;
 };
 
 export type TokenTrade = {
   txHash: string;
   side: "buy" | "sell";
-  ethAmount: string;
+  pipedogAmount: string;
   tokenAmount: string;
   timestamp: string;
 };
@@ -27,7 +27,7 @@ export type TokenTrade = {
 export type TokenPosition = {
   tokenSlug: string;
   balance: string;
-  claimableEth: string;
+  claimablePipedog: string;
   creator: boolean;
 };
 
@@ -45,7 +45,7 @@ export const laypipeApiRoutes = {
   holdings: (wallet: string) =>
     `/api/holdings?wallet=${encodeURIComponent(wallet)}`,
   tokenomics: "/api/tokenomics",
-  buybacks: "/api/buybacks",
+  protocolDistributions: "/api/protocol-distributions",
 } as const;
 
 export interface MarketDataAdapter {
