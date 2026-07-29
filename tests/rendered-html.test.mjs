@@ -46,15 +46,15 @@ async function expectPage(path, patterns) {
 
 test("server-renders the board with explicit preview data", async () => {
   const html = await expectPage("/", [
-    /Find the next coin down the pipe/i,
-    /Preview market/i,
-    /realistic demo fixtures/i,
+    /LAY SOME PIPE, DOG\./i,
+    /All preview launches/i,
     /THE BOARD/i,
     /Hot/i,
     /Largest/i,
     /Biggest mover/i,
   ]);
 
+  assert.doesNotMatch(html, /Preview market/i);
   assert.match(html, /Cards/i);
   assert.match(html, /Table/i);
   assert.match(html, /Search name or ticker/i);

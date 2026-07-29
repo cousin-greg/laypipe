@@ -2,7 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { demoMarketAdapter } from "../_data/adapter";
 import {
   LaunchMode,
@@ -290,12 +295,39 @@ export function MarketBoard() {
     page * PAGE_SIZE,
   );
 
+  function handleFeatureTabKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    tabIndex: number,
+  ) {
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (tabIndex + 1) % featureTabs.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (tabIndex - 1 + featureTabs.length) % featureTabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = featureTabs.length - 1;
+    }
+
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = featureTabs[nextIndex];
+    setFeatureTab(nextTab.id);
+    event.currentTarget
+      .closest('[role="tablist"]')
+      ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+      [nextIndex]?.focus();
+  }
+
   return (
     <main>
       <section className="board-intro content-width">
         <div className="board-intro-copy">
           <p className="eyebrow">THE ROBINHOOD CHAIN PIPELINE</p>
-          <h1>Find the next coin down the pipe.</h1>
+          <h1>LAY SOME PIPE, DOG.</h1>
           <p>
             Browse fresh launches, see where fees flow, and follow the public
             route from every trade to PIPEDOG buybacks for treasury and the
@@ -320,16 +352,6 @@ export function MarketBoard() {
         </div>
       </section>
 
-      <section className="preview-notice content-width" aria-label="Data notice">
-        <span>Preview market</span>
-        <p>
-          These launches and values are realistic demo fixtures—not live
-          LayPipe tokens. Live records will replace them when the factory and
-          indexer are deployed.
-        </p>
-        <Link href="/docs#readiness">Readiness →</Link>
-      </section>
-
       <section
         className="featured-section content-width"
         onMouseEnter={() => setFeaturePaused(true)}
@@ -337,27 +359,48 @@ export function MarketBoard() {
         onFocusCapture={() => setFeaturePaused(true)}
         onBlurCapture={() => setFeaturePaused(false)}
       >
-        <div className="featured-tabs" role="tablist" aria-label="Token ranking">
-          {featureTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={featureTab === tab.id}
-              onClick={() => setFeatureTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
         <article className="featured-token">
-          <div className="featured-identity">
-            <div>
+          <header className="featured-header">
+            <div className="featured-context">
               <span className="featured-kicker">
                 {featureTabs.find((tab) => tab.id === featureTab)?.label} right
-                now · Demo
+                now
               </span>
+              <span className="demo-chip">Demo</span>
+            </div>
+
+            <div
+              className="featured-tabs"
+              role="tablist"
+              aria-label="Featured token ranking"
+            >
+              {featureTabs.map((tab, tabIndex) => (
+                <button
+                  id={`feature-tab-${tab.id}`}
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-controls="featured-market-panel"
+                  aria-selected={featureTab === tab.id}
+                  tabIndex={featureTab === tab.id ? 0 : -1}
+                  onClick={() => setFeatureTab(tab.id)}
+                  onKeyDown={(event) =>
+                    handleFeatureTabKeyDown(event, tabIndex)
+                  }
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </header>
+
+          <div
+            id="featured-market-panel"
+            className="featured-body"
+            role="tabpanel"
+            aria-labelledby={`feature-tab-${featureTab}`}
+          >
+            <div className="featured-identity">
               <div className="featured-name">
                 <TokenAvatar token={featured} size="large" />
                 <div>
@@ -365,60 +408,60 @@ export function MarketBoard() {
                   <p>${featured.symbol}</p>
                 </div>
               </div>
-            </div>
-            <p>{featured.description}</p>
-            <div className="featured-actions">
-              <Link
-                className="button button-accent"
-                href={`/token/${featured.slug}`}
-              >
-                View demo market
-              </Link>
-              <span className={`mode-badge ${featured.mode}`}>
-                {featured.mode === "self-burn"
-                  ? "Self-burn mode"
-                  : "Creator-fee mode"}
-              </span>
-            </div>
-          </div>
-
-          <div className="featured-chart">
-            <div className="chart-heading">
-              <div>
-                <span>Illustrative price</span>
-                <strong>{formatMoney(featured.price)}</strong>
+              <p>{featured.description}</p>
+              <div className="featured-actions">
+                <Link
+                  className="button button-accent"
+                  href={`/token/${featured.slug}`}
+                >
+                  View demo market
+                </Link>
+                <span className={`mode-badge ${featured.mode}`}>
+                  {featured.mode === "self-burn"
+                    ? "Self-burn mode"
+                    : "Creator-fee mode"}
+                </span>
               </div>
-              <Change value={featured.change24h} />
             </div>
-            <Sparkline
-              values={featured.chart}
-              positive={featured.change24h >= 0}
-              label={`${featured.name} illustrative 24 hour price trend`}
-            />
-            <div className="chart-axis" aria-hidden="true">
-              <span>24h ago</span>
-              <span>Now</span>
-            </div>
-          </div>
 
-          <dl className="featured-stats">
-            <div>
-              <dt>Market cap</dt>
-              <dd>{compactMoney(featured.marketCap)}</dd>
+            <div className="featured-chart">
+              <div className="chart-heading">
+                <div>
+                  <span>Illustrative price</span>
+                  <strong>{formatMoney(featured.price)}</strong>
+                </div>
+                <Change value={featured.change24h} />
+              </div>
+              <Sparkline
+                values={featured.chart}
+                positive={featured.change24h >= 0}
+                label={`${featured.name} illustrative 24 hour price trend`}
+              />
+              <div className="chart-axis" aria-hidden="true">
+                <span>24h ago</span>
+                <span>Now</span>
+              </div>
             </div>
-            <div>
-              <dt>24h volume</dt>
-              <dd>{compactMoney(featured.volume24h)}</dd>
-            </div>
-            <div>
-              <dt>Liquidity</dt>
-              <dd>{compactMoney(featured.liquidity)}</dd>
-            </div>
-            <div>
-              <dt>Holders</dt>
-              <dd>{compactNumber(featured.holders)}</dd>
-            </div>
-          </dl>
+
+            <dl className="featured-stats">
+              <div>
+                <dt>Market cap</dt>
+                <dd>{compactMoney(featured.marketCap)}</dd>
+              </div>
+              <div>
+                <dt>24h volume</dt>
+                <dd>{compactMoney(featured.volume24h)}</dd>
+              </div>
+              <div>
+                <dt>Liquidity</dt>
+                <dd>{compactMoney(featured.liquidity)}</dd>
+              </div>
+              <div>
+                <dt>Holders</dt>
+                <dd>{compactNumber(featured.holders)}</dd>
+              </div>
+            </dl>
+          </div>
         </article>
       </section>
 
