@@ -14,7 +14,7 @@
   --paper: #fffdf2;
   --rule: rgba(51, 35, 21, 0.2);
   --mori: "PP Mori", "Mori", var(--font-mori-fallback), sans-serif;
-  --dragon: "Dragon", var(--font-dragon-fallback), cursive;
+  --dragon: var(--font-dragon), "Dragon", system-ui, sans-serif;
 }
 
 * {

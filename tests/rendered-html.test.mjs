@@ -34,5 +34,7 @@ test("server-renders the laypipe product shell", async () => {
   assert.match(html, /Launch preview/i);
   assert.match(html, /Contracts pending audit/i);
   assert.match(html, /0x5Cb6F181081301b44905F3ae15419112ecaBd8A6/i);
+  assert.match(html, /Dragon-Regular[^"']*\.woff2/i);
+  assert.match(html, /--font-dragon/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
