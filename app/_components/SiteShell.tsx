@@ -132,10 +132,10 @@ export function SiteShell({ children }: { children: ReactNode }) {
         <div className="header-main">
           <Link className="brand-lockup" href="/" aria-label="laypipe.fun home">
             <Image
-              src="/brand/pipedog-cutout.png"
+              src="/brand/pipedog-pipe-mark.png"
               alt=""
-              width={386}
-              height={351}
+              width={512}
+              height={512}
               priority
               unoptimized
             />
@@ -281,10 +281,10 @@ export function SiteShell({ children }: { children: ReactNode }) {
       <footer className="app-footer">
         <div className="footer-brand">
           <Image
-            src="/brand/pipedog-cutout.png"
+            src="/brand/pipedog-pipe-mark.png"
             alt=""
-            width={386}
-            height={351}
+            width={512}
+            height={512}
             unoptimized
           />
           <div>

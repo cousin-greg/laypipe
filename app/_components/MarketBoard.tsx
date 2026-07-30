@@ -336,33 +336,14 @@ export function MarketBoard() {
         </div>
         <div
           className="board-intro-art"
-          aria-label="The original PIPEDOG entering a green pipe connected to a burn furnace"
+          aria-label="PIPEDOG seated inside a green pipe connected to a burn furnace"
         >
           <Image
-            className="board-intro-dog"
-            src="/brand/pipedog-cutout.png"
-            alt="The original PIPEDOG detective"
-            width={386}
-            height={351}
-            priority
-            unoptimized
-          />
-          <Image
-            className="board-intro-machine"
-            src="/brand/pipe-furnace.png"
-            alt=""
-            width={1536}
-            height={1024}
-            priority
-            unoptimized
-          />
-          <Image
-            className="board-intro-machine board-intro-machine-front"
-            src="/brand/pipe-furnace.png"
-            alt=""
-            width={1536}
-            height={1024}
-            aria-hidden="true"
+            className="board-intro-scene"
+            src="/brand/pipedog-furnace.png"
+            alt="PIPEDOG sitting fully inside a green pipe connected to a lit furnace"
+            width={1538}
+            height={1023}
             priority
             unoptimized
           />

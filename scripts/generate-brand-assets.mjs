@@ -7,6 +7,11 @@ import sharp from "sharp";
 const root = process.cwd();
 const publicDir = path.join(root, "public");
 const brandDir = path.join(publicDir, "brand");
+const pipedogInPipePath = path.join(brandDir, "pipedog-in-pipe.png");
+const machinePath = path.join(brandDir, "pipe-furnace.png");
+const heroPath = path.join(brandDir, "pipedog-furnace.png");
+const markPath = path.join(brandDir, "pipedog-pipe-mark.png");
+const faviconPath = path.join(brandDir, "favicon.png");
 const chromeCandidates = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -67,10 +72,74 @@ async function capture(browser, html, width, height, outputPath, name) {
   }
 }
 
-const [browser, dog, machine, mori, dragon] = await Promise.all([
+async function generatePipedogPipeAssets() {
+  const machineMetadata = await sharp(machinePath).metadata();
+  if (!machineMetadata.width || !machineMetadata.height) {
+    throw new Error("Unable to read the pipe-furnace dimensions.");
+  }
+
+  const pipeOverlay = await sharp(pipedogInPipePath)
+    .resize(890, 890, { fit: "fill" })
+    .png()
+    .toBuffer();
+  const machineCut = 640;
+  const furnaceAndPipe = await sharp(machinePath)
+    .extract({
+      left: machineCut,
+      top: 0,
+      width: machineMetadata.width - machineCut,
+      height: machineMetadata.height,
+    })
+    .png()
+    .toBuffer();
+
+  await sharp({
+    create: {
+      width: machineMetadata.width,
+      height: machineMetadata.height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([
+      { input: furnaceAndPipe, left: machineCut, top: 0 },
+      { input: pipeOverlay, left: -70, top: 170 },
+    ])
+    .png({ compressionLevel: 9 })
+    .toFile(heroPath);
+
+  const compactMark = await sharp(pipedogInPipePath)
+    .extract({ left: 250, top: 140, width: 720, height: 570 })
+    .resize(470, 470, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toBuffer();
+
+  await sharp({
+    create: {
+      width: 512,
+      height: 512,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: compactMark, left: 21, top: 21 }])
+    .png({ compressionLevel: 9 })
+    .toFile(markPath);
+
+  await sharp(markPath)
+    .resize(512, 512, { fit: "contain" })
+    .png({ compressionLevel: 9 })
+    .toFile(faviconPath);
+}
+
+await generatePipedogPipeAssets();
+
+const [browser, hero, mori, dragon] = await Promise.all([
   findBrowser(),
-  dataUrl(path.join(brandDir, "pipedog-cutout.png"), "image/png"),
-  dataUrl(path.join(brandDir, "pipe-furnace.png"), "image/png"),
+  dataUrl(heroPath, "image/png"),
   dataUrl(path.join(root, "app", "fonts", "PPMori-Bold.woff2"), "font/woff2"),
   dataUrl(path.join(root, "app", "fonts", "Dragon-Black.woff2"), "font/woff2"),
 ]);
@@ -159,16 +228,7 @@ const openGraphHtml = `<!doctype html>
         text-transform: uppercase;
         transform: rotate(-1deg);
       }
-      .dog {
-        position: absolute;
-        z-index: 2;
-        left: 550px;
-        bottom: 215px;
-        width: 260px;
-        height: auto;
-        filter: drop-shadow(0 12px 10px rgba(34, 42, 26, 0.22));
-      }
-      .machine {
+      .hero-art {
         position: absolute;
         z-index: 3;
         right: -38px;
@@ -201,90 +261,14 @@ const openGraphHtml = `<!doctype html>
         <p class="tagline">Launch and trade in PIPEDOG.</p>
         <div class="route">Protocol lane: 25% to 0xdead</div>
       </section>
-      <img class="dog" src="${dog}" alt="" />
-      <img class="machine" src="${machine}" alt="" />
+      <img class="hero-art" src="${hero}" alt="" />
       <div class="burn">Fees to the furnace</div>
     </main>
   </body>
 </html>`;
 
-const iconHtml = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      ${sharedStyles}
-      body {
-        position: relative;
-        background:
-          radial-gradient(circle at 72% 20%, #ffd24d, transparent 34%),
-          #fff4bb;
-      }
-      .frame {
-        position: absolute;
-        inset: 18px;
-        overflow: hidden;
-        border: 18px solid #172016;
-        border-radius: 104px;
-        background: linear-gradient(180deg, #fff9dc 0 72%, #c7ec82 72%);
-      }
-      .dog {
-        position: absolute;
-        z-index: 1;
-        top: 58px;
-        left: 78px;
-        width: 320px;
-        height: auto;
-        filter: drop-shadow(0 12px 10px rgba(34, 42, 26, 0.2));
-      }
-      .pipe-body {
-        position: absolute;
-        z-index: 2;
-        right: 80px;
-        bottom: -80px;
-        left: 80px;
-        height: 236px;
-        border: 14px solid #172016;
-        background: linear-gradient(90deg, #1f9e2a, #48d448 40%, #159722);
-      }
-      .pipe-rim {
-        position: absolute;
-        z-index: 3;
-        right: 54px;
-        bottom: 132px;
-        left: 54px;
-        height: 96px;
-        border: 14px solid #172016;
-        border-radius: 50%;
-        background: transparent;
-        box-shadow:
-          inset 0 0 0 13px #32c93b,
-          inset 0 11px 0 #6aec60;
-      }
-      .pipe-hole {
-        position: absolute;
-        z-index: 0;
-        right: 84px;
-        bottom: 154px;
-        left: 84px;
-        height: 54px;
-        border: 9px solid #172016;
-        border-radius: 50%;
-        background: #073f1c;
-      }
-    </style>
-  </head>
-  <body>
-    <main class="frame">
-      <div class="pipe-hole"></div>
-      <img class="dog" src="${dog}" alt="" />
-      <div class="pipe-body"></div>
-      <div class="pipe-rim"></div>
-    </main>
-  </body>
-</html>`;
-
 await capture(browser, openGraphHtml, 1200, 630, path.join(publicDir, "og.png"), "laypipe-og");
-await capture(browser, iconHtml, 512, 512, path.join(brandDir, "favicon.png"), "laypipe-icon");
 
-console.log("Generated public/og.png (1200x630) and public/brand/favicon.png (512x512).");
+console.log(
+  "Generated PIPEDOG pipe mark, favicon, furnace composite, and public/og.png.",
+);

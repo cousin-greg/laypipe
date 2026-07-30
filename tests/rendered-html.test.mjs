@@ -88,7 +88,7 @@ async function expectPage(path, patterns) {
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
   assert.match(html, /Demo feed/i);
-  assert.match(html, /pipedog-cutout\.png/i);
+  assert.match(html, /pipedog-pipe-mark\.png/i);
   assert.match(html, /Dragon[_-]Regular[^"']*\.woff2/i);
   assert.match(html, /PPMori[_-]Regular[^"']*\.woff2/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
