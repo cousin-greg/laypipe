@@ -172,7 +172,7 @@ export default function LaunchForm() {
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [description, setDescription] = useState("");
-  const [mode, setMode] = useState<LaunchFeeMode>("self-burn");
+  const [mode, setMode] = useState<LaunchFeeMode>("creator");
   const [firstBuy, setFirstBuy] = useState("0");
   const [firstBuyMinOut, setFirstBuyMinOut] = useState("");
   const [website, setWebsite] = useState("");
@@ -764,12 +764,14 @@ export default function LaunchForm() {
                 <button
                   type="button"
                   aria-pressed={mode === "self-burn"}
+                  aria-describedby="self-burn-disabled-reason"
+                  disabled
                   onClick={() => edit(setMode, "self-burn")}
                 >
                   <i aria-hidden="true">↓</i>
                   <strong>Self-burn</strong>
-                  <span>
-                    0.7% uses PIPEDOG to buy and permanently burn your own coin.
+                  <span id="self-burn-disabled-reason">
+                    Disabled until permissionless buys have audited price protection.
                   </span>
                 </button>
               </div>

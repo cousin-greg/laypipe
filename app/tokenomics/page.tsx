@@ -43,7 +43,7 @@ export default function TokenomicsPage() {
             </p>
             <div className="branch-choice">
               <span>Creator fees</span>
-              <span>Self-burn</span>
+              <span>Self-burn (disabled)</span>
             </div>
           </article>
           <article className="protocol-branch">
@@ -62,6 +62,18 @@ export default function TokenomicsPage() {
           </article>
         </div>
       </section>
+
+      <aside className="readiness-banner">
+        <span>Safety gate</span>
+        <div>
+          <strong>Creator-fee launches are the only selectable mode.</strong>
+          <p>
+            The self-burn contract path is implemented but its launch config
+            remains disabled until permissionless buys have independently
+            audited, attacker-independent price protection.
+          </p>
+        </div>
+      </aside>
 
       <section className="tokenomics-notes">
         <article>

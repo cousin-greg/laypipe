@@ -330,7 +330,7 @@ contract DeployLaypipeBaseSepolia is Script {
             baseFeeRate: 10_000,
             launchFeeRate: 10_000,
             launchFeeDecay: 0,
-            enabled: true,
+            enabled: !selfBurn,
             selfBurn: selfBurn
         });
     }
@@ -348,6 +348,10 @@ contract DeployLaypipeBaseSepolia is Script {
             LaypipeSwapRouter(deployed.swapRouter);
         PipedogRevenueRouter revenueRouter =
             PipedogRevenueRouter(deployed.revenueRouter);
+        LaypipeFactory.LaunchConfig memory standardConfig =
+            factory.getLaunchConfig(0);
+        LaypipeFactory.LaunchConfig memory selfBurnConfig =
+            factory.getLaunchConfig(1);
 
         if (
             address(factory.poolManager())
@@ -363,6 +367,9 @@ contract DeployLaypipeBaseSepolia is Script {
                 || factory.treasury() != deployed.revenueRouter
                 || factory.launchEnabled()
                 || factory.dividendLaunchEnabled()
+                || factory.launchConfigCount() != 2
+                || !standardConfig.enabled || standardConfig.selfBurn
+                || selfBurnConfig.enabled || !selfBurnConfig.selfBurn
                 || factory.pendingOwner() != inputs.finalOwner
                 || hook.factory() != deployed.factoryProxy
                 || address(hook.poolManager())
@@ -397,6 +404,7 @@ contract DeployLaypipeBaseSepolia is Script {
         console2.log(
             "LayPipe Base Sepolia TEST-ONLY stack wired; launch DISABLED"
         );
+        console2.log("standard config staged; self-burn config DISABLED");
         console2.log("mock tPIPEDOG", deployed.mockPipedog);
         console2.log(
             "factory implementation", deployed.factoryImplementation

@@ -8,12 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { MarketDataMode } from "@/lib/server/market/mode";
-import {
-  type BoardToken,
-  fixtureBoardSource,
-  selectMarketAdapter,
-} from "../_data/adapter";
+import { type BoardToken } from "../_data/adapter";
 import { LaunchMode, protocolPreviewStats } from "../_data/market";
 import {
   compactMoney,
@@ -22,6 +17,7 @@ import {
   formatMoney,
 } from "./format";
 import { Sparkline } from "./Sparkline";
+import { useMarketData } from "./MarketDataProvider";
 
 type FeatureTab = "hot" | "largest" | "newest" | "mover";
 type SortMode = "hot" | "market-cap" | "newest" | "volume" | "gainers";
@@ -169,18 +165,19 @@ function TokenCard({ token }: { token: BoardToken }) {
   );
 }
 
-export function MarketBoard({ marketMode }: { marketMode: MarketDataMode }) {
-  const adapter = useMemo(() => selectMarketAdapter(marketMode), [marketMode]);
-  const initialSource = marketMode === "fixture" ? fixtureBoardSource : null;
+export function MarketBoard() {
+  const {
+    hasMore,
+    lastUpdated,
+    loadMore,
+    loadMoreError,
+    loadingMore,
+    marketMode,
+    refreshState,
+    tokens,
+  } = useMarketData();
   const [featureTab, setFeatureTab] = useState<FeatureTab>("hot");
   const [featurePaused, setFeaturePaused] = useState(false);
-  const [tokens, setTokens] = useState<BoardToken[]>(initialSource?.tokens ?? []);
-  const [refreshState, setRefreshState] = useState<
-    "ready" | "refreshing" | "error"
-  >(marketMode === "fixture" ? "ready" : "refreshing");
-  const [lastUpdated, setLastUpdated] = useState<string | null>(
-    initialSource?.updatedAt ?? null,
-  );
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("hot");
   const [mode, setMode] = useState<"all" | LaunchMode>("all");
@@ -256,29 +253,6 @@ export function MarketBoard({ marketMode }: { marketMode: MarketDataMode }) {
 
     return () => window.clearInterval(interval);
   }, [featurePaused, visibleFeatureTabs]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const refresh = async () => {
-      setRefreshState("refreshing");
-      try {
-        const result = await adapter.listTokens(controller.signal);
-        setTokens(result.tokens);
-        setLastUpdated(result.updatedAt);
-        setRefreshState("ready");
-      } catch {
-        if (controller.signal.aborted) return;
-        setRefreshState("error");
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(refresh, 15_000);
-
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [adapter]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -865,6 +839,24 @@ export function MarketBoard({ marketMode }: { marketMode: MarketDataMode }) {
             </button>
           </nav>
         )}
+
+        {marketMode === "live" && (hasMore || loadMoreError) ? (
+          <div className="market-load-more" aria-live="polite">
+            {hasMore ? (
+              <button
+                className="button button-quiet"
+                type="button"
+                disabled={loadingMore || refreshState === "refreshing"}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore ? "Loading indexed launches…" : "Load more indexed launches"}
+              </button>
+            ) : null}
+            {loadMoreError ? (
+              <p>The next indexed page could not be loaded. Try again.</p>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     </main>
   );

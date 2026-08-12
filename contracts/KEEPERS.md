@@ -1,10 +1,11 @@
 # Permissionless keeper operations
 
-LayPipe has three independent permissionless maintenance paths:
+LayPipe has up to four independent permissionless maintenance paths:
 
-1. sweep v4 fee claims into real PIPEDOG;
-2. process the platform revenue lanes;
-3. execute bounded self-burns.
+1. sweep v4 fee claims into conserved creator/platform credits;
+2. route the hook's platform credit to the revenue router;
+3. process the platform revenue lanes; and
+4. execute bounded self-burns.
 
 A permissionless write is still a signed, gas-paying transaction. Only the
 revenue-lane and self-burn calls pay a PIPEDOG bounty. Hook fee sweeps do not.
@@ -12,8 +13,9 @@ revenue-lane and self-burn calls pay a PIPEDOG bounty. Hook fee sweeps do not.
 ## Sweep hook fees
 
 `PipedogHook.sweep(poolId)` redeems a pool's pending Uniswap v4 fee claims into
-PIPEDOG, credits the creator lane in `tab(poolId)`, and transfers the platform
-lane to the configured `PipedogRevenueRouter`.
+PIPEDOG, credits the creator lane in `tab(poolId)`, and attempts an isolated
+exact transfer of the platform lane to the configured revenue router. A failed
+platform transfer is caught and credited to `platformTab()`.
 
 The helper at `script/SweepHookFees.s.sol` reads only public inputs. It never
 loads a private key, mnemonic, password, deployment key, or deployment `.env`.
@@ -48,7 +50,7 @@ forge script script/SweepHookFees.s.sol:SweepHookFees `
 The simulation prints pending PIPEDOG and creates no transaction when the
 amount is zero or below `MIN_PENDING_PIPEDOG_WEI`. The threshold covers total
 pending fees; only the configured platform share goes to the revenue router.
-Compare the PIPEDOG value of that share with native gas cost before
+Compare the PIPEDOG value of the maintenance action with native gas cost before
 broadcasting.
 
 Use a hardware wallet to broadcast:
@@ -74,10 +76,28 @@ After a successful sweep:
 - `FeesSwept` records the PIPEDOG amounts;
 - creator PIPEDOG remains in `tab(poolId)` until the current fee recipient
   calls `claim(poolId)`;
-- platform PIPEDOG is held by the revenue router as unallocated revenue.
+- platform PIPEDOG is either transferred to the revenue router or, if that
+  exact transfer failed, remains conserved in the hook's `platformTab()`.
 
-There is no deferred platform balance or retry path. Platform transfer failure
-reverts the entire sweep.
+`collectPlatform()` is a separate permissionless exact-transfer call that moves
+the complete deferred platform tab to the current revenue-router destination.
+It pays no bounty. If that retry fails, only the retry reverts: the tab stays
+exactly conserved and creator claims remain live. A treasury rotation sends the
+existing tab to the new destination; no per-pool platform credit is orphaned.
+
+Before processing revenue-router lanes, monitor and route the hook tab:
+
+```powershell
+cast call $env:LAYPIPE_HOOK "platformTab()(uint256)" `
+  --rpc-url $env:ROBINHOOD_RPC_URL
+
+cast call $env:LAYPIPE_HOOK "collectPlatform()(uint256)" `
+  --from $keeper --rpc-url $env:ROBINHOOD_RPC_URL
+```
+
+Production automation should submit `collectPlatform()` as its own transaction
+and verify `PlatformPayoutCollected`, the tab decrease, and the revenue router's
+matching balance increase before moving on to lane processing.
 
 ## Process platform revenue
 

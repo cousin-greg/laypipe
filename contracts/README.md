@@ -61,8 +61,10 @@ behavior.
 
 ## Platform revenue policy
 
-Launch fees and the platform share of trading fees arrive at
-`PipedogRevenueRouter` directly as PIPEDOG. There is no circular
+Launch fees arrive at `PipedogRevenueRouter` directly as PIPEDOG. The hook
+normally sends the platform share of trading fees there in the same sweep. If
+that exact transfer fails, the hook conserves it in `platformTab()` for an
+independent permissionless `collectPlatform()` retry. There is no circular
 WETH/PIPEDOG buyback.
 
 Every newly received amount is assigned:
@@ -84,9 +86,12 @@ change ERC-20 `totalSupply`. Code, events, and product copy should call this
 `sequester`, not a supply burn.
 
 The router owner can pause the two policy lanes, rotate destinations, change
-per-call caps, and migrate all router-held PIPEDOG to a successor. The
-25/25/50 split is therefore an administrator-trusted operating policy, not an
-irrevocable custody guarantee.
+per-call caps, and, while paused, migrate all router-held PIPEDOG to a
+successor contract that reports the same canonical token. This compatibility
+check prevents an accidental EOA or wrong-token destination; it is not a
+timelock and cannot constrain a malicious owner. The 25/25/50 split is
+therefore an administrator-trusted operating policy, not an irrevocable
+custody guarantee.
 
 At the active 1% trading fee and 70/30 creator/platform split, the effective
 gross trade flow is:
@@ -118,7 +123,8 @@ launched tokens per PIPEDOG = 1.0001 ^ startTick
 implied FDV in PIPEDOG      = launched token supply / tokens per PIPEDOG
 ```
 
-Generate an aligned candidate tick:
+Generate an aligned candidate tick with the same integer `TickMath` ratios used
+by the contracts:
 
 ```powershell
 node scripts/calibrate-curve.mjs `
@@ -130,11 +136,28 @@ node scripts/calibrate-curve.mjs `
 The same inputs may be provided with `LAYPIPE_SUPPLY_TOKENS`,
 `LAYPIPE_TARGET_FDV_PIPEDOG`, and `LAYPIPE_TICK_SPACING`.
 
+Calibration is not the release gate. Put the exact candidate, global launch
+fee, current hook fee assumptions, at least three increasing representative buy
+sizes, and explicit FDV/depth/dust/output/impact/round-trip bounds in a review
+JSON. Then run:
+
+```powershell
+node scripts/simulate-curve.mjs --review .\curve-review.json
+```
+
+Draft reviews intentionally fail while printing a source-pinned SHA-256 config
+hash. After written economic review, copy that exact hash into the approval
+object and rerun. The command passes only when the hash and every approved bound
+match. It reports exact base units for executable buy depth, fee deductions,
+token output, price impact, an immediate sell-side reversal, seed dust, and the
+curve-exhaustion/partial-fill boundary. See
+[CURVE_REVIEW.md](./CURVE_REVIEW.md) for the strict schema and limitations.
+
 Tick `204200` is a legacy ETH-oriented value and an unsafe PIPEDOG example. At
 a 1,000,000,000-token supply it implies an initial FDV of only about
-**1.356 PIPEDOG**. Do not reuse it silently. The helper is a deterministic
-configuration aid, not an oracle, liquidity simulation, or economic
-endorsement.
+**1.356 PIPEDOG**. Do not reuse it silently. Neither helper is an oracle,
+market-quality forecast, MEV model, audit, economic endorsement, or deployment
+authorization. No production curve values are selected in this repository.
 
 ## Canonical contracts
 
@@ -212,12 +235,40 @@ guards, and self-burn guards use ArbSys precompile `0x64` and
 unavailable. Non-Robinhood rehearsal networks use their ordinary EVM
 `block.number` and remain isolated by chain-specific deployment preflights.
 
+### Robinhood transient-storage gate
+
+`LaypipeFactory` uses OpenZeppelin's transient reentrancy guard, so a Foundry
+simulation compiled for Cancun is not sufficient evidence that the target
+runtime executes EIP-1153. Run the dependency-free, read-only Node gate against
+the configured Robinhood RPC:
+
+```powershell
+node scripts/check-robinhood-eip1153.mjs
+```
+
+The gate requires chain ID `4663`, captures the latest block number and hash,
+and binds both `eth_call` contract-creation simulations to that exact canonical
+block hash using EIP-1898. Initcode
+`0x602a60005d60005c60005260206000f3` stores `0x2a` in transient slot zero,
+loads it, and must return the 32-byte word `0x2a`. A separate `0xfe` initcode
+control must fail with a JSON-RPC invalid-opcode error. This proves opcode
+semantics without signing, deploying, broadcasting, or changing chain state.
+
+Robinhood mainnet passed this gate on 2026-08-12 UTC at block `34176993`, hash
+`0xf8cbda286e1e06fa8058360d47fd71df6678a99f6a76251a8b58486e2bdb3917`.
+That observation is evidence for that runtime, not a permanent assumption;
+rerun the gate immediately before every audit handoff and release candidate.
+
 ## Permissionless maintenance
 
 Trading fees remain as Uniswap v4 claims until somebody calls
 `PipedogHook.sweep(poolId)`. Sweeping redeems PIPEDOG, credits the creator tab,
-and sends the platform share to the revenue router. The fee sweep itself pays
-no bounty.
+and attempts an isolated exact platform route. A failed platform route is
+caught and credited to the global platform tab instead of reverting the
+sweep. Creator `claim(poolId)` and permissionless `collectPlatform()` therefore
+remain independent: platform failure cannot roll back or freeze a creator
+payout, and treasury rotation does not orphan deferred platform credit. None
+of these maintenance calls pays a bounty.
 
 The keyless `script/SweepHookFees.s.sol` helper reads only public inputs and
 skips pools below an optional PIPEDOG threshold. Revenue routing and
@@ -248,6 +299,16 @@ node scripts\generate-abis.mjs
 git diff --exit-code -- abi
 ```
 
+For a production candidate, the exact approved economics artifact is an
+additional mandatory gate:
+
+```powershell
+node scripts\simulate-curve.mjs --review <approved-curve-review.json>
+```
+
+The automated curve fixtures test the model; they do not substitute for this
+release-specific review.
+
 Committed frontend/indexer ABIs live in `abi/`. The generator exports only the
 canonical protocol surface and removes any stale dividend ABI.
 
@@ -267,7 +328,8 @@ enabling browser mutations, record an audited deployment manifest containing:
 - token implementation, hook, self-burner, swap router, and revenue-router
   addresses and runtime codehashes;
 - final owner, treasury, operations wallet, config IDs, and exact config
-  values; and
+  values;
+- the passing curve-review config hash and retained simulation report; and
 - canonical PIPEDOG and PoolManager bindings.
 
 The factory implementation is stored at the standard EIP-1967 implementation
@@ -278,7 +340,11 @@ closed unless its address and codehash match the audited manifest. Checking
 only the proxy address, public getters, or `UPGRADE_INTERFACE_VERSION()` is
 not a version check: an upgraded implementation can preserve or spoof those
 surfaces. Any factory upgrade requires a new reviewed manifest, and launch
-mutations must remain disabled until the frontend and indexer accept it.
+mutations must remain disabled until the frontend and indexer accept it. The
+factory also rejects upgrades while its global launch gate is open. The UUPS
+test suite checks two-step ownership, pending/old-owner rejection, EIP-1967
+slot identity, proxy/runtime codehash separation, invalid implementations,
+initializer closure, and storage preservation across an appended-state mock.
 
 ## No-broadcast deployment rehearsal
 
@@ -301,6 +367,8 @@ commit, or pass it in the process list.
 Run the read-only chain gate:
 
 ```powershell
+node scripts/check-robinhood-eip1153.mjs
+
 forge script script/PreflightRobinhood.s.sol:PreflightRobinhood `
   --rpc-url robinhood -vv
 ```
@@ -314,8 +382,10 @@ forge script script/DeployLaypipe.s.sol:DeployLaypipe `
 
 The script deploys and wires the PIPEDOG revenue router, UUPS factory proxy,
 token implementation, mined-address hook, self-burner, and swap router. It adds
-standard and self-burn configs, transfers ownership in two steps, prints the
-implied PIPEDOG FDV, and leaves launch disabled.
+an enabled standard config and a disabled self-burn config, transfers ownership
+in two steps, prints the implied PIPEDOG FDV, and leaves global launch disabled.
+Do not enable the self-burn config until its permissionless execution has an
+independently audited, attacker-independent price-protection design.
 
 The final owner must accept ownership on the factory, hook, and revenue router
 before any funding or enablement. Do not add `--broadcast` until an independent
@@ -362,8 +432,9 @@ forge script script/DeployLaypipeBaseSepolia.s.sol:DeployLaypipeBaseSepolia `
 The rehearsal mines a lower-half mock quote address so launched-token vanity
 mining can reliably preserve quote-token `currency0` ordering. It deploys the
 mock quote, revenue router, UUPS factory proxy, token implementation,
-flag-mined hook, self-burner, swap router, and both launch configs; transfers
-ownership in two steps; and leaves launches disabled.
+flag-mined hook, self-burner, swap router, an enabled standard config, and a
+disabled self-burn config; transfers ownership in two steps; and leaves global
+launches disabled.
 
 A dry run on August 11, 2026 estimated `18,870,783` gas and
 `0.000207578613 ETH` at that block's gas price. That estimate will move. Fund

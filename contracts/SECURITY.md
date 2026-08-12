@@ -16,9 +16,17 @@ For equal-decimal PIPEDOG/token pools, tick `204200` implies roughly
 is an initial FDV of about 1.356 PIPEDOG. It is retained only as a regression
 warning and must not be treated as a default.
 
-`scripts/calibrate-curve.mjs` aligns a target to tick spacing, but it does not
-model executable depth, price impact, fee effects, MEV, demand, or market
-quality. A separate economic simulation and review are required.
+`scripts/calibrate-curve.mjs` aligns a target using the contract's integer tick
+math. `scripts/simulate-curve.mjs` then fails closed unless an exact,
+source-pinned review hash and its explicit FDV, depth, dust, output, impact, and
+round-trip bounds all pass. It models current one-range integer swap arithmetic,
+hook fee effects, an immediate sell reversal, and curve exhaustion. The strict
+review procedure is documented in [CURVE_REVIEW.md](./CURVE_REVIEW.md).
+
+That gate still does not model MEV, demand, alternate venues, intervening
+trades, PIPEDOG's external value, or market quality. In particular, it does not
+make the permissionless self-burn market order safe. A passing report is not an
+economic endorsement, security audit, or deployment authorization.
 
 ## Permanent one-sided pools
 
@@ -78,6 +86,22 @@ including Base Sepolia, and is guarded by separate deployment preflights. The
 quarantined dividend artifact still contains its historical clock assumptions;
 it is not deployed or part of the canonical ABI surface.
 
+## Robinhood transient-storage runtime
+
+`LaypipeFactory` uses OpenZeppelin `ReentrancyGuardTransient`, which executes
+EIP-1153 `TSTORE` and `TLOAD`. Support is proven on Robinhood mainnet at block
+`34176993` (hash
+`0xf8cbda286e1e06fa8058360d47fd71df6678a99f6a76251a8b58486e2bdb3917`) by
+the read-only `scripts/check-robinhood-eip1153.mjs` gate. The gate validates
+chain ID `4663`, pins both semantic and invalid-opcode control calls to the same
+canonical block hash, and fails closed on any unexpected result. It performs
+no signing, deployment, broadcast, or state mutation.
+
+This is a release-time runtime invariant, not a one-time compatibility claim.
+Run the gate against the intended production RPC immediately before every
+audit handoff, dry run, and release candidate. A failure blocks deployment
+until the chain runtime or the reviewed reentrancy design is reconciled.
+
 ## Token ordering and vanity mining
 
 PIPEDOG must be `currency0`. A valid launched token address must both end in
@@ -135,13 +159,18 @@ from their respective processed lanes. Self-burns pay their bounty from the
 bounded PIPEDOG fuel chunk. Caps, once-per-block gates, and bounties are
 deployment parameters and need operational review.
 
-Hook sweep and creator claim transfers are atomic exact PIPEDOG transfers.
-There is no deferred platform payout tab. A broken or incompatible treasury
-destination causes the sweep to revert rather than parking the platform share.
+Hook sweep credits the creator liability after redeeming PoolManager claims and
+attempts the platform route through an isolated exact-transfer self-call. A
+failed platform transfer rolls back only that isolated call and is credited to
+`platformTab`; it cannot roll back creator accounting or freeze creator payout.
+Permissionless `collectPlatform()` retries the exact deferred amount. Rotating
+the treasury routes the existing platform tab to the new destination. The hook
+has no generic recovery or migration path that can drain either liability.
 
 ## Administrative trust
 
-- **Factory owner:** may upgrade the launcher for future calls, change launch
+- **Factory owner:** may upgrade the launcher for future calls only while the
+  global launch gate is closed, change launch
   fee and config enablement, rotate compatible infrastructure while launches
   are paused, and recover assets held by the factory. Factory-held PIPEDOG goes
   to the protocol treasury; unrelated ERC-20s and force-sent native currency
@@ -152,15 +181,19 @@ destination causes the sweep to revert rather than parking the platform share.
   creator-controlled.
 - **Revenue-router owner:** may pause the sequestration and treasury lanes,
   rotate treasury/operations destinations, change their per-call caps, recover
-  unrelated assets, and migrate all router-held PIPEDOG to a successor.
+  unrelated assets, and, while paused, migrate all router-held PIPEDOG to a
+  successor contract that reports the same PIPEDOG token.
 - **Self-burner and swap router:** have no owner or withdrawal path for
   operational assets. Their protocol bindings and bounty/cap parameters are
   immutable.
 - **Launched token:** is an ownerless clone after initialization.
 
 The 25/25/50 constants govern normal revenue allocation, but owner migration
-can move all remaining PIPEDOG to a successor. Treat the split as a trusted
-operating policy, not an irrevocable custody guarantee.
+can move all remaining PIPEDOG to a compatible successor. The pause and token
+compatibility checks prevent common operational mistakes, not malicious
+governance: there is no migration delay and a hostile compatible successor can
+still bypass the policy. Treat the split as a trusted operating policy, not an
+irrevocable custody guarantee.
 
 Hook rotation automatically pauses launches and clears the old
 hook-bound self-burner. Treasury changes require launch to be paused and the
@@ -197,8 +230,8 @@ using the Robinhood ArbSys L2 block clock for checkpoints and `launchBlock`.
 LayPipe implementations.
 
 Run the reference fetch, source-fidelity check, full build/test suite, live
-preflight, ABI generation, and no-broadcast deployment simulation immediately
-before an audit handoff.
+preflight, EIP-1153 runtime gate, ABI generation, and no-broadcast deployment
+simulation immediately before an audit handoff.
 
 The Robinhood preflight pins canonical PIPEDOG, Uniswap v4 PoolManager, and
 the deterministic CREATE2 deployer runtime codehashes, exercises the

@@ -246,6 +246,7 @@ function standardConfig(options: {
   tickSpacing: number;
   startTick: number;
   selfBurn: boolean;
+  enabled: boolean;
 }): AuditedLaunchConfig {
   return {
     id: options.id,
@@ -257,7 +258,7 @@ function standardConfig(options: {
       baseFeeRate: FIXED_TRADING_FEE_RATE,
       launchFeeRate: FIXED_TRADING_FEE_RATE,
       launchFeeDecay: 0,
-      enabled: true,
+      enabled: options.enabled,
       selfBurn: options.selfBurn,
     },
   };
@@ -433,6 +434,7 @@ export function parseRobinhoodProductionManifest(
         tickSpacing,
         startTick,
         selfBurn: false,
+        enabled: true,
       }),
       selfBurn: standardConfig({
         id: selfBurnConfigId,
@@ -440,6 +442,7 @@ export function parseRobinhoodProductionManifest(
         tickSpacing,
         startTick,
         selfBurn: true,
+        enabled: false,
       }),
     },
     routing: {
@@ -642,13 +645,10 @@ async function assertRuntimeIdentity(
   }
 }
 
-/**
- * Verifies one consistent chain snapshot. Call this again immediately before
- * every wallet mutation; callers must not cache a successful result.
- */
-export async function assertAuditedDeployment(
+async function assertAuditedDeploymentSnapshot(
   provider: Eip1193Provider,
   manifest: AuditedDeploymentManifest,
+  allowLaunchPausedForReadOnly: boolean,
 ) {
   const chainId = await provider.request<unknown>({ method: "eth_chainId" });
   if (
@@ -832,7 +832,11 @@ export async function assertAuditedDeployment(
   );
 
   assertUintMatch(launchFee, manifest.launch.launchFee, "Factory launch fee");
-  if (launchEnabled !== manifest.launch.launchEnabled) {
+  const acceptedReadOnlyPause =
+    allowLaunchPausedForReadOnly &&
+    manifest.launch.launchEnabled &&
+    !launchEnabled;
+  if (launchEnabled !== manifest.launch.launchEnabled && !acceptedReadOnlyPause) {
     integrityFailure("Factory launch-enabled state does not match the audited manifest.");
   }
   try {
@@ -856,4 +860,30 @@ export async function assertAuditedDeployment(
   }
 
   return { blockNumber: BigInt(blockTag), blockTag };
+}
+
+/**
+ * Verifies one consistent active deployment snapshot. Call this again
+ * immediately before every wallet mutation; callers must not cache a
+ * successful result.
+ */
+export function assertAuditedDeployment(
+  provider: Eip1193Provider,
+  manifest: AuditedDeploymentManifest,
+) {
+  return assertAuditedDeploymentSnapshot(provider, manifest, false);
+}
+
+/**
+ * Read-only indexer preflight. It accepts the audited production deployment
+ * while its global launch switch is deliberately paused so indexing and
+ * reconciliation can start before the Safe enables public launches. Every
+ * other manifest, code, binding, governance, routing, and config check stays
+ * identical to the wallet preflight.
+ */
+export function assertAuditedIndexerDeployment(
+  provider: Eip1193Provider,
+  manifest: AuditedDeploymentManifest,
+) {
+  return assertAuditedDeploymentSnapshot(provider, manifest, true);
 }

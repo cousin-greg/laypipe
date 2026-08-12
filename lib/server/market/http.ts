@@ -8,6 +8,7 @@ import {
   listLiveTokens,
   parseLiveTokenSlug,
   parseTokenListRequest,
+  readMarketCursorSecret,
 } from "./read-model";
 import { readMarketDataMode, type MarketDataMode } from "./mode";
 
@@ -17,6 +18,7 @@ export const NO_STORE_CACHE_CONTROL = "no-store";
 export interface MarketHttpDependencies {
   database?: () => Promise<DbClient>;
   marketMode?: () => MarketDataMode;
+  marketCursorSecret?: () => string;
 }
 
 function json(body: unknown, status: number, cacheControl: string) {
@@ -72,8 +74,10 @@ export async function handleTokenListRequest(
   if (gated) return gated;
 
   let options;
+  let cursorSecret: string;
   try {
-    options = parseTokenListRequest(request.url);
+    cursorSecret = (dependencies.marketCursorSecret ?? readMarketCursorSecret)();
+    options = parseTokenListRequest(request.url, cursorSecret);
   } catch (error) {
     if (error instanceof MarketInputError) {
       return errorResponse("invalid_request", error.message, 400);
@@ -83,7 +87,7 @@ export async function handleTokenListRequest(
 
   try {
     const database = await (dependencies.database ?? getDatabase)();
-    const payload = await listLiveTokens(database, options);
+    const payload = await listLiveTokens(database, options, cursorSecret);
     return json(payload, 200, MARKET_CACHE_CONTROL);
   } catch {
     return unavailableResponse();
@@ -99,6 +103,7 @@ export async function handleTokenDetailRequest(
 
   let normalizedSlug: string;
   try {
+    (dependencies.marketCursorSecret ?? readMarketCursorSecret)();
     normalizedSlug = parseLiveTokenSlug(slug);
   } catch (error) {
     if (error instanceof MarketInputError) {
@@ -159,6 +164,7 @@ export async function handleMarketHealthRequest(
   }
 
   try {
+    (dependencies.marketCursorSecret ?? readMarketCursorSecret)();
     const database = await (dependencies.database ?? getDatabase)();
     const indexer = await getMarketHealth(database);
     if (!indexer) {

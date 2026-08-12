@@ -5,6 +5,11 @@ import type {
   PipedogPriceRatio,
 } from "@/lib/market/live";
 import type { MarketDataMode } from "@/lib/server/market/mode";
+import {
+  buildTokenListUrl,
+  isMarketPageCursor,
+  MARKET_PAGE_LIMIT,
+} from "@/lib/market/pagination";
 import { LaunchMode, LaunchToken, marketSource } from "./market";
 
 export type ProtocolConfig = {
@@ -83,11 +88,18 @@ export type BoardMarketSource = {
   label: string;
   tokens: BoardToken[];
   updatedAt: string | null;
+  nextCursor: string | null;
+};
+
+export type MarketListRequest = {
+  cursor?: string | null;
+  limit?: number;
+  signal?: AbortSignal;
 };
 
 export interface MarketDataAdapter {
   source: "fixture" | "live";
-  listTokens(signal?: AbortSignal): Promise<BoardMarketSource>;
+  listTokens(options?: MarketListRequest): Promise<BoardMarketSource>;
   getToken(slug: string, signal?: AbortSignal): Promise<BoardToken | null>;
 }
 
@@ -108,6 +120,7 @@ export const fixtureMarketAdapter: MarketDataAdapter = {
       ...fixtureBoardSource,
       tokens: [...fixtureBoardSource.tokens],
       updatedAt: new Date().toISOString(),
+      nextCursor: null,
     };
   },
   async getToken(slug) {
@@ -121,6 +134,7 @@ export const fixtureBoardSource: BoardMarketSource = {
   label: marketSource.label,
   tokens: marketSource.tokens.map(fixtureToken),
   updatedAt: marketSource.updatedAt,
+  nextCursor: null,
 };
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
@@ -216,7 +230,17 @@ export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
 
 function parseTokenList(payload: unknown): LiveTokenListResponse {
   const response = requireObject(payload, "Live market response");
-  if (response.source !== "live" || !Array.isArray(response.tokens)) {
+  const page = requireObject(response.page, "Live market page");
+  const nextCursor = page.nextCursor;
+  if (
+    response.source !== "live" ||
+    !Array.isArray(response.tokens) ||
+    typeof page.limit !== "number" ||
+    !Number.isSafeInteger(page.limit) ||
+    page.limit < 1 ||
+    page.limit > MARKET_PAGE_LIMIT ||
+    (nextCursor !== null && !isMarketPageCursor(nextCursor))
+  ) {
     throw new Error("Live market response is invalid.");
   }
   return {
@@ -237,9 +261,13 @@ function parseTokenDetail(payload: unknown): LiveTokenDetailResponse {
 export function createApiMarketAdapter(baseUrl = ""): MarketDataAdapter {
   return {
     source: "live",
-    async listTokens(signal) {
-      const response = await fetch(`${baseUrl}${laypipeApiRoutes.tokens}?limit=50`, {
-        signal,
+    async listTokens(options = {}) {
+      const endpoint = `${baseUrl}${laypipeApiRoutes.tokens}`;
+      const response = await fetch(buildTokenListUrl(endpoint, {
+        cursor: options.cursor,
+        limit: options.limit ?? MARKET_PAGE_LIMIT,
+      }), {
+        signal: options.signal,
         headers: { accept: "application/json" },
       });
 
@@ -253,6 +281,7 @@ export function createApiMarketAdapter(baseUrl = ""): MarketDataAdapter {
         label: "Indexed Robinhood Chain markets",
         tokens: payload.tokens.map(mapLiveTokenToBoardToken),
         updatedAt: payload.indexer?.updatedAt ?? null,
+        nextCursor: payload.page.nextCursor,
       };
     },
     async getToken(slug, signal) {

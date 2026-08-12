@@ -1348,6 +1348,21 @@ dd {
   font-weight: 700;
 }
 
+.market-load-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.market-load-more p {
+  margin: 0;
+  color: var(--negative);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .empty-state {
   display: flex;
   min-height: 420px;
@@ -1699,6 +1714,11 @@ dd {
   border-color: var(--border);
   background: color-mix(in srgb, var(--green) 14%, var(--surface));
   box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--green) 32%, transparent);
+}
+
+.mode-picker button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .mode-picker i {

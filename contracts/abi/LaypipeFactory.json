@@ -1620,6 +1620,11 @@
   },
   {
     "type": "error",
+    "name": "UpgradeRequiresLaunchPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ValueTooLarge",
     "inputs": []
   }

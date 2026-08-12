@@ -44,11 +44,14 @@ enabled until every required contract address is configured and verified.
   reference, so a searcher can manipulate the pool around the protocol-funded
   buy. Per-call caps limit loss but do not make execution safe. An audited
   TWAP/oracle or otherwise bounded execution design is required before this
-  mode can be enabled.
+  mode can be enabled. The production manifest pins this config as disabled,
+  and the launch form defaults to creator fees and does not offer self-burn.
 - No launch configuration is approved yet. Supply, aligned start tick,
   executable curve depth, price impact, caps, bounties, and launch fee require
-  PIPEDOG-denominated simulation and written sign-off. The historical tick
-  `204200` is explicitly not a production default.
+  PIPEDOG-denominated simulation and written sign-off. The strict
+  `contracts/scripts/simulate-curve.mjs` gate must pass with its exact
+  source-pinned approval hash and retained report. The historical tick `204200`
+  is explicitly not a production default.
 - Put factory ownership behind a Safe plus a reviewed timelock/guardian plan.
   Exact approvals reduce exposure, but an immediately upgradeable spender can
   still exploit the allowance window if its owner is compromised. The wallet
@@ -57,12 +60,17 @@ enabled until every required contract address is configured and verified.
 - Decide whether the revenue router's owner migration power is acceptable as
   disclosed policy or must be timelocked/limited before launch. The normal
   25/25/50 routing split is not irrevocable while that migration path exists.
-- Prove EIP-1153 transient-storage support on the exact Robinhood Chain
-  runtime before deployment. The factory currently uses transient reentrancy
-  protection, while a Cancun-configured Foundry simulation can mask a target
-  chain that does not execute `TLOAD`/`TSTORE`. Use a minimal on-chain probe
-  after audit authorization or replace it with reviewed upgrade-safe storage
-  protection and validate the storage layout.
+  Migration now requires the router to be paused and the successor to be a
+  contract reporting the same PIPEDOG token, but those operational checks are
+  not a delay and do not constrain a malicious owner.
+- Keep the EIP-1153 runtime gate green. Robinhood mainnet support was proved by
+  read-only `eth_call` at block `34176993` (hash
+  `0xf8cbda286e1e06fa8058360d47fd71df6678a99f6a76251a8b58486e2bdb3917`) on
+  2026-08-12 UTC. `contracts/scripts/check-robinhood-eip1153.mjs` confirms
+  chain `4663`, pins both calls to one canonical block hash, requires a
+  `TSTORE`/`TLOAD` round-trip to return `0x2a`, and requires an invalid-opcode
+  control to fail. Re-run it against the intended production RPC immediately
+  before audit and release; a future runtime change must fail closed.
 
 Copy `.env.example` to an ignored `.env.local` for local work. Put production
 values in Vercel's encrypted environment settings. Never place database,
@@ -109,8 +117,62 @@ Use `numeric(78,0)` for EVM integers and serialize them as decimal strings.
 Never coerce token amounts to JavaScript `number`.
 
 Public read routes use keyset pagination and short CDN caching. Health and
-mutation routes use `no-store`. Indexer work is bounded by block batch, guarded
-by `CRON_SECRET`, idempotent, and safe to retry.
+mutation routes use `no-store`. Keyset cursors are HMAC-authenticated with a
+domain-separated use of the server-only wallet challenge secret, so arbitrary
+client-generated cursor variants fail before Neon. Indexer work is bounded by
+block batch, guarded by `CRON_SECRET`, idempotent, and safe to retry.
+
+Before switching to `live`, stage Vercel WAF rules in log-only mode for GET
+traffic to `/api/tokens` and `/token/*`, initially at 120 requests per minute
+per IP. That is deliberately generous versus the board's four polls per minute.
+Review real traffic, verify Preview, and only then publish an enforcing 429
+rule. Application caching and signed cursors reduce spend; they do not replace
+an edge limit for arbitrary token-address probes.
+
+The implemented canonical worker is exposed at `/api/indexer/sync` (Vercel
+Cron or another scheduler with `Authorization: Bearer $CRON_SECRET`) and
+`/api/indexer/webhook` (Alchemy `X-Alchemy-Signature`). The webhook signature
+is HMAC-SHA256 over the exact raw body; parsed or re-serialized JSON is never
+used for authentication. A signed webhook is only a wake-up signal: the worker
+re-reads finalized blocks and logs from the configured HTTPS RPC and advances
+the same database cursor, so webhook retries and ordering cannot fork the read
+model.
+
+The signed envelope `type` is validated as bounded text but is intentionally
+not an ingestion allowlist: its event contents are ignored, and any request
+signed by that webhook's configured key has only one effect—wake the same
+bounded canonical RPC cursor.
+
+Cron and webhook wake-ups share a 60-second Upstash lease. Concurrent signed
+requests receive a successful HTTP 202 `busy` acknowledgement instead of a
+500/retry loop; the lease expires after a crash and uses compare-before-delete
+on release. The atomic Postgres cursor CAS remains the final guard against any
+overlap or stale retry.
+
+Keep `INDEXER_ENABLED=false` until the migration and Preview rehearsal are
+complete. The default `INDEXER_BATCH_SIZE=10` works with Alchemy's Robinhood
+free-tier `eth_getLogs` range. A wake-up processes at most
+`INDEXER_MAX_BATCHES_PER_RUN=25` windows (250 blocks) under the same pinned safe
+head and complete audited-manifest preflight, stopping when caught up or when
+the 45-second deadline needs release headroom. Every batch is also bounded by
+total logs, new launch metadata reads, watched pool/token filter chunks, reorg
+lookback, RPC response bytes, and a 45-second internal deadline. Exceeding a
+bound fails before cursor advancement. The default watch set supports 2,500 launches;
+larger sets require an explicit sharded-stream/filter design rather than an
+unbounded function invocation.
+
+The scheduler/webhook cadence and production RPC quota must sustain more blocks
+per minute than Robinhood produces. Hobby's daily cron is not a primary
+indexer. Alert on `bounded`/`deadline` responses, cursor lag, lease contention,
+and provider throttling; raise wake-up frequency before widening the free-tier
+10-block RPC ranges.
+
+Launches, canonical PoolManager swaps (including direct v4 swaps that bypass
+LayPipe's router), and launch-token transfers are decoded now. Hook fee,
+self-burn, revenue-router, and admin-event ingestion remains an explicit
+operational gap. Do not claim full indexing or reconciliation readiness until
+those decoders and their chain-vs-database checks are added. The repository
+does not create a Vercel schedule or activate an Alchemy webhook automatically.
 
 `LAYPIPE_MARKET_MODE=fixture` is the safe deployment default. `live` explicitly
 selects the Neon-backed API; an unavailable database or indexer returns an
@@ -160,7 +222,8 @@ apply user-selected slippage instead of asking users to guess a minimum.
    a pinned deployment block.
 3. Exercise image and metadata pinning with abuse protection enabled.
 4. Complete contract tests, source-fidelity checks, ABI generation, live
-   preflights, and a no-broadcast deployment simulation.
+   preflights, the EIP-1153 runtime gate, and a no-broadcast deployment
+   simulation.
 5. Complete an independent audit and resolve every finding.
 6. Fund the deployment address with testnet gas, broadcast Base Sepolia, and
    test launch, exact approval, buy, sell, fee sweep, self-burn, and revenue

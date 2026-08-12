@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { DbClient, DbRow } from "../db/neon";
 import {
   LAYPIPE_CHAIN_ID,
@@ -12,6 +13,7 @@ import { normalizeAddress, normalizeBytes32, normalizeUint256 } from "../indexer
 export const TOKEN_LIST_DEFAULT_LIMIT = 20;
 export const TOKEN_LIST_MAX_LIMIT = 50;
 const INDEXER_STREAM = "laypipe";
+const CURSOR_DOMAIN = "laypipe.market.cursor.v1";
 
 export class MarketInputError extends Error {}
 
@@ -21,7 +23,26 @@ interface CursorValue {
   tokenAddress: `0x${string}`;
 }
 
-export function parseTokenListRequest(requestUrl: string) {
+export function readMarketCursorSecret() {
+  const secret = process.env.WALLET_CHALLENGE_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("WALLET_CHALLENGE_SECRET is required for live market cursors.");
+  }
+  return secret;
+}
+
+function cursorSignature(payload: string, secret: string) {
+  return createHmac("sha256", secret)
+    .update(CURSOR_DOMAIN, "utf8")
+    .update("\0", "utf8")
+    .update(payload, "utf8")
+    .digest();
+}
+
+export function parseTokenListRequest(
+  requestUrl: string,
+  cursorSecret = readMarketCursorSecret(),
+) {
   const url = new URL(requestUrl);
   const allowed = new Set(["limit", "cursor"]);
   for (const key of url.searchParams.keys()) {
@@ -43,27 +64,71 @@ export function parseTokenListRequest(requestUrl: string) {
   }
 
   const rawCursor = url.searchParams.get("cursor");
-  return { limit, cursor: rawCursor ? decodeTokenCursor(rawCursor) : null };
+  return {
+    limit,
+    cursor: rawCursor ? decodeTokenCursor(rawCursor, cursorSecret) : null,
+  };
 }
 
-export function encodeTokenCursor(cursor: CursorValue) {
+export function encodeTokenCursor(
+  cursor: CursorValue,
+  cursorSecret = readMarketCursorSecret(),
+) {
   const payload = JSON.stringify({
     v: 1,
     b: normalizeUint256(cursor.blockNumber, "Cursor block"),
     l: postgresInteger(cursor.logIndex, "Cursor log index"),
     a: normalizeAddress(cursor.tokenAddress, "Cursor token"),
   });
-  return Buffer.from(payload, "utf8").toString("base64url");
+  const encodedPayload = Buffer.from(payload, "utf8").toString("base64url");
+  const signature = cursorSignature(encodedPayload, cursorSecret).toString("base64url");
+  return Buffer.from(
+    JSON.stringify({ p: encodedPayload, s: signature }),
+    "utf8",
+  ).toString("base64url");
 }
 
-export function decodeTokenCursor(value: string): CursorValue {
+export function decodeTokenCursor(
+  value: string,
+  cursorSecret = readMarketCursorSecret(),
+): CursorValue {
   if (!/^[A-Za-z0-9_-]{1,512}$/.test(value)) {
     throw new MarketInputError("cursor is malformed.");
   }
   try {
-    const bytes = Buffer.from(value, "base64url");
-    if (bytes.toString("base64url") !== value) throw new Error("non-canonical encoding");
-    const parsed = JSON.parse(bytes.toString("utf8")) as {
+    const envelopeBytes = Buffer.from(value, "base64url");
+    if (envelopeBytes.toString("base64url") !== value) {
+      throw new Error("non-canonical envelope");
+    }
+    const envelope = JSON.parse(envelopeBytes.toString("utf8")) as {
+      p?: unknown;
+      s?: unknown;
+    };
+    if (
+      Object.keys(envelope).sort().join(",") !== "p,s" ||
+      typeof envelope.p !== "string" ||
+      typeof envelope.s !== "string" ||
+      !/^[A-Za-z0-9_-]{1,384}$/.test(envelope.p) ||
+      !/^[A-Za-z0-9_-]{43}$/.test(envelope.s)
+    ) {
+      throw new Error("invalid envelope");
+    }
+    const suppliedSignature = Buffer.from(envelope.s, "base64url");
+    if (
+      suppliedSignature.toString("base64url") !== envelope.s ||
+      suppliedSignature.length !== 32
+    ) {
+      throw new Error("invalid signature encoding");
+    }
+    const expectedSignature = cursorSignature(envelope.p, cursorSecret);
+    if (!timingSafeEqual(suppliedSignature, expectedSignature)) {
+      throw new Error("invalid signature");
+    }
+    const payloadBytes = Buffer.from(envelope.p, "base64url");
+    if (payloadBytes.toString("base64url") !== envelope.p) {
+      throw new Error("non-canonical payload");
+    }
+    const parsed = JSON.parse(payloadBytes.toString("utf8")) as {
       v?: unknown;
       b?: unknown;
       l?: unknown;
@@ -365,6 +430,7 @@ async function loadWatermark(database: DbClient): Promise<IndexerWatermark | nul
 export async function listLiveTokens(
   database: DbClient,
   options: { limit: number; cursor: CursorValue | null },
+  cursorSecret = readMarketCursorSecret(),
 ): Promise<LiveTokenListResponse> {
   const limit = options.limit;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > TOKEN_LIST_MAX_LIMIT) {
@@ -395,7 +461,7 @@ export async function listLiveTokens(
               blockNumber: last.block_number,
               logIndex: last.log_index,
               tokenAddress: normalizeAddress(last.token_address),
-            })
+            }, cursorSecret)
           : null,
     },
     indexer,

@@ -230,6 +230,13 @@ contract PipedogRevenueRouterTest is Test {
 
     function testMigrationAllocatesFreshDonationAndPreservesAccounting() public {
         _deposit(400 ether);
+        PipedogRevenueRouter successor =
+            _deployRouter(
+                IERC20(address(pipedog)),
+                SEQUESTER_CAP,
+                TREASURY_CAP,
+                BOUNTY_BPS
+            );
 
         // Regression: migration must allocate direct PIPEDOG transfers before
         // clearing the pots, or totalMigrated can exceed accounted revenue.
@@ -238,9 +245,13 @@ contract PipedogRevenueRouterTest is Test {
         assertEq(router.unallocated(), 3);
         assertEq(router.totalRevenueAllocated(), 400 ether);
 
-        router.migrate(SUCCESSOR);
+        router.pause();
+        router.migrate(address(successor));
 
-        assertEq(pipedog.balanceOf(SUCCESSOR), 400 ether + 3);
+        assertEq(
+            pipedog.balanceOf(address(successor)), 400 ether + 3
+        );
+        assertEq(successor.unallocated(), 400 ether + 3);
         assertEq(pipedog.balanceOf(address(router)), 0);
         assertEq(router.sequesterTank(), 0);
         assertEq(router.treasuryTank(), 0);
@@ -249,6 +260,41 @@ contract PipedogRevenueRouterTest is Test {
         assertEq(router.totalMigrated(), 400 ether + 3);
         assertEq(router.unallocated(), 0);
         _assertAccountingIdentity(router, pipedog);
+    }
+
+    function testMigrationRequiresPauseAndCompatiblePipedogRouter()
+        public
+    {
+        PipedogRevenueRouter successor =
+            _deployRouter(
+                IERC20(address(pipedog)),
+                SEQUESTER_CAP,
+                TREASURY_CAP,
+                BOUNTY_BPS
+            );
+
+        vm.expectRevert(abi.encodeWithSignature("ExpectedPause()"));
+        router.migrate(address(successor));
+
+        router.pause();
+        vm.expectRevert(PipedogRevenueRouter.InvalidSuccessor.selector);
+        router.migrate(SUCCESSOR);
+
+        MockERC20 wrongToken = new MockERC20("Wrong", "WRONG");
+        PipedogRevenueRouter wrongTokenRouter =
+            _deployRouter(
+                IERC20(address(wrongToken)),
+                SEQUESTER_CAP,
+                TREASURY_CAP,
+                BOUNTY_BPS
+            );
+        vm.expectRevert(PipedogRevenueRouter.InvalidSuccessor.selector);
+        router.migrate(address(wrongTokenRouter));
+
+        vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
+        router.migrate(address(router));
+        vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
+        router.migrate(address(0));
     }
 
     function testRecoveryProtectsPipedogAndHandlesUnrelatedAssets() public {

@@ -196,7 +196,9 @@ function manifestProvider(manifest, options = {}) {
       if (selector === selectors.owner) return addressWord(manifest.governance.finalOwner);
       if (selector === selectors.pendingOwner) return addressWord(zeroAddress);
       if (selector === selectors.launchFee) return uintWord(manifest.launch.launchFee);
-      if (selector === selectors.launchEnabled) return uintWord(1);
+      if (selector === selectors.launchEnabled) {
+        return uintWord(options.launchEnabled === false ? 0 : 1);
+      }
       if (selector === selectors.getLaunchConfig) {
         const configId = BigInt(`0x${data.slice(10)}`);
         const expected =
@@ -287,7 +289,36 @@ test("production manifest is complete-or-disabled and pins canonical externals",
     robinhood.ROBINHOOD_POOL_MANAGER_ADDRESS.toLowerCase(),
   );
   assert.equal(configured.deployment.launch.creator.config.selfBurn, false);
+  assert.equal(configured.deployment.launch.creator.config.enabled, true);
   assert.equal(configured.deployment.launch.selfBurn.config.selfBurn, true);
+  assert.equal(configured.deployment.launch.selfBurn.config.enabled, false);
+});
+
+test("production launch UI defaults to creator fees and cannot select unsafe self-burn", () => {
+  const form = readFileSync(
+    resolve(repositoryRoot, "app/launch/LaunchForm.tsx"),
+    "utf8",
+  );
+  assert.match(form, /useState<LaunchFeeMode>\("creator"\)/);
+  assert.match(
+    form,
+    /aria-pressed=\{mode === "self-burn"\}[\s\S]{0,180}\bdisabled\b/,
+  );
+  assert.match(form, /Disabled until permissionless buys have audited price protection/);
+});
+
+test("deployment scripts stage the self-burn config disabled", () => {
+  for (const relativePath of [
+    "contracts/script/DeployLaypipe.s.sol",
+    "contracts/script/DeployLaypipeBaseSepolia.s.sol",
+  ]) {
+    const source = readFileSync(resolve(repositoryRoot, relativePath), "utf8");
+    assert.match(source, /enabled:\s*!selfBurn/);
+    assert.match(
+      source,
+      /!standardConfig\.enabled[\s\S]{0,100}selfBurnConfig\.enabled/,
+    );
+  }
 });
 
 test("address-only clients cannot reach wallet mutations", async () => {
@@ -309,6 +340,25 @@ test("fully configured audited manifest reaches a wallet mutation", async () => 
   assert.equal(provider.calls.includes("eth_getStorageAt"), true);
   assert.equal(provider.calls.includes("eth_estimateGas"), true);
   assert.equal(provider.calls.includes("eth_sendTransaction"), true);
+});
+
+test("only the read-only indexer preflight accepts a globally paused launch", async () => {
+  const manifest = runtimeManifest();
+  const pausedProvider = manifestProvider(manifest, { launchEnabled: false });
+  await assert.rejects(
+    manifests.assertAuditedDeployment(pausedProvider, manifest),
+    /launch-enabled state does not match/,
+  );
+  await manifests.assertAuditedIndexerDeployment(pausedProvider, manifest);
+
+  const driftedProvider = manifestProvider(manifest, {
+    launchEnabled: false,
+    mutatedConfig: true,
+  });
+  await assert.rejects(
+    manifests.assertAuditedIndexerDeployment(driftedProvider, manifest),
+    /startTick does not match/,
+  );
 });
 
 test("implementation, component, and config drift fail closed before a mutation", async () => {

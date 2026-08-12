@@ -26,6 +26,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     error QuoteTransferMismatch(uint256 expected, uint256 actual);
     error ProtectedToken();
     error NativeRecoveryFailed();
+    error InvalidSuccessor();
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant SEQUESTER_SHARE_BPS = 2_500;
@@ -227,13 +228,28 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
         _unpause();
     }
 
-    /// @notice Moves every PIPEDOG balance to a replacement router.
+    /// @notice While this router is paused, moves every PIPEDOG balance to a
+    ///         replacement router that reports the same canonical token.
     /// @dev This admin escape means 25/25/50 is a trusted operating policy,
-    ///      not an irrevocable custody guarantee.
-    function migrate(address successor) external onlyOwner nonReentrant {
+    ///      not an irrevocable custody guarantee. The compatibility check
+    ///      prevents an accidental EOA/wrong-token destination; it is not a
+    ///      timelock and cannot protect against a malicious owner.
+    function migrate(address successor)
+        external
+        onlyOwner
+        whenPaused
+        nonReentrant
+    {
         if (successor == address(0) || successor == address(this)) {
             revert ZeroAddress();
         }
+        (bool compatible, bytes memory result) =
+            successor.staticcall(abi.encodeWithSignature("pipedog()"));
+        if (
+            successor.code.length == 0 || !compatible
+                || result.length != 32
+                || abi.decode(result, (address)) != address(pipedog)
+        ) revert InvalidSuccessor();
         _allocate();
         uint256 amount = pipedog.balanceOf(address(this));
         sequesterTank = 0;

@@ -37,7 +37,7 @@ exact ERC-20 allowance needed for that action, never an unlimited approval.
 
 ## Local development
 
-Requires Node.js `>=22.13.0`.
+Requires Node.js `24.x`, matching the pinned Vercel runtime.
 
 ```bash
 npm install

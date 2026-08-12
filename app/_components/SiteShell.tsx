@@ -4,12 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
-import type { MarketDataMode } from "@/lib/server/market/mode";
-import {
-  type BoardToken,
-  fixtureBoardSource,
-  selectMarketAdapter,
-} from "../_data/adapter";
+import { useMarketData } from "./MarketDataProvider";
 import { compactMoney } from "./format";
 
 const CHAIN_ID = 4663;
@@ -46,43 +41,15 @@ function shortAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function SiteShell({
-  children,
-  marketMode,
-}: {
-  children: ReactNode;
-  marketMode: MarketDataMode;
-}) {
+export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const marketAdapter = useMemo(() => selectMarketAdapter(marketMode), [marketMode]);
-  const [latestTokens, setLatestTokens] = useState<BoardToken[]>(
-    marketMode === "fixture" ? fixtureBoardSource.tokens.slice(0, 16) : [],
-  );
-  const [feedState, setFeedState] = useState<"ready" | "error">("ready");
+  const { marketMode, refreshState, tokens } = useMarketData();
+  const latestTokens = useMemo(() => tokens.slice(0, 16), [tokens]);
+  const feedState = refreshState === "error" ? "error" : "ready";
   const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const [walletLabel, setWalletLabel] = useState("Connect wallet");
   const [walletBusy, setWalletBusy] = useState(false);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const refresh = async () => {
-      try {
-        const source = await marketAdapter.listTokens(controller.signal);
-        setLatestTokens(source.tokens.slice(0, 16));
-        setFeedState("ready");
-      } catch {
-        if (controller.signal.aborted) return;
-        setFeedState("error");
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(refresh, 15_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [marketAdapter]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {

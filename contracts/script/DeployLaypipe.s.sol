@@ -220,7 +220,7 @@ contract DeployLaypipe is Script {
             baseFeeRate: 10_000,
             launchFeeRate: 10_000,
             launchFeeDecay: 0,
-            enabled: true,
+            enabled: !selfBurn,
             selfBurn: selfBurn
         });
     }
@@ -238,6 +238,10 @@ contract DeployLaypipe is Script {
             LaypipeSwapRouter(deployed.swapRouter);
         PipedogRevenueRouter revenueRouter =
             PipedogRevenueRouter(deployed.revenueRouter);
+        LaypipeFactory.LaunchConfig memory standardConfig =
+            factory.getLaunchConfig(0);
+        LaypipeFactory.LaunchConfig memory selfBurnConfig =
+            factory.getLaunchConfig(1);
 
         if (
             address(factory.poolManager())
@@ -253,6 +257,9 @@ contract DeployLaypipe is Script {
                 || factory.treasury() != deployed.revenueRouter
                 || factory.launchEnabled()
                 || factory.dividendLaunchEnabled()
+                || factory.launchConfigCount() != 2
+                || !standardConfig.enabled || standardConfig.selfBurn
+                || selfBurnConfig.enabled || !selfBurnConfig.selfBurn
                 || factory.pendingOwner() != finalOwner
                 || hook.factory() != deployed.factoryProxy
                 || address(hook.poolManager())
@@ -282,6 +289,7 @@ contract DeployLaypipe is Script {
         int24 startTick
     ) private pure {
         console2.log("Laypipe PIPEDOG-quote stack wired; launch DISABLED");
+        console2.log("standard config staged; self-burn config DISABLED");
         console2.log("factory implementation", deployed.factoryImplementation);
         console2.log("factory proxy", deployed.factoryProxy);
         console2.log("token implementation", deployed.tokenImplementation);

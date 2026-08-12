@@ -636,6 +636,7 @@ contract LaypipeFactoryIntegrationTest is Test {
             routerBefore + platformAmount
         );
         assertEq(hook.tab(poolId), creatorAmount);
+        assertEq(hook.platformTab(), 0);
 
         uint256 creatorBefore = pipedog.balanceOf(CREATOR);
         vm.prank(CREATOR);
@@ -873,6 +874,7 @@ contract LaypipeFactoryIntegrationTest is Test {
             routerBefore + platformAmount
         );
         assertEq(hook.tab(poolId), creatorAmount);
+        assertEq(hook.platformTab(), 0);
 
         vm.prank(CREATOR);
         uint256 claimed = hook.claim(poolId);

@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cache = new Map();
+process.env.WALLET_CHALLENGE_SECRET = "market-test-secret-that-is-longer-than-thirty-two-bytes";
 
 function loadTypeScript(relativePath) {
   const filename = resolve(root, relativePath);
@@ -119,7 +120,36 @@ test("token list validation is bounded and cursors are canonical", () => {
     logIndex: 7,
     tokenAddress: address("a"),
   });
+  const tampered = `${cursor.slice(0, -1)}${cursor.endsWith("a") ? "b" : "a"}`;
+  assert.throws(() => readModel.decodeTokenCursor(tampered), /malformed/);
+  const unsigned = Buffer.from(JSON.stringify({
+    v: 1,
+    b: "123",
+    l: 7,
+    a: address("a"),
+  })).toString("base64url");
+  assert.throws(() => readModel.decodeTokenCursor(unsigned), /malformed/);
   assert.throws(() => readModel.decodeTokenCursor("not-json"), /malformed/);
+});
+
+test("live market APIs fail closed before Neon when cursor signing is unavailable", async () => {
+  let databaseCalls = 0;
+  const response = await http.handleTokenListRequest(
+    new Request("https://laypipe.fun/api/tokens"),
+    {
+      marketMode: () => "live",
+      marketCursorSecret: () => {
+        throw new Error("missing signing secret");
+      },
+      database: async () => {
+        databaseCalls += 1;
+        return databaseFor();
+      },
+    },
+  );
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(databaseCalls, 0);
 });
 
 test("list queries use fixed SQL placeholders and keyset parameters", async () => {
@@ -386,15 +416,17 @@ test("MarketBoard has a guarded live-empty state and no demo fallback", () => {
   const page = readFileSync(resolve(root, "app/page.tsx"), "utf8");
   const layout = readFileSync(resolve(root, "app/layout.tsx"), "utf8");
   const shell = readFileSync(resolve(root, "app/_components/SiteShell.tsx"), "utf8");
+  const provider = readFileSync(resolve(root, "app/_components/MarketDataProvider.tsx"), "utf8");
   const adapter = readFileSync(resolve(root, "app/_data/adapter.ts"), "utf8");
   const tokenPage = readFileSync(resolve(root, "app/token/[slug]/page.tsx"), "utf8");
   assert.match(board, /featured \? \(/);
   assert.match(board, /Fixture data was not substituted/);
   assert.match(board, /No fixture coins are shown in live mode/);
-  assert.match(page, /readMarketDataMode\(\)/);
-  assert.match(page, /marketMode=\{readMarketDataMode\(\)\}/);
-  assert.match(layout, /marketMode=\{readMarketDataMode\(\)\}/);
-  assert.match(shell, /marketMode === "fixture" \? fixtureBoardSource\.tokens\.slice\(0, 16\) : \[\]/);
+  assert.match(page, /<MarketBoard \/>/);
+  assert.match(layout, /const marketMode = readMarketDataMode\(\)/);
+  assert.match(layout, /<MarketDataProvider marketMode=\{marketMode\}>/);
+  assert.match(provider, /marketMode === "fixture" \? fixtureBoardSource : null/);
+  assert.match(shell, /tokens\.slice\(0, 16\)/);
   assert.match(shell, /Live feed unavailable/);
   assert.match(adapter, /mode === "live" \? createApiMarketAdapter\(\) : fixtureMarketAdapter/);
   assert.doesNotMatch(adapter, /catch[\s\S]{0,200}fixtureMarketAdapter/);

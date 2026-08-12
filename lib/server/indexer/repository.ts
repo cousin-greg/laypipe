@@ -478,6 +478,47 @@ export interface StoredBlockRow extends DbRow {
   block_hash: string;
 }
 
+export interface IndexedLaunchIdentityRow extends DbRow {
+  token_address: string;
+  pool_id: string;
+}
+
+/**
+ * Loads the complete watched launch set for the bounded RPC filter builder.
+ * The extra row makes an oversized watch set fail before any cursor advance;
+ * callers can then shard the stream instead of silently dropping pools.
+ */
+export async function loadIndexedLaunchIdentities(options: {
+  chainId: number;
+  limit: number;
+}) {
+  if (
+    !Number.isSafeInteger(options.limit) ||
+    options.limit < 1 ||
+    options.limit > 20_000
+  ) {
+    throw new Error("Indexed launch identity limit must be between 1 and 20000.");
+  }
+  const database = await getDatabase();
+  const rows = await database.query<IndexedLaunchIdentityRow>(
+    `SELECT token_address, pool_id
+     FROM launches
+     WHERE chain_id = $1::bigint
+     ORDER BY block_number ASC, log_index ASC
+     LIMIT $2::integer`,
+    [options.chainId, options.limit + 1],
+  );
+  if (rows.length > options.limit) {
+    throw new Error(
+      "Indexed launch watch set exceeds the configured RPC filter bound.",
+    );
+  }
+  return rows.map((row) => ({
+    tokenAddress: normalizeAddress(row.token_address, "Indexed launch token"),
+    poolId: normalizeBytes32(row.pool_id, "Indexed launch pool"),
+  }));
+}
+
 export async function loadRecentStoredBlocks(options: {
   chainId: number;
   atOrBelow: bigint | string;

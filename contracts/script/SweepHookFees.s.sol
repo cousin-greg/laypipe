@@ -7,7 +7,8 @@ import {PoolId} from "v4-core/src/types/PoolId.sol";
 import {PipedogHook} from "../src/PipedogHook.sol";
 
 /// @notice Permissionless keeper entrypoint for converting a Laypipe pool's
-/// pending Uniswap v4 claims into creator credit and platform PIPEDOG.
+/// pending Uniswap v4 claims into creator credit and an exact best-effort
+/// platform route. A failed route is conserved for `collectPlatform()` retry.
 /// @dev This script intentionally reads no private key. Use a hardware wallet,
 /// a named Foundry keystore, or an explicitly unlocked keeper account through
 /// Forge's standard wallet flags when broadcasting.
@@ -38,7 +39,8 @@ contract SweepHookFees is Script {
         vm.stopBroadcast();
 
         console2.log("creator amount credited", creatorAmount);
-        console2.log("platform PIPEDOG forwarded", platformAmount);
+        console2.log("platform amount swept", platformAmount);
+        console2.log("total platform tab", hook.platformTab());
         console2.log("pending after sweep", hook.pending(poolId));
     }
 }

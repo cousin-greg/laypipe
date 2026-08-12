@@ -24,10 +24,10 @@ import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation
 ///         PIPEDOG side of every exact-input and exact-output swap. PIPEDOG is
 ///         always currency0; launch addresses are mined above its address.
 ///
-///         Fees move in two lanes: `sweep(poolId)` is permissionless and pays
-///         the platform share to the treasury while crediting the creator
-///         share to the creator's unclaimed balance; `claim(poolId)` — fee
-///         recipient only — sweeps, then pays the balance in PIPEDOG.
+///         Fees move in two lanes: `sweep(poolId)` is permissionless, credits
+///         the creator balance, and routes the platform share. A failed exact
+///         platform transfer is parked in `platformTab`; `collectPlatform()`
+///         retries that independent balance against the current treasury.
 ///
 ///         Trust model — not upgradeable. Only the factory can register pools
 ///         or add liquidity. Unclaimed creator balances can only ever move to
@@ -58,6 +58,7 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     error LiquidityAlreadySeeded();
     error DonationsLocked();
     error PartialFillRejected();
+    error NotSelf();
 
     event PoolRegistered(PoolId indexed poolId, address indexed creator, PoolConfig config);
     /// @notice The exact PIPEDOG fee taken by a swap — indexers mirror fees
@@ -65,6 +66,8 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     event FeeAccrued(PoolId indexed poolId, uint256 amount);
     event FeesSwept(PoolId indexed poolId, address indexed caller, uint256 creatorAmount, uint256 platformAmount);
     event CreatorFeesClaimed(PoolId indexed poolId, address indexed creator, uint256 amount);
+    event PlatformPayoutDeferred(uint256 amount);
+    event PlatformPayoutCollected(address indexed treasury, uint256 amount);
     event CreatorUpdated(PoolId indexed poolId, address indexed oldCreator, address indexed newCreator);
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
 
@@ -77,7 +80,7 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     address public immutable factory;
     /// @notice Canonical PIPEDOG quote/payment token.
     IERC20 public immutable quoteToken;
-    /// @notice Receives the platform share of swept fees. Owner-settable.
+    /// @notice Destination for immediate and deferred platform fees. Owner-settable.
     address public treasury;
 
     mapping(PoolId => PoolConfig) public poolConfigs;
@@ -89,6 +92,8 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     mapping(PoolId => uint256) public pending;
     /// @notice Creator's swept-but-unclaimed PIPEDOG, per pool.
     mapping(PoolId => uint256) public tab;
+    /// @notice Failed platform PIPEDOG awaiting an independent treasury retry.
+    uint256 public platformTab;
     constructor(
         IPoolManager poolManager_,
         address factory_,
@@ -399,6 +404,27 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         emit CreatorFeesClaimed(poolId, recipient, amount);
     }
 
+    /// @notice Routes all swept platform PIPEDOG to the current treasury.
+    /// @dev Kept separate from `sweep` and creator `claim` so a failed
+    ///      platform transfer cannot roll back creator accounting or payout.
+    ///      A failed exact transfer rolls this tab reset back atomically.
+    function collectPlatform() external nonReentrant returns (uint256 amount) {
+        amount = platformTab;
+        address recipient = treasury;
+        platformTab = 0;
+        _pushExact(recipient, amount);
+        emit PlatformPayoutCollected(recipient, amount);
+    }
+
+    /// @notice Exact-transfer adapter used only by this hook's best-effort
+    ///         platform route. External self-call isolation lets `_sweep`
+    ///         catch a token-level transfer failure without weakening the
+    ///         exact balance-delta invariant or reverting creator accounting.
+    function pushPlatformExact(address recipient, uint256 amount) external {
+        if (msg.sender != address(this)) revert NotSelf();
+        _pushExact(recipient, amount);
+    }
+
     function _sweep(PoolId poolId) private returns (uint256 creatorAmount, uint256 platformAmount) {
         PoolConfig memory config = poolConfigs[poolId];
         if (!config.exists) revert UnknownPool();
@@ -413,7 +439,14 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
         creatorAmount = (amount * config.creatorFeeBps) / BPS_DENOMINATOR;
         platformAmount = amount - creatorAmount;
         tab[poolId] += creatorAmount;
-        _pushExact(treasury, platformAmount);
+        if (platformAmount > 0) {
+            address recipient = treasury;
+            try this.pushPlatformExact(recipient, platformAmount) {}
+            catch {
+                platformTab += platformAmount;
+                emit PlatformPayoutDeferred(platformAmount);
+            }
+        }
         emit FeesSwept(poolId, msg.sender, creatorAmount, platformAmount);
     }
 

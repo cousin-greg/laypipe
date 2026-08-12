@@ -80,7 +80,10 @@ export default function DocsPage() {
             </p>
             <ol>
               <li>Choose the token identity and optional PIPEDOG first buy.</li>
-              <li>Select creator-fee or self-burn mode.</li>
+              <li>
+                Use creator-fee mode. Self-burn is implemented but remains
+                disabled pending audited price protection.
+              </li>
               <li>
                 Approve only the exact PIPEDOG launch fee and first-buy amount.
               </li>
@@ -100,8 +103,8 @@ export default function DocsPage() {
               <p>
                 The inherited enrollment-based dividend mode is intentionally
                 blocked by the current factory implementation. Creator-fee and
-                self-burn launches remain the only supported modes until a
-                complete-holder reward design receives a separate review.
+                self-burn are the only implemented modes, but self-burn remains
+                disabled until its execution design receives a separate audit.
               </p>
             </div>
             <div className="docs-note">
@@ -145,7 +148,9 @@ export default function DocsPage() {
               keeper bounty deducted from the lane being processed. Sweeping
               platform fees out of an inactive launch pool is unbountied, so
               production operations must monitor and trigger that step when
-              creators stop claiming.
+              creators stop claiming. If the hook’s exact platform transfer
+              fails, it parks that amount for an independent permissionless
+              retry without blocking the creator claim.
             </p>
             <div className="docs-note">
               <strong>Self-burn orders expose execution risk</strong>
@@ -153,8 +158,9 @@ export default function DocsPage() {
                 Self-burns use capped, visible PIPEDOG market orders without an
                 oracle or minimum output. The caps limit order size, but do not
                 eliminate sandwiching or price movement. Review those limits
-                against live liquidity before enabling launches. Protocol
-                PIPEDOG distributions are direct transfers, not market orders.
+                against live liquidity before enabling the self-burn config.
+                Protocol PIPEDOG distributions are direct transfers, not market
+                orders.
               </p>
             </div>
             <div className="docs-note">
@@ -182,11 +188,12 @@ export default function DocsPage() {
             <div className="docs-note">
               <strong>Admin roles remain trusted</strong>
               <p>
-                The factory can be upgraded for future launches, the hook
-                owner can change the platform-fee destination, and the router
-                owner can pause or migrate platform PIPEDOG. Production
-                ownership should move to a reviewed Safe or timelock before
-                launch.
+                The factory can be upgraded for future launches only while
+                its global launch gate is closed, the hook owner can change
+                the platform-fee destination, and the router owner can migrate
+                platform PIPEDOG while paused to a same-token successor.
+                Those checks are not a timelock. Production ownership should
+                move to a reviewed Safe or timelock before launch.
               </p>
             </div>
             <div className="readiness-table">

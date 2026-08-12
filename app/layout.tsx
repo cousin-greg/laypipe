@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { readMarketDataMode } from "@/lib/server/market/mode";
+import { MarketDataProvider } from "./_components/MarketDataProvider";
 import { SiteShell } from "./_components/SiteShell";
 import "./globals.css";
 
@@ -124,6 +125,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const marketMode = readMarketDataMode();
+
   return (
     <html
       lang="en"
@@ -140,7 +143,9 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <SiteShell marketMode={readMarketDataMode()}>{children}</SiteShell>
+        <MarketDataProvider marketMode={marketMode}>
+          <SiteShell>{children}</SiteShell>
+        </MarketDataProvider>
       </body>
     </html>
   );

@@ -110,6 +110,7 @@ contract LaypipeFactory is
     error SeedRequiresQuote();
     error ResidualQuoteBalance(uint256 expected, uint256 actual);
     error ValueTooLarge();
+    error UpgradeRequiresLaunchPaused();
 
     /// @dev Signature intentionally matches the current LetsCash launch event
     ///      so existing indexers can map the Laypipe deployment by address.
@@ -690,5 +691,11 @@ contract LaypipeFactory is
             && config.launchFeeRate == FIXED_FEE_RATE && config.launchFeeDecay == 0;
     }
 
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @dev An upgrade can affect every future launch and the proxy remains an
+    ///      approved PIPEDOG spender between a user's approval and launch.
+    ///      Requiring the public launch gate to be closed prevents an
+    ///      operational upgrade from occurring while new calls are accepted.
+    function _authorizeUpgrade(address) internal view override onlyOwner {
+        if (launchEnabled) revert UpgradeRequiresLaunchPaused();
+    }
 }
