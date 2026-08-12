@@ -877,6 +877,11 @@
   },
   {
     "type": "error",
+    "name": "ArbSysUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EnforcedPause",
     "inputs": []
   },

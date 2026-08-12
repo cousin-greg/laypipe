@@ -15,6 +15,7 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {CurrencySettler} from "./lib/CurrencySettler.sol";
 import {PipedogHook} from "./PipedogHook.sol";
 import {LaypipeToken} from "./LaypipeToken.sol";
+import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 
 /// @title LaypipeSelfBurner
 /// @notice Claims a self-burn pool's creator-fee lane in PIPEDOG, buys that
@@ -55,6 +56,8 @@ contract LaypipeSelfBurner is IUnlockCallback, ReentrancyGuard {
     mapping(PoolId => PoolKey) private _keys;
     /// @notice Claimed PIPEDOG waiting to buy and burn a launched token.
     mapping(PoolId => uint256) public unburned;
+    /// @dev Robinhood's actual L2 block from ArbSys, not Solidity's
+    ///      periodically updated Ethereum L1 estimate.
     mapping(PoolId => uint256) private _lastBurnBlock;
 
     constructor(
@@ -106,10 +109,11 @@ contract LaypipeSelfBurner is IUnlockCallback, ReentrancyGuard {
         if (Currency.unwrap(key.currency1) == address(0)) {
             revert UnknownPool();
         }
-        if (_lastBurnBlock[poolId] == block.number) {
+        uint256 currentBlock = ChainBlockNumber.current();
+        if (_lastBurnBlock[poolId] == currentBlock) {
             revert BurnedThisBlock();
         }
-        _lastBurnBlock[poolId] = block.number;
+        _lastBurnBlock[poolId] = currentBlock;
 
         if (hook.pending(poolId) > 0 || hook.tab(poolId) > 0) {
             uint256 beforeBalance =

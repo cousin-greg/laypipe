@@ -6,9 +6,13 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PipedogRevenueRouter} from "../src/PipedogRevenueRouter.sol";
+import {IArbSysBlockNumber} from
+    "../src/lib/ChainBlockNumber.sol";
 import {FeeOnTransferERC20, MockERC20, ReentrantERC20, RejectNative} from "./mocks/RevenueRouterMocks.sol";
 
 contract PipedogRevenueRouterTest is Test {
+    address internal constant ARBSYS =
+        0x0000000000000000000000000000000000000064;
     uint16 internal constant BOUNTY_BPS = 100;
     uint256 internal constant SEQUESTER_CAP = 100 ether;
     uint256 internal constant TREASURY_CAP = 100 ether;
@@ -131,6 +135,28 @@ contract PipedogRevenueRouterTest is Test {
         assertEq(localRouter.sequesterTank(), 0);
         assertEq(localRouter.totalKeeperBounties(), 1);
         _assertAccountingIdentity(localRouter, token);
+    }
+
+    function testRobinhoodPerBlockGuardUsesArbSysBlockNumber() public {
+        vm.chainId(4663);
+        _mockArbBlockNumber(700);
+        _deposit(800 ether);
+
+        vm.prank(KEEPER);
+        router.sequesterPipedog();
+
+        // Robinhood's Solidity block.number is an L1 estimate. Moving it does
+        // not open another L2-block keeper slot.
+        vm.roll(block.number + 1);
+        vm.expectRevert(
+            PipedogRevenueRouter.AlreadyProcessedThisBlock.selector
+        );
+        vm.prank(KEEPER);
+        router.sequesterPipedog();
+
+        _mockArbBlockNumber(701);
+        vm.prank(KEEPER);
+        assertEq(router.sequesterPipedog(), 99 ether);
     }
 
     function testOperationsCollectionPaysPipedogToFixedDestination() public {
@@ -333,6 +359,15 @@ contract PipedogRevenueRouterTest is Test {
             + target.totalPipedogTreasuryRouted() + target.totalPipedogOperationsCollected()
             + target.totalKeeperBounties() + target.totalMigrated();
         assertEq(accountedInbound, heldOrRouted);
+    }
+
+    function _mockArbBlockNumber(uint256 number) private {
+        vm.clearMockedCalls();
+        vm.mockCall(
+            ARBSYS,
+            abi.encodeCall(IArbSysBlockNumber.arbBlockNumber, ()),
+            abi.encode(number)
+        );
     }
 }
 

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
 import localFont from "next/font/local";
 import { SiteShell } from "./_components/SiteShell";
 import "./globals.css";
@@ -83,51 +82,41 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
-export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "laypipe.fun";
-  const protocol =
-    requestHeaders.get("x-forwarded-proto") ??
-    (host.startsWith("localhost") ? "http" : "https");
-  const origin = `${protocol}://${host}`;
-  const socialImage = `${origin}/og.png`;
-
-  return {
-    metadataBase: new URL(origin),
-    title: "laypipe.fun — Launch and trade with PIPEDOG",
+export const metadata: Metadata = {
+  metadataBase: new URL("https://laypipe.fun"),
+  title: "laypipe.fun — Launch and trade with PIPEDOG",
+  description:
+    "A Robinhood Chain launch board where every coin pairs and trades with PIPEDOG and protocol fees route directly to 0xdead, treasury, and operations.",
+  applicationName: "laypipe.fun",
+  icons: {
+    icon: "/brand/favicon.png",
+    shortcut: "/brand/favicon.png",
+    apple: "/brand/favicon.png",
+  },
+  openGraph: {
+    title: "laypipe.fun — The Robinhood Chain coin pipeline",
     description:
-      "A Robinhood Chain launch board where every coin pairs and trades with PIPEDOG and protocol fees route directly to 0xdead, treasury, and operations.",
-    applicationName: "laypipe.fun",
-    icons: {
-      icon: "/brand/favicon.png",
-      shortcut: "/brand/favicon.png",
-      apple: "/brand/favicon.png",
-    },
-    openGraph: {
-      title: "laypipe.fun — The Robinhood Chain coin pipeline",
-      description:
-        "Launch a coin against PIPEDOG, lock its liquidity, and route the protocol fee lane directly to 0xdead, treasury, and operations.",
-      url: origin,
-      siteName: "laypipe.fun",
-      type: "website",
-      images: [
-        {
-          url: socialImage,
-          width: 1200,
-          height: 630,
-          alt: "The original PIPEDOG beside a green pipe and burn furnace for laypipe.fun",
-        },
-      ],
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: "laypipe.fun — The Robinhood Chain coin pipeline",
-      description:
-        "Sunshine launch infrastructure where every coin trades in PIPEDOG and protocol fees route directly.",
-      images: [socialImage],
-    },
-  };
-}
+      "Launch a coin against PIPEDOG, lock its liquidity, and route the protocol fee lane directly to 0xdead, treasury, and operations.",
+    url: "https://laypipe.fun",
+    siteName: "laypipe.fun",
+    type: "website",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "The original PIPEDOG beside a green pipe and burn furnace for laypipe.fun",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "laypipe.fun — The Robinhood Chain coin pipeline",
+    description:
+      "Sunshine launch infrastructure where every coin trades in PIPEDOG and protocol fees route directly.",
+    images: ["/og.png"],
+  },
+};
 
 export default function RootLayout({
   children,

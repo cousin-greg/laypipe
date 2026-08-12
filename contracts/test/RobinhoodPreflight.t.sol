@@ -47,6 +47,8 @@ interface ILiveLetsCashHook {
 }
 
 contract RobinhoodPreflightTest is Test {
+    address internal constant ARBSYS =
+        0x0000000000000000000000000000000000000064;
     uint256 internal constant DEFAULT_FORK_BLOCK = 22_642_189;
     address internal constant LIVE_FACTORY =
         0x5bd1Fbe78a78fe8236fa00CF48fbEBA74ae34661;
@@ -65,6 +67,8 @@ contract RobinhoodPreflightTest is Test {
     address internal constant OPERATIONS = address(0x0B5);
 
     function setUp() public {
+        _mockArbBlockNumber(1);
+        vm.makePersistent(ARBSYS);
         vm.createSelectFork(
             vm.envOr(
                 "ROBINHOOD_RPC_URL",
@@ -72,6 +76,7 @@ contract RobinhoodPreflightTest is Test {
             ),
             vm.envOr("ROBINHOOD_FORK_BLOCK", DEFAULT_FORK_BLOCK)
         );
+        _mockArbBlockNumber(block.number);
     }
 
     function testCanonicalPipedogPreflightPasses() public {
@@ -222,6 +227,15 @@ contract RobinhoodPreflightTest is Test {
             PipedogProtocolConfig.PIPEDOG,
             keccak256(abi.encode(spender, ownerSlot)),
             bytes32(amount)
+        );
+    }
+
+    function _mockArbBlockNumber(uint256 number) private {
+        vm.etch(
+            ARBSYS,
+            abi.encodePacked(
+                hex"7f", bytes32(number), hex"60005260206000f3"
+            )
         );
     }
 }

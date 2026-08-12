@@ -18,6 +18,7 @@ invariant = { runs = 256, depth = 64, fail_on_revert = false }
 
 [rpc_endpoints]
 robinhood = "${ROBINHOOD_RPC_URL}"
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
 
 [profile.ci]
 fuzz = { runs = 2048 }

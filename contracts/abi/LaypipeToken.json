@@ -718,6 +718,11 @@
   },
   {
     "type": "error",
+    "name": "ArbSysUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ERC20InsufficientAllowance",
     "inputs": [
       {

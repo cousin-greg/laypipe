@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 
 /// @dev The fee engine that charges this token's pool. Declared here rather
 ///      than imported so the token depends on the one function it reads.
@@ -101,7 +102,9 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     ///         then be quoting a rate belonging to somebody else's pool.
     address public hook;
 
-    /// @dev Balance history keyed by block number. Every mint/transfer/burn
+    /// @dev Balance history keyed by the chain-local block number. On
+    ///      Robinhood Chain this is ArbSys `arbBlockNumber()`, not Solidity's
+    ///      L1-estimate `block.number`. Every mint/transfer/burn
     ///      records the account's resulting balance against the current block,
     ///      overwriting any earlier entry for that same block, so each block
     ///      keeps exactly one entry: the balance that block ended on.
@@ -215,7 +218,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     }
 
     function _writeCheckpoint(BalanceCheckpoint[] storage checkpoints, uint256 value) private {
-        uint64 blockNumber = uint64(block.number);
+        uint64 blockNumber = uint64(ChainBlockNumber.current());
         uint256 length = checkpoints.length;
         // One entry per block: a later move in the same block replaces the
         // earlier one, leaving the figure this block finished on.
@@ -235,7 +238,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
         // Asking the factory later would follow it to whatever engine it is
         // pointed at next, and quote a rate belonging to another pool.
         hook = ILaunchFactory(factory).hook();
-        launchBlock = block.number;
+        launchBlock = ChainBlockNumber.current();
     }
 
     /// @notice Destroys `amount` of the caller's own tokens. Real burn: total

@@ -4,6 +4,8 @@ pragma solidity ^0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {LaypipeToken} from "../src/LaypipeToken.sol";
+import {IArbSysBlockNumber} from
+    "../src/lib/ChainBlockNumber.sol";
 
 contract TokenCloneFactory {
     address public hook = address(0xBEEF);
@@ -42,6 +44,8 @@ contract TokenCloneFactory {
 }
 
 contract LaypipeTokenTest is Test {
+    address internal constant ARBSYS =
+        0x0000000000000000000000000000000000000064;
     address internal constant HOLDER = address(0xA11CE);
     address internal constant RECIPIENT = address(0xB0B);
 
@@ -75,5 +79,41 @@ contract LaypipeTokenTest is Test {
         );
         assertTrue(token.supportsBlockCheckpoints());
         assertTrue(token.supportsBlockBalanceCheckpoints());
+    }
+
+    function testRobinhoodLaunchAndCheckpointsUseArbSysBlockNumber()
+        public
+    {
+        vm.chainId(4663);
+        vm.roll(111);
+        _mockArbBlockNumber(700);
+
+        LaypipeToken implementation = new LaypipeToken();
+        TokenCloneFactory cloneFactory = new TokenCloneFactory();
+        LaypipeToken token = cloneFactory.create(implementation, HOLDER);
+        uint256 initialBalance = token.balanceOf(HOLDER);
+
+        assertEq(token.launchBlock(), 700);
+        assertEq(token.balanceOfAt(HOLDER, 700), initialBalance);
+        assertEq(token.balanceOfAt(HOLDER, 699), 0);
+
+        // Advancing Solidity's block number alone must not advance the
+        // Robinhood checkpoint clock.
+        vm.roll(222);
+        _mockArbBlockNumber(701);
+        vm.prank(HOLDER);
+        token.transfer(RECIPIENT, initialBalance / 2);
+
+        assertEq(token.balanceOfAt(HOLDER, 700), initialBalance);
+        assertEq(token.balanceOfAt(HOLDER, 701), initialBalance / 2);
+    }
+
+    function _mockArbBlockNumber(uint256 number) private {
+        vm.clearMockedCalls();
+        vm.mockCall(
+            ARBSYS,
+            abi.encodeCall(IArbSysBlockNumber.arbBlockNumber, ()),
+            abi.encode(number)
+        );
     }
 }

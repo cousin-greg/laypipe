@@ -49,6 +49,8 @@ contract LaypipeFactoryIntegrationTest is Test {
     uint256 internal constant ROUTE_CAP = 1 ether;
     uint256 internal constant SELF_BURN_CAP = 0.01 ether;
     uint16 internal constant BOUNTY_BPS = 100;
+    address internal constant ARBSYS =
+        0x0000000000000000000000000000000000000064;
     int24 internal constant TICK_SPACING = 200;
     int24 internal constant BOUNDARY_START_TICK = 887_200;
     // Reference-only legacy calibration. CurveEconomics.t.sol documents why
@@ -75,6 +77,8 @@ contract LaypipeFactoryIntegrationTest is Test {
     PoolDonateTest internal donateRouter;
 
     function setUp() public {
+        _mockArbBlockNumber(1);
+        vm.makePersistent(ARBSYS);
         vm.createSelectFork(
             vm.envOr(
                 "ROBINHOOD_RPC_URL",
@@ -82,6 +86,7 @@ contract LaypipeFactoryIntegrationTest is Test {
             ),
             DEFAULT_FORK_BLOCK
         );
+        _mockArbBlockNumber(block.number);
         manager = IPoolManager(PipedogProtocolConfig.POOL_MANAGER);
         pipedog = IERC20(PipedogProtocolConfig.PIPEDOG);
 
@@ -692,7 +697,8 @@ contract LaypipeFactoryIntegrationTest is Test {
         uint256 expectedBounty =
             (creatorFuel * BOUNTY_BPS) / 10_000;
 
-        vm.roll(block.number + 1);
+        uint256 burnBlock = block.number + 1_000;
+        _mockArbBlockNumber(burnBlock);
         vm.prank(KEEPER);
         uint256 burned = selfBurner.burn(poolId);
         assertGt(burned, 0);
@@ -704,6 +710,16 @@ contract LaypipeFactoryIntegrationTest is Test {
         assertEq(selfBurner.unburned(poolId), 0);
         // The self-burn swap itself earns another PIPEDOG fee.
         assertGt(hook.pending(poolId), 0);
+
+        // Advancing the Solidity/L1 estimate cannot bypass the L2-block gate.
+        vm.roll(block.number + 1);
+        vm.expectRevert(LaypipeSelfBurner.BurnedThisBlock.selector);
+        vm.prank(KEEPER);
+        selfBurner.burn(poolId);
+
+        _mockArbBlockNumber(burnBlock + 1);
+        vm.prank(KEEPER);
+        assertGt(selfBurner.burn(poolId), 0);
     }
 
     function testSuffixAloneCannotBypassPipedogAddressOrdering()
@@ -1070,6 +1086,18 @@ contract LaypipeFactoryIntegrationTest is Test {
             address(pipedog),
             keccak256(abi.encode(spender, ownerSlot)),
             bytes32(amount)
+        );
+    }
+
+    function _mockArbBlockNumber(uint256 number) internal {
+        // Storage reads against custom precompiles are not ordinary RPC
+        // account reads. Install a storage-free runtime that returns the
+        // requested number, then persist it across the fork boundary.
+        vm.etch(
+            ARBSYS,
+            abi.encodePacked(
+                hex"7f", bytes32(number), hex"60005260206000f3"
+            )
         );
     }
 

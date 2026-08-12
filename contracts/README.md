@@ -88,6 +88,23 @@ per-call caps, and migrate all router-held PIPEDOG to a successor. The
 25/25/50 split is therefore an administrator-trusted operating policy, not an
 irrevocable custody guarantee.
 
+At the active 1% trading fee and 70/30 creator/platform split, the effective
+gross trade flow is:
+
+| Destination | Gross trade share |
+| --- | ---: |
+| Standard creator, or launched-token self-burn fuel | 0.700% |
+| PIPEDOG dead-address sequestration | 0.075% |
+| Treasury wallet | 0.075% |
+| Operations wallet | 0.150% |
+
+Launch fees do not have a creator lane; the complete launch fee enters the
+router and is assigned 25% / 25% / 50%. If the operations wallet is intended
+to be the developer-fee destination, that is the current developer route. It
+is not a separately configurable fee and it is owner-rotatable. Product and
+economic review must explicitly approve that interpretation and its effective
+rates before mainnet; this documentation does not choose final economics.
+
 ## Curve calibration
 
 Supply, tick spacing, start tick, launch fee, routing caps, and bounties have no
@@ -125,7 +142,7 @@ endorsement.
 | --- | --- | --- |
 | `LaypipeFactory` | UUPS launcher, config registry, deterministic `...cc` clones, pool seed, and optional first buy | Clean-room implementation based on public ABI and observed behavior |
 | `PipedogHook` | PIPEDOG fee engine, permanent liquidity lock, fee sweep/claim, and creator-stream transfer | Reviewed derivative of verified MIT LetsCash source; quote claims and payouts were changed from native value to exact PIPEDOG |
-| `LaypipeToken` | Ownerless fixed-supply clone, metadata, real holder burn, and closed-block checkpoints | Reviewed documentation-only PIPEDOG derivative of the verified MIT mechanical adaptation; executable semantics are unchanged |
+| `LaypipeToken` | Ownerless fixed-supply clone, metadata, real holder burn, and closed-block checkpoints | Reviewed PIPEDOG and Robinhood block-clock derivative of the verified MIT mechanical adaptation |
 | `LaypipeSelfBurner` | Claims PIPEDOG creator fees, pays a bounded keeper bounty, buys the launched token, and calls its real `burn()` | Reviewed PIPEDOG-quote derivative of an earlier verified MIT LetsCash source |
 | `LaypipeSwapRouter` | Exact-allowance, slippage-checked PIPEDOG buy/sell entrypoint | Clean-room LayPipe implementation |
 | `PipedogRevenueRouter` | Direct 25/25/50 PIPEDOG platform policy | Clean-room LayPipe implementation |
@@ -182,6 +199,16 @@ It also pins PIPEDOG bytecode and verifies its name, symbol, 18 decimals, total
 supply, zero-address balance, and PoolManager interface compatibility. WETH
 and PIPEDOG/WETH reference constants are not dependencies of the canonical
 LayPipe routing path.
+
+### Robinhood block clock
+
+Robinhood Chain is an Arbitrum Orbit chain. Solidity `block.number` reports a
+periodically updated Ethereum L1 estimate there, so it is not a valid L2
+per-block counter. Active LayPipe checkpoints, `launchBlock`, revenue-lane
+guards, and self-burn guards use ArbSys precompile `0x64` and
+`arbBlockNumber()` on chain ID 4663. The call fails closed if ArbSys is
+unavailable. Non-Robinhood rehearsal networks use their ordinary EVM
+`block.number` and remain isolated by chain-specific deployment preflights.
 
 ## Permissionless maintenance
 
@@ -261,3 +288,54 @@ The final owner must accept ownership on the factory, hook, and revenue router
 before any funding or enablement. Do not add `--broadcast` until an independent
 audit, source-verification plan, ownership-acceptance plan, economic review,
 and explicit authorization are complete.
+
+## Base Sepolia rehearsal (test only)
+
+Canonical PIPEDOG does not exist on Base Sepolia. The isolated rehearsal path
+therefore deploys `MockPipedogBaseSepolia`, a fixed-supply vanilla 18-decimal
+ERC-20 with no owner, tax, rebase, permit, or post-deployment mint path. It then
+deploys the same LayPipe stack against Uniswap v4's official Base Sepolia
+PoolManager and leaves launches disabled. Robinhood config and the production
+deployment script are not reused or modified.
+
+The rehearsal preflight pins both the official PoolManager address and its
+deployed runtime codehash. It also pins Foundry's deterministic deployment
+proxy runtime, then exercises the PoolManager interface before deployment.
+This makes an address-preserving or interface-compatible runtime change fail
+closed until the expected dependency is reviewed and deliberately updated.
+
+The official Base Sepolia network is chain ID `84532`; its public RPC is
+`https://sepolia.base.org`. The protocol dependency is Uniswap v4 PoolManager
+`0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`. The complete official v4 address
+set is recorded in `script/BaseSepoliaConfig.sol` from:
+
+`https://developers.uniswap.org/docs/protocols/v4/deployments#base-sepolia-84532`
+
+Run the live read-only gate:
+
+```powershell
+forge script script/PreflightBaseSepolia.s.sol:PreflightBaseSepolia `
+  --rpc-url base_sepolia -vv
+```
+
+Fill every `BASE_SEPOLIA_*` test value in the ignored `.env`, then simulate the
+complete deployment without broadcasting:
+
+```powershell
+forge script script/DeployLaypipeBaseSepolia.s.sol:DeployLaypipeBaseSepolia `
+  --rpc-url base_sepolia -vvv
+```
+
+The rehearsal mines a lower-half mock quote address so launched-token vanity
+mining can reliably preserve quote-token `currency0` ordering. It deploys the
+mock quote, revenue router, UUPS factory proxy, token implementation,
+flag-mined hook, self-burner, swap router, and both launch configs; transfers
+ownership in two steps; and leaves launches disabled.
+
+A dry run on August 11, 2026 estimated `18,870,783` gas and
+`0.000207578613 ETH` at that block's gas price. That estimate will move. Fund
+the Base Sepolia deployer with test ETH from an official Base-listed faucet;
+`0.002 ETH` is a practical rehearsal buffer for deployment plus ownership and
+smoke-test transactions. Never fund or treat mock tPIPEDOG as an asset, and do
+not add `--broadcast` without explicit authorization and the independent audit
+required by [SECURITY.md](./SECURITY.md).

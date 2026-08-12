@@ -94,7 +94,8 @@ collectOperations()
 `sequesterPipedog()` and `routeTreasuryPipedog()`:
 
 - process no more than their configured PIPEDOG cap;
-- run at most once per lane per block;
+- run at most once per lane per Robinhood L2 block (read from ArbSys, not the
+  coarser Solidity `block.number` L1 estimate);
 - pay `bountyBps` from the processed lane to the caller;
 - transfer the remainder directly to `0xdead` or the configured treasury.
 
@@ -123,7 +124,8 @@ For self-burn pools, `LaypipeSelfBurner.burn(poolId)`:
 4. pays the caller `bountyBps` from that chunk;
 5. swaps the remainder for the launched token and calls its real `burn()`.
 
-Each pool can process at most once per block. A zero-output attempt reverts and
+Each pool can process at most once per Robinhood L2 block, read from ArbSys. A
+zero-output attempt reverts and
 does not pay a bounty. Unspent quote from a partial execution is restored to
 the pool's `unburned` tank.
 

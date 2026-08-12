@@ -123,9 +123,9 @@ test("server-renders all product routes", async () => {
     [
       "/launch",
       [
-        /Factory deployment, audit, and curve calibration are still pending/i,
-        /exact PIPEDOG allowance/i,
-        /Native ETH is used for network gas only/i,
+        /audited production factory is not configured yet/i,
+        /IPFS pinning happens before wallet transactions/i,
+        /Native ETH is used only for Robinhood Chain gas/i,
       ],
     ],
     [

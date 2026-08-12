@@ -6,6 +6,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 
 /// @title PipedogRevenueRouter
 /// @notice Direct PIPEDOG platform-revenue policy for laypipe.fun.
@@ -52,6 +53,8 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public totalKeeperBounties;
     uint256 public totalMigrated;
 
+    /// @dev Robinhood's actual L2 blocks from ArbSys, not Solidity's
+    ///      periodically updated Ethereum L1 estimate.
     uint256 private _lastSequesterBlock;
     uint256 private _lastTreasuryRouteBlock;
 
@@ -130,10 +133,11 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     /// @notice Routes PIPEDOG directly to the conventional dead-address sink.
     /// This reduces practical circulation but never ERC20 totalSupply.
     function sequesterPipedog() external nonReentrant whenNotPaused returns (uint256 amount) {
-        if (_lastSequesterBlock == block.number) {
+        uint256 currentBlock = ChainBlockNumber.current();
+        if (_lastSequesterBlock == currentBlock) {
             revert AlreadyProcessedThisBlock();
         }
-        _lastSequesterBlock = block.number;
+        _lastSequesterBlock = currentBlock;
         _allocate();
 
         uint256 fuel = sequesterTank;
@@ -153,10 +157,11 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
 
     /// @notice Routes the treasury lane directly in PIPEDOG.
     function routeTreasuryPipedog() external nonReentrant whenNotPaused returns (uint256 amount) {
-        if (_lastTreasuryRouteBlock == block.number) {
+        uint256 currentBlock = ChainBlockNumber.current();
+        if (_lastTreasuryRouteBlock == currentBlock) {
             revert AlreadyProcessedThisBlock();
         }
-        _lastTreasuryRouteBlock = block.number;
+        _lastTreasuryRouteBlock = currentBlock;
         _allocate();
 
         uint256 fuel = treasuryTank;

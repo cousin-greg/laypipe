@@ -24,6 +24,8 @@ throughout, transaction controls remain disabled, and no LayPipe contract is
 deployed or audited. The PIPEDOG-denominated curve parameters are not
 production-calibrated. Read [contracts/README.md](./contracts/README.md) and
 [contracts/SECURITY.md](./contracts/SECURITY.md) before any test deployment.
+The infrastructure, account, metadata, indexing, and staged-release gates are
+tracked in [PRODUCTION.md](./PRODUCTION.md).
 
 PIPEDOG has no native `burn()` method. The platform’s 25% sink lane sends
 PIPEDOG directly to `0x000000000000000000000000000000000000dEaD`; this removes
@@ -42,6 +44,7 @@ npm install
 npm run dev
 npm test
 npm run lint
+npx tsc --noEmit
 ```
 
 Production is hosted on Vercel. The repository intentionally has no Sites or

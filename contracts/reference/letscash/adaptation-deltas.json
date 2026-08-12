@@ -16,9 +16,10 @@
     {
       "file": "LaypipeToken.sol",
       "expectIdenticalToMechanicalBaseline": false,
-      "status": "reviewed documentation-only PIPEDOG derivative of verified-source mechanical adaptation",
+      "status": "reviewed PIPEDOG and Robinhood block-clock derivative of verified-source mechanical adaptation",
       "intentionalDeltas": [
-        "NatSpec pairing and fee-unit descriptions name canonical PIPEDOG instead of native ETH; executable semantics are unchanged"
+        "NatSpec pairing and fee-unit descriptions name canonical PIPEDOG instead of native ETH",
+        "Robinhood launch and checkpoint ids use ArbSys L2 block numbers instead of Solidity's Ethereum L1 block estimate"
       ]
     },
     {
@@ -28,7 +29,8 @@
       "intentionalDeltas": [
         "canonical PIPEDOG creator claims, swap settlement, exact-transfer bounty payment, and no native receive path",
         "deploy-time immutable PIPEDOG burn cap and bounty with an explicit maximum",
-        "reentrancy guard plus constructor, pool-key, quote-ordering, swap-delta, and input-range validation"
+        "reentrancy guard plus constructor, pool-key, quote-ordering, swap-delta, and input-range validation",
+        "Robinhood once-per-block burn gating uses the ArbSys L2 block number"
       ]
     },
     {

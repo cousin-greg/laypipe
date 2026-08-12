@@ -56,6 +56,21 @@ allowance still granted to its proxy address.
 Native ETH and WETH are not operational quote or payment assets. Native
 recovery functions exist only because value can be force-sent to a contract.
 
+## Robinhood L2 block numbers
+
+Robinhood is an Arbitrum Orbit chain where Solidity `block.number` is a
+periodically updated Ethereum L1 estimate, not the current Robinhood L2 block.
+The active token checkpoints, `launchBlock`, revenue routing gates, and
+self-burn gate therefore read `arbBlockNumber()` from ArbSys precompile `0x64`
+on chain ID 4663 and fail closed if that call is unavailable. Using the L1
+estimate would make per-block behavior unexpectedly coarse and checkpoint ids
+incorrect for Robinhood activity.
+
+The non-Robinhood `block.number` branch exists only for isolated rehearsals,
+including Base Sepolia, and is guarded by separate deployment preflights. The
+quarantined dividend artifact still contains its historical clock assumptions;
+it is not deployed or part of the canonical ABI surface.
+
 ## Token ordering and vanity mining
 
 PIPEDOG must be `currency0`. A valid launched token address must both end in
@@ -165,9 +180,10 @@ splitter were unverified when captured.
 `PipedogHook` and `LaypipeSelfBurner` are reviewed derivatives, not
 source-identical copies: their native-value assumptions were replaced with
 canonical PIPEDOG claims, settlement, and exact-transfer checks, among other
-documented deltas. `LaypipeToken` differs from its mechanical baseline only in
-PIPEDOG-specific documentation. `LaypipeFactory`, `LaypipeSwapRouter`, and
-`PipedogRevenueRouter` are clean-room LayPipe implementations.
+documented deltas. `LaypipeToken` also differs from its mechanical baseline by
+using the Robinhood ArbSys L2 block clock for checkpoints and `launchBlock`.
+`LaypipeFactory`, `LaypipeSwapRouter`, and `PipedogRevenueRouter` are clean-room
+LayPipe implementations.
 
 Run the reference fetch, source-fidelity check, full build/test suite, live
 preflight, ABI generation, and no-broadcast deployment simulation immediately
