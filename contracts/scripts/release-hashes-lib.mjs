@@ -126,7 +126,7 @@ function compiledArtifactProjection(artifact, contract) {
     settings?.optimizer?.runs !== 800 ||
     optimizerKeys.join(",") !== "enabled,runs" ||
     settings?.viaIR !== true ||
-    settings?.metadata?.bytecodeHash !== "ipfs" ||
+    settings?.metadata?.bytecodeHash !== "none" ||
     (settings.metadata.appendCBOR !== undefined && settings.metadata.appendCBOR !== true) ||
     metadataKeys.some((key) => key !== "appendCBOR" && key !== "bytecodeHash")
   ) {
@@ -141,7 +141,7 @@ function compiledArtifactProjection(artifact, contract) {
       evmVersion: "cancun",
       optimizer: { enabled: true, runs: 800 },
       viaIR: true,
-      metadataBytecodeHash: "ipfs",
+      metadataBytecodeHash: "none",
       metadataAppendCbor: true,
     },
     creationBytecode: bytecode(artifact.bytecode.object, `${contract} creation bytecode`),
@@ -239,8 +239,14 @@ export function assertExpectedReleaseHashes(manifest, expected) {
     expected?.artifactBundleSha256,
     "Expected artifact bundle hash",
   );
-  if (manifest.abiBundleSha256 !== abi) throw new Error("ABI bundle SHA-256 mismatch.");
+  if (manifest.abiBundleSha256 !== abi) {
+    throw new Error(
+      `ABI bundle SHA-256 mismatch: expected ${abi}, received ${manifest.abiBundleSha256}.`,
+    );
+  }
   if (manifest.artifactBundleSha256 !== artifacts) {
-    throw new Error("Artifact bundle SHA-256 mismatch.");
+    throw new Error(
+      `Artifact bundle SHA-256 mismatch: expected ${artifacts}, received ${manifest.artifactBundleSha256}.`,
+    );
   }
 }

@@ -43,7 +43,7 @@ function artifact(overrides = {}) {
         },
         viaIR: true,
         metadata: {
-          bytecodeHash: "ipfs",
+          bytecodeHash: overrides.bytecodeHash ?? "none",
           ...(overrides.appendCbor === undefined
             ? {}
             : { appendCBOR: overrides.appendCbor }),
@@ -133,6 +133,9 @@ test("stale ABIs and incorrect expected bundle pins fail closed", async () => {
 
 test("unreviewed compiler-detail changes and partial CLI pins fail closed", async () => {
   const noCbor = await fixture({ artifact: artifact({ appendCbor: false }) });
+  const sourceMetadataHash = await fixture({
+    artifact: artifact({ bytecodeHash: "ipfs" }),
+  });
   const optimizerOverride = await fixture({
     artifact: artifact({ optimizerDetails: { yul: false } }),
   });
@@ -145,9 +148,14 @@ test("unreviewed compiler-detail changes and partial CLI pins fail closed", asyn
       buildReleaseHashManifest({ root: optimizerOverride, contracts: CONTRACTS }),
       /compiler settings/,
     );
+    await assert.rejects(
+      buildReleaseHashManifest({ root: sourceMetadataHash, contracts: CONTRACTS }),
+      /compiler settings/,
+    );
   } finally {
     await Promise.all([
       rm(noCbor, { recursive: true, force: true }),
+      rm(sourceMetadataHash, { recursive: true, force: true }),
       rm(optimizerOverride, { recursive: true, force: true }),
     ]);
   }

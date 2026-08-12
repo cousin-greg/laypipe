@@ -200,6 +200,11 @@ audited deployment manifest. Storage layout, build-info, and deployment scripts
 remain independently reviewed, commit-bound inputs and are not covered by the
 two aggregate hashes.
 
+The audited compiler configuration uses `bytecode_hash = "none"` and retains
+the CBOR compiler marker. This removes machine/source-metadata digests before
+bytecode generation; no post-build byte stripping is permitted. The artifact
+bundle therefore continues to bind exact creation and runtime templates.
+
 The final report should include manual findings, static-analysis output,
 fuzz/invariant methodology, fork block/RPC evidence, dependency review scope,
 economic-model review scope, unresolved assumptions, and confirmation that all

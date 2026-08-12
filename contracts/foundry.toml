@@ -10,7 +10,7 @@ evm_version = "cancun"
 optimizer = true
 optimizer_runs = 800
 via_ir = true
-bytecode_hash = "ipfs"
+bytecode_hash = "none"
 fs_permissions = [{ access = "read", path = "./" }]
 
 fuzz = { runs = 512 }

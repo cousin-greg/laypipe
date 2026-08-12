@@ -336,6 +336,12 @@ artifact IDs, source maps, ASTs, and raw metadata text are excluded. External
 library link placeholders fail closed instead of introducing path-keyed hash
 input.
 
+Release builds set Solidity's metadata bytecode hash to `none` while retaining
+the standard CBOR compiler marker. That removes source-path and raw-metadata
+digests from the executable templates at compile time; the gate never strips
+bytes after compilation. Exact creation/runtime bytes, including their CBOR
+trailers, remain part of the artifact hash and CREATE2 identity.
+
 Per-contract hashes are aggregated in contract-name order with domain-separated
 bundle schemas. Repo-relative filenames are printed as audit labels but are not
 aggregate-hash input. The artifact hash identifies the compiled bytecode templates;
