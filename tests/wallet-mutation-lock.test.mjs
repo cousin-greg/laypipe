@@ -22,6 +22,14 @@ const pendingClaims = await tsImport(
   "../lib/wallet/pending-claims.ts",
   import.meta.url,
 );
+const pendingKeeperActions = await tsImport(
+  "../lib/wallet/pending-keeper-actions.ts",
+  import.meta.url,
+);
+const keeperClient = await tsImport(
+  "../lib/web3/keeper-client.ts",
+  import.meta.url,
+);
 
 const wallet = "0x3333333333333333333333333333333333333333";
 const otherWallet = "0x4444444444444444444444444444444444444444";
@@ -94,6 +102,20 @@ function claimIntent(owner = wallet) {
   };
 }
 
+function keeperIntent(owner = wallet) {
+  const action = { kind: "sweep", poolId };
+  return {
+    chainId: 4663,
+    wallet: owner,
+    action: "sweep",
+    poolId,
+    target,
+    calldata: keeperClient.keeperActionData(action),
+    hash: null,
+    invokedAt: Date.now(),
+  };
+}
+
 function exclusiveLocks() {
   const held = new Set();
   return {
@@ -103,6 +125,49 @@ function exclusiveLocks() {
       held.add(name);
       try { return await callback({ name, mode: "exclusive" }); }
       finally { held.delete(name); }
+    },
+  };
+}
+
+function queuedLocks() {
+  const held = new Set();
+  const queues = new Map();
+
+  function drain(name) {
+    if (held.has(name)) return;
+    const queue = queues.get(name);
+    const next = queue?.shift();
+    if (!next) return;
+    if (queue.length === 0) queues.delete(name);
+    held.add(name);
+    Promise.resolve()
+      .then(() => next.callback({ name, mode: "exclusive" }))
+      .then(next.resolve, next.reject)
+      .finally(() => {
+        held.delete(name);
+        drain(name);
+      });
+  }
+
+  return {
+    request(name, options, callback) {
+      assert.equal(options.mode, "exclusive");
+      if (options.ifAvailable) {
+        if (held.has(name)) return Promise.resolve(callback(null));
+        held.add(name);
+        return Promise.resolve()
+          .then(() => callback({ name, mode: "exclusive" }))
+          .finally(() => {
+            held.delete(name);
+            drain(name);
+          });
+      }
+      return new Promise((resolve, reject) => {
+        const queue = queues.get(name) ?? [];
+        queue.push({ callback, resolve, reject });
+        queues.set(name, queue);
+        drain(name);
+      });
     },
   };
 }
@@ -126,11 +191,60 @@ test("one shared wallet lock rejects a concurrent cross-surface submission", asy
   await first;
 });
 
+test("manual recovery cannot clear while the same wallet send is active", async () => {
+  const locks = queuedLocks();
+  let releaseSend;
+  const activeSend = mutationLock.withWalletMutationLock(
+    locks,
+    wallet,
+    () => new Promise((resolve) => { releaseSend = resolve; }),
+  );
+  await Promise.resolve();
+
+  let recoveryInvoked = false;
+  await assert.rejects(
+    mutationLock.withWalletRecoveryLocks(locks, wallet, () => {
+      recoveryInvoked = true;
+    }),
+    /Another tab is already submitting/i,
+  );
+  assert.equal(recoveryInvoked, false);
+  releaseSend();
+  await activeSend;
+});
+
+test("different wallets serialize short recovery-store writes without lost updates", async () => {
+  const locks = queuedLocks();
+  const order = [];
+  let releaseFirstWrite;
+  const first = mutationLock.withWalletMutationLock(locks, wallet, () =>
+    mutationLock.withWalletRecoveryStoreLock(locks, async () => {
+      order.push("wallet-a-start");
+      await new Promise((resolve) => { releaseFirstWrite = resolve; });
+      order.push("wallet-a-end");
+    }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const second = mutationLock.withWalletMutationLock(locks, otherWallet, () =>
+    mutationLock.withWalletRecoveryStoreLock(locks, () => {
+      order.push("wallet-b-write");
+    }),
+  );
+  await Promise.resolve();
+  assert.deepEqual(order, ["wallet-a-start"]);
+  releaseFirstWrite();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ["wallet-a-start", "wallet-a-end", "wallet-b-write"]);
+});
+
 test("launch, trade, and claim records each block every wallet mutation surface", () => {
   const cases = [
     (storage) => pendingLaunches.savePendingLaunch(storage, launchIntent()),
     (storage) => pendingTrades.savePendingTrade(storage, tradeIntent()),
     (storage) => pendingClaims.savePendingClaim(storage, claimIntent()),
+    (storage) => pendingKeeperActions.savePendingKeeperAction(storage, keeperIntent()),
   ];
   for (const persist of cases) {
     const storage = new MemoryStorage();
@@ -169,6 +283,7 @@ test("all wallet mutation UIs use the shared lock and cross-surface guard", asyn
     "app/launch/LaunchForm.tsx",
     "app/_components/WalletPortfolio.tsx",
     "app/token/[slug]/TradePanel.tsx",
+    "app/_components/KeeperRewardsPanel.tsx",
   ];
   for (const file of files) {
     const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
@@ -178,5 +293,64 @@ test("all wallet mutation UIs use the shared lock and cross-surface guard", asyn
       /assertNoPendingWalletMutation\(window\.localStorage,/,
       `${file} must check every pending recovery store inside the lock`,
     );
+    assert.match(
+      source,
+      /withWalletRecoveryStoreLock\(/,
+      `${file} must serialize durable intent writes across wallets`,
+    );
+    assert.match(
+      source,
+      /withWalletRecoveryLocks\(/,
+      `${file} must serialize manual recovery against active sends`,
+    );
   }
+});
+
+test("submitted hashes are canonical-reconcile-only on every mutation surface", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const sources = await Promise.all([
+    "app/launch/LaunchForm.tsx",
+    "app/_components/WalletPortfolio.tsx",
+    "app/token/[slug]/TradePanel.tsx",
+    "app/_components/KeeperRewardsPanel.tsx",
+  ].map((file) => readFile(new URL(`../${file}`, import.meta.url), "utf8")));
+
+  for (const source of sources) {
+    assert.match(source, /hash (?:!== null|=== null)|!.*\.hash|.*\.hash !== null/);
+    assert.match(source, /withWalletRecoveryLocks\(navigator\.locks,/);
+  }
+  assert.match(sources[0], /\{!pendingIntent\.hash && \(/);
+  assert.match(sources[1], /\{!pendingClaim\.hash && \(/);
+  assert.match(sources[2], /!restoredIntent\.hash/);
+  assert.match(sources[3], /\{!pendingAction\.hash && \(/);
+});
+
+test("launch and trade UIs remove only the exact saved recovery intent", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const launch = await readFile(
+    new URL("../app/launch/LaunchForm.tsx", import.meta.url),
+    "utf8",
+  );
+  const trade = await readFile(
+    new URL("../app/token/[slug]/TradePanel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(launch, /removeExactPendingLaunch\(window\.localStorage, expected\)/);
+  assert.match(launch, /removeExactUnsubmittedPendingLaunch\(window\.localStorage, expected\)/);
+  assert.doesNotMatch(launch, /\bremovePendingLaunch\b/);
+  assert.match(trade, /removeExactPendingTrade\(window\.localStorage, expected\)/);
+  assert.match(trade, /removeExactUnsubmittedPendingTrade\(window\.localStorage, expected\)/);
+  assert.doesNotMatch(trade, /\bremovePendingTrade\b/);
+});
+
+test("known keeper hashes cannot be manually cleared before canonical reconciliation", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../app/_components/KeeperRewardsPanel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /if \(!account \|\| !pendingAction \|\| pendingAction\.hash !== null\) return/);
+  assert.match(source, /removeExactUnsubmittedKeeperAction\(window\.localStorage, pendingAction\)/);
+  assert.match(source, /\{!pendingAction\.hash && \(/);
+  assert.doesNotMatch(source, /removePendingKeeperActionForWallet/);
 });

@@ -54,6 +54,10 @@ export const EXPECTED_DATABASE_MIGRATIONS = Object.freeze([
     name: "0003_market_baseline_semantics.sql",
     sha256: "99d236277d48835c50e4cefbf886a07564c7322d6f6cb434de16dcf4f1fc2501",
   }),
+  Object.freeze({
+    name: "0004_keeper_rewards.sql",
+    sha256: "7cc755ce38659234e9a3a85fa3aaa64bb328286fb3f0f36007e40a6afa546fad",
+  }),
 ] as const);
 export const EXPECTED_DATABASE_MIGRATION_FINGERPRINT = EXPECTED_DATABASE_MIGRATIONS
   .map(({ name, sha256 }) => `${name}:${sha256}`)

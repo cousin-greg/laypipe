@@ -129,6 +129,14 @@ test("runtime grant identifiers reject injection and reserved PostgreSQL roles",
   );
   assert.match(
     sql,
+    /GRANT SELECT ON[\s\S]*keeper_pool_fee_state[\s\S]*TO "laypipe_runtime_read"/,
+  );
+  assert.match(
+    sql,
+    /ALTER FUNCTION laypipe_apply_inserted_keeper_pool_fees\(\) OWNER TO "laypipe_runtime_service"/,
+  );
+  assert.match(
+    sql,
     /REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, "laypipe_runtime_read", "laypipe_runtime_write"/,
   );
 });
@@ -165,6 +173,7 @@ ALTER SCHEMA public OWNER TO laypipe_migration_owner;
       "0001_runtime_security.sql",
       "0002_market_leader_snapshot.sql",
       "0003_market_baseline_semantics.sql",
+      "0004_keeper_rewards.sql",
     ]) {
       const migration = readFileSync(resolve(root, "db/migrations", name), "utf8")
         .split(/^\s*--> statement-breakpoint\s*$/gm).map((value) => value.trim()).filter(Boolean)
@@ -271,6 +280,10 @@ ORDER BY r.rolname;
 SELECT
   has_table_privilege('laypipe_runtime_read', 'launches', 'SELECT'),
   has_table_privilege('laypipe_runtime_read', 'launches', 'INSERT'),
+  has_table_privilege('laypipe_runtime_read', 'keeper_pool_fee_state', 'SELECT'),
+  has_table_privilege('laypipe_runtime_read', 'keeper_pool_fee_state', 'UPDATE'),
+  has_table_privilege('laypipe_runtime_read', 'keeper_caller_accounting', 'SELECT'),
+  has_table_privilege('laypipe_runtime_read', 'keeper_caller_accounting', 'UPDATE'),
   has_table_privilege('laypipe_runtime_write', 'chain_blocks', 'INSERT'),
   has_table_privilege('laypipe_runtime_write', 'chain_blocks', 'UPDATE'),
   has_table_privilege('laypipe_runtime_write', 'ipfs_promotions', 'INSERT'),
@@ -288,7 +301,7 @@ SELECT
   has_function_privilege('laypipe_runtime_read', 'laypipe_refresh_market_leaders()', 'EXECUTE'),
   has_function_privilege('laypipe_runtime_write', 'laypipe_refresh_market_leaders()', 'EXECUTE');
 `);
-    assert.equal(matrix.stdout, "t|f|t|t|t|t|t|t|t|t|f|f|f|f|t|f|f|f");
+    assert.equal(matrix.stdout, "t|f|t|f|t|f|t|t|t|t|t|t|t|t|f|f|f|f|t|f|f|f");
 
     const readSelect = await psql(container, "SELECT count(*) FROM launches;", {
       role: "laypipe_read_login",
@@ -306,6 +319,8 @@ SELECT
       ["laypipe_write_login", "UPDATE indexer_cursors SET next_block = 99;"],
       ["laypipe_write_login", "UPDATE pool_market_totals SET total_trades = 0;"],
       ["laypipe_write_login", "UPDATE token_holder_balance_state SET balance = 0;"],
+      ["laypipe_write_login", "UPDATE keeper_pool_fee_state SET accrued_total = 0;"],
+      ["laypipe_write_login", "UPDATE keeper_caller_accounting SET sweep_calls = 0;"],
       ["laypipe_write_login", "UPDATE market_leader_snapshots SET refreshed_at = now();"],
       ["laypipe_write_login", "DELETE FROM market_leader_entries;"],
       ["laypipe_write_login", "DELETE FROM ipfs_promotions;"],
@@ -586,7 +601,7 @@ WHERE n.nspname = 'public'
   AND p.proname LIKE 'laypipe_%'
   AND 'search_path=pg_catalog, public' = ANY(coalesce(p.proconfig, ARRAY[]::text[]));
 `);
-    assert.equal(searchPaths.stdout, "13");
+    assert.equal(searchPaths.stdout, "19");
 
     const futureTable = await psql(container, "CREATE TABLE escaped_future(id integer);", {
       role: "laypipe_write_login",

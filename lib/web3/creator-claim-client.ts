@@ -62,8 +62,8 @@ export interface ClaimClientDependencies {
 }
 
 export interface ClaimSubmissionCallbacks {
-  onSubmissionInvoked?: () => void;
-  onSubmitted?: (hash: Hex) => void;
+  onSubmissionInvoked?: () => void | Promise<void>;
+  onSubmitted?: (hash: Hex) => void | Promise<void>;
 }
 
 export class ClaimSubmissionIndeterminateError extends WalletFlowError {
@@ -448,7 +448,7 @@ export class CreatorClaimClient {
     // so account or chain drift cannot hide in another long verification pass.
     await ensureRobinhoodChain(this.provider);
     await assertSubmissionContext(this.provider, account);
-    callbacks.onSubmissionInvoked?.();
+    await callbacks.onSubmissionInvoked?.();
     try {
       const hash = await this.provider.request<unknown>({
         method: "eth_sendTransaction",
@@ -459,7 +459,7 @@ export class CreatorClaimClient {
           "The wallet may have broadcast the claim but returned an invalid hash. Do not retry until wallet activity is reconciled.",
         );
       }
-      callbacks.onSubmitted?.(hash);
+      await callbacks.onSubmitted?.(hash);
       return { hash, observedClaimable: final.claimable };
     } catch (error) {
       if (explicitWalletRejection(error)) {

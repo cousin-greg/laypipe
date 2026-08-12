@@ -1,10 +1,14 @@
 # LayPipe artwork authorization and IPFS API
 
 The upload is intentionally split because Vercel Functions reject request bodies
-above 4.5 MB while LayPipe accepts artwork up to 5 MB. The browser never sends
-the raw file in a LayPipe Function request. A wallet-authorized, 60-second Pinata
-URL stages it; the final Function retrieves the staged bytes, verifies, decodes,
-sanitizes, and pins the permanent image and metadata.
+above 4.5 MB while LayPipe accepts artwork up to 5 MB. Before any upload, the
+browser decodes and re-encodes the selected image and replaces its basename with
+`laypipe-artwork.<type>` so source-file EXIF, location, comments, camera details,
+and private filename text never reach public IPFS. The browser never
+sends the source file in a LayPipe Function request. A wallet-authorized,
+60-second Pinata URL stages the normalized pixels; the final Function retrieves
+the staged bytes, independently verifies and sanitizes them, and pins the
+permanent image and metadata.
 
 Every challenge is an EIP-191 message. The opaque `challenge` is an HMAC-signed,
 five-minute token containing the wallet, action, exact request digest, nonce, and
@@ -21,8 +25,10 @@ all honor this server-side kill switch.
 
 ## Browser contract
 
-1. Hash the original file with SHA-256 and calculate the canonical stage digest
-   from `{action,wallet,fileName,mimeType,size,fileSha256}`.
+1. Decode and re-encode the selected image locally, validate the normalized file,
+   hash that normalized file with SHA-256, and calculate the canonical stage
+   digest from `{action,wallet,fileName,mimeType,size,fileSha256}`. Fail closed
+   when the browser cannot provide the required bitmap/canvas APIs.
 2. `POST /api/auth/challenge`:
 
    ```json
@@ -36,7 +42,7 @@ all honor this server-side kill switch.
    ```json
    {
      "wallet":"0x...",
-     "fileName":"coin.png",
+     "fileName":"laypipe-artwork.png",
      "mimeType":"image/png",
      "size":1234,
      "fileSha256":"64 lowercase hex",
@@ -46,7 +52,7 @@ all honor this server-side kill switch.
    ```
 
    Response: `{uploadUrl,expiresAt}`. Immediately `POST` multipart directly to
-   `uploadUrl` with `network=public` and `file=<original File>`. Pinata responds
+   `uploadUrl` with `network=public` and `file=<normalized File>`. Pinata responds
    with `{data:{id,cid,...}}`; retain `id` and `cid` only for the final request.
    The filename must be the canonical value produced by `sanitizeArtworkName`.
 4. Calculate the canonical pin digest from

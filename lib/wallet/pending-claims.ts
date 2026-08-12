@@ -264,6 +264,61 @@ export function removeExactPendingClaim(
   writeAll(storage, current);
 }
 
+export function removeExactUnsubmittedPendingClaim(
+  storage: Storage,
+  expected: PendingClaimIntent,
+  now = Date.now(),
+) {
+  const validated = parseIntent(expected, now);
+  if (validated.hash !== null) {
+    return persistenceError(
+      "corrupt",
+      "Only an exact hashless claim intent can be cleared manually.",
+    );
+  }
+  const current = readAll(storage, now);
+  const walletIndex = current.findIndex(
+    (candidate) => candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
+  );
+  if (walletIndex < 0 || !exactIntent(current[walletIndex]!, validated)) {
+    return persistenceError(
+      "corrupt",
+      "The hashless claim intent no longer matches the saved exact record.",
+    );
+  }
+  current.splice(walletIndex, 1);
+  writeAll(storage, current);
+}
+
+export function resetPendingClaimForWallet(storage: Storage, wallet: Address) {
+  let value: unknown;
+  try {
+    const raw = storage.getItem(PENDING_CLAIMS_STORAGE_KEY);
+    if (raw === null) return;
+    value = JSON.parse(raw);
+  } catch (cause) {
+    return persistenceError(
+      "unreadable",
+      "The claim store cannot be safely reset for one wallet.",
+      cause,
+    );
+  }
+  if (!Array.isArray(value) || value.length > MAX_PENDING_CLAIMS) {
+    return persistenceError("malformed", "The claim store cannot be safely reset for one wallet.");
+  }
+  const retained = value.filter((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return persistenceError("corrupt", "The claim store has an unowned record.");
+    }
+    const owner = (entry as { wallet?: unknown }).wallet;
+    if (typeof owner !== "string" || !isAddress(owner)) {
+      return persistenceError("corrupt", "The claim store has an unowned record.");
+    }
+    return owner.toLowerCase() !== wallet.toLowerCase();
+  }) as PendingClaimIntent[];
+  writeAll(storage, retained);
+}
+
 export function resetPendingClaimStore(storage: Storage) {
   try {
     storage.removeItem(PENDING_CLAIMS_STORAGE_KEY);

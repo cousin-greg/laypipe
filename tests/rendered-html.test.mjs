@@ -89,8 +89,6 @@ async function expectPage(path, patterns) {
   assert.match(html, /Robinhood Chain/i);
   assert.match(html, /Fixture feed/i);
   assert.match(html, /pipedog-pipe-mark\.png/i);
-  assert.match(html, /Dragon[_-]Regular[^"']*\.woff2/i);
-  assert.match(html, /PPMori[_-]Regular[^"']*\.woff2/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
   assert.doesNotMatch(html, /buybacks?/i);
 
@@ -99,6 +97,23 @@ async function expectPage(path, patterns) {
   }
 
   return html;
+}
+
+async function expectCanonicalFontAssets(html) {
+  const stylesheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/gi)]
+    .map((match) => match[1]);
+  assert.ok(stylesheets.length > 0, "rendered page should link its built stylesheets");
+  const css = (
+    await Promise.all(
+      stylesheets.map(async (href) => {
+        const response = await fetch(new URL(href, baseUrl));
+        assert.equal(response.status, 200, `${href} should load`);
+        return response.text();
+      }),
+    )
+  ).join("\n");
+  assert.match(css, /Dragon[_-]Regular[^"')]*\.woff2/i);
+  assert.match(css, /PPMori[_-]Regular[^"')]*\.woff2/i);
 }
 
 test("server-renders the board with explicitly labeled fixture data", async () => {
@@ -111,6 +126,8 @@ test("server-renders the board with explicitly labeled fixture data", async () =
     /Biggest mover/i,
     /0\.3% protocol lane routes 25% to 0xdead/i,
   ]);
+
+  await expectCanonicalFontAssets(html);
 
   assert.doesNotMatch(html, /Preview market/i);
   assert.match(html, /Cards/i);

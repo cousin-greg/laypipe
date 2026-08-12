@@ -332,8 +332,8 @@ test("wallet claim UI keeps corrupt persistence locked behind explicit recovery"
   );
   assert.match(component, /!claimStorageReady/);
   assert.match(component, /Claims are locked\./);
-  assert.match(component, /resetPendingClaimStore/);
-  assert.match(component, /I checked wallet activity; reset all local claim locks/);
+  assert.match(component, /resetPendingClaimForWallet/);
+  assert.match(component, /I checked wallet activity; reset this wallet&apos;s claim lock/);
   assert.match(component, /removeExactPendingClaim/);
   const immediateFlow = component.slice(
     component.indexOf("async function claim("),

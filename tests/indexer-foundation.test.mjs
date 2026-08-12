@@ -220,6 +220,51 @@ test("market leader baseline uses the cutoff price with a new-pool fallback", ()
   assert.match(statements[1], /^REVOKE ALL ON FUNCTION/);
 });
 
+test("keeper rewards use exact caller indexes and rollback-safe pending-fee state", () => {
+  const sql = readFileSync(
+    resolve(root, "db/migrations/0004_keeper_rewards.sql"),
+    "utf8",
+  );
+  assert.match(
+    sql,
+    /ARRAY\['fee_events', 'revenue_events'\][\s\S]*t\.tgfoid = 'public\.laypipe_reject_changed_immutable_row\(\)'::regprocedure[\s\S]*t\.tgtype = 19[\s\S]*t\.tgenabled IN \('O', 'A'\)/,
+  );
+  assert.match(
+    sql,
+    /keeper projections require enabled immutable UPDATE trigger on %/,
+  );
+  assert.match(sql, /CREATE INDEX revenue_events_caller_bounty_idx/);
+  assert.match(
+    sql,
+    /chain_id, caller_address, block_number DESC, log_index DESC[\s\S]*INCLUDE \(route_kind, bounty, amount, transaction_hash, block_timestamp\)/,
+  );
+  assert.match(sql, /route_kind IN \('sequestered', 'treasury'\)/);
+  assert.match(sql, /CREATE INDEX fee_events_sweeper_idx/);
+  assert.match(sql, /WHERE fee_kind = 'swept' AND actor_address IS NOT NULL/);
+  assert.match(sql, /CREATE TABLE keeper_pool_fee_state/);
+  assert.match(sql, /GENERATED ALWAYS AS \(accrued_total - swept_total\) STORED/);
+  assert.match(sql, /CHECK \([\s\S]*swept_total <= accrued_total[\s\S]*115792089237316195423570985008687907853269984665640564039457584007913129639935[\s\S]*\)/);
+  assert.match(sql, /CREATE INDEX keeper_pool_fee_state_candidates_idx/);
+  assert.match(sql, /WHERE indexed_pending > 0/);
+  assert.match(sql, /REFERENCING NEW TABLE AS new_keeper_fee_events/);
+  assert.match(sql, /REFERENCING OLD TABLE AS old_keeper_fee_events/);
+  assert.match(sql, /keeper pool fee state diverged during canonical rollback/);
+  assert.match(sql, /REVOKE ALL ON TABLE keeper_pool_fee_state FROM PUBLIC/);
+  assert.match(sql, /CREATE TABLE keeper_caller_accounting/);
+  assert.match(
+    sql,
+    /sequester_bounty numeric NOT NULL[\s\S]*sweep_calls numeric NOT NULL/,
+  );
+  assert.match(sql, /REFERENCING NEW TABLE AS new_keeper_revenue_events/);
+  assert.match(sql, /REFERENCING OLD TABLE AS old_keeper_revenue_events/);
+  assert.match(sql, /REFERENCING NEW TABLE AS new_keeper_sweep_events/);
+  assert.match(sql, /REFERENCING OLD TABLE AS old_keeper_sweep_events/);
+  assert.match(sql, /REVOKE ALL ON TABLE keeper_caller_accounting FROM PUBLIC/);
+
+  const statements = migrationPlan.migrationStatements(sql);
+  assert.equal(statements.length, 28);
+});
+
 test("migration chunks are single statements and discovery is rechecked behind the lock", () => {
   const sql = readFileSync(resolve(root, "db/migrations/0000_production_read_model.sql"), "utf8");
   const statements = migrationPlan.migrationStatements(sql);

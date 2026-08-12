@@ -276,6 +276,22 @@ tokens actually burned, and the paid bounty. Operational monitoring should
 periodically compare event totals to the audited contracts' public counter and
 balance views before production alerts are enabled.
 
+Migration `0004_keeper_rewards.sql` adds two canonical keeper projections.
+`keeper_pool_fee_state` maintains current indexed pending fees per pool, and
+`keeper_caller_accounting` maintains exact caller-attributed revenue bounties,
+route counts, and zero-bounty sweep counts. Statement transition triggers apply
+INSERT and DELETE deltas in the canonical ingest/rollback transaction, so reorg
+replay stays exact. The migration first verifies the canonical `fee_events` and
+`revenue_events` immutability triggers: identical `ON CONFLICT DO UPDATE` replay
+leaves projections unchanged, while any changed event aborts before an UPDATE
+can make a projection stale. The public keeper read model uses a bounded partial
+index scan for at most 20 pool candidates and a primary-key lookup for one
+wallet; it never sums lifetime fee or reward history on a request. Indexed
+candidates are discovery hints only: the connected wallet still verifies the
+configured release manifest, reads current contract state, and simulates before sending.
+`PlatformPayoutCollected` cannot enter caller accounting because its event has
+no caller.
+
 Run the executable, read-only gate with an explicit finalized block:
 
 ```text

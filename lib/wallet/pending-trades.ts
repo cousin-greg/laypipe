@@ -248,6 +248,20 @@ function samePool(
   );
 }
 
+function exactIntent(left: PendingTradeIntent, right: PendingTradeIntent) {
+  return (
+    samePool(left, right.wallet, right.tokenAddress, right.poolId) &&
+    left.action === right.action &&
+    left.target.toLowerCase() === right.target.toLowerCase() &&
+    left.calldata.toLowerCase() === right.calldata.toLowerCase() &&
+    left.value === right.value &&
+    left.hash?.toLowerCase() === right.hash?.toLowerCase() &&
+    left.invokedAt === right.invokedAt &&
+    JSON.stringify(left.action === "approval" ? left.approval : left.trade) ===
+      JSON.stringify(right.action === "approval" ? right.approval : right.trade)
+  );
+}
+
 export function readPendingTrade(
   storage: Storage,
   wallet: Address,
@@ -357,16 +371,49 @@ export function savePendingTradeHash(
   writeAll(storage, current);
 }
 
-export function removePendingTrade(
+export function removeExactPendingTrade(
   storage: Storage,
-  wallet: Address,
-  tokenAddress: Address,
-  poolId: Hex,
+  expected: PendingTradeIntent,
 ) {
-  writeAll(
-    storage,
-    readAll(storage).filter(
-      (candidate) => !samePool(candidate, wallet, tokenAddress, poolId),
-    ),
+  const validated = parseIntent(expected, Date.now());
+  if (!validated || validated.hash === null) {
+    throw new PendingTradeStorageError(
+      "A canonically resolved trade intent must include its exact transaction hash.",
+    );
+  }
+  const current = readAll(storage);
+  const index = current.findIndex(
+    (candidate) =>
+      candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
   );
+  if (index < 0 || !exactIntent(current[index]!, validated)) {
+    throw new PendingTradeStorageError(
+      "The canonically resolved trade intent does not match the saved exact record.",
+    );
+  }
+  current.splice(index, 1);
+  writeAll(storage, current);
+}
+
+export function removeExactUnsubmittedPendingTrade(
+  storage: Storage,
+  expected: PendingTradeIntent,
+) {
+  const validated = parseIntent(expected, Date.now());
+  if (!validated || validated.hash !== null) {
+    throw new PendingTradeStorageError(
+      "Only an exact hashless trade intent can be cleared manually.",
+    );
+  }
+  const current = readAll(storage);
+  const index = current.findIndex(
+    (candidate) => candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
+  );
+  if (index < 0 || !exactIntent(current[index]!, validated)) {
+    throw new PendingTradeStorageError(
+      "The hashless trade intent no longer matches the saved exact record.",
+    );
+  }
+  current.splice(index, 1);
+  writeAll(storage, current);
 }

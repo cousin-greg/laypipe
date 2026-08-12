@@ -92,9 +92,10 @@ export default function DocsPage() {
             </p>
             <ol>
               <li>
-                Choose the token identity. Non-zero PIPEDOG first buys remain
-                disabled until the app has a trusted quote and explicit
-                slippage control.
+                Choose the token identity and, optionally, a PIPEDOG first buy
+                with an explicit 0.5%-5% slippage limit. LayPipe proves the
+                deterministic quote against the full factory call before the
+                wallet prompt.
               </li>
               <li>
                 Use creator-fee mode. Self-burn is implemented but remains
@@ -112,6 +113,17 @@ export default function DocsPage() {
                 PIPEDOG has no permit support. A live wallet must grant the
                 exact ERC-20 allowance required for that launch or buy, never
                 an unlimited approval. Native ETH pays network gas only.
+              </p>
+            </div>
+            <div className="docs-note">
+              <strong>Launch first buys have a price bound, not a deadline</strong>
+              <p>
+                The launch calldata carries a nonzero minimum token output. Its
+                30-second quote TTL and 600-block drift cap are client-side
+                pre-submission checks because the current factory ABI has no
+                deadline field. Delayed inclusion still cannot execute below
+                the encoded minimum, but it cannot be expired on-chain without
+                an audited factory upgrade.
               </p>
             </div>
             <div className="docs-note">
@@ -180,6 +192,16 @@ export default function DocsPage() {
               creators stop claiming. If the hook’s exact platform transfer
               fails, it parks that amount for an independent permissionless
               retry without blocking the creator claim.
+            </p>
+            <p>
+              The Rewards page shows exact caller-attributed router bounties
+              from canonical events and lets the connected wallet verify and
+              simulate currently eligible maintenance calls. Platform
+              collection and pool sweeps pay no bounty; the platform event has
+              no caller and is never presented as a wallet reward. Known
+              transaction hashes remain locally locked until canonical receipt
+              reconciliation. The website has no server signer or automatic
+              keeper key, and self-burn execution is not exposed.
             </p>
             <div className="docs-note">
               <strong>Self-burn orders expose execution risk</strong>

@@ -10,11 +10,12 @@ import {
 } from "@/lib/server/auth/http";
 import { enforceRateLimit } from "@/lib/server/auth/redis";
 import { requireIpfsPinningEnabled } from "@/lib/server/ipfs/pinata";
+import { observeOperationalRequest } from "@/lib/server/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+async function handleChallengeRequest(request: Request) {
   try {
     sameOriginBrowserRequest(request);
     requireIpfsPinningEnabled();
@@ -51,4 +52,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return jsonError(error);
   }
+}
+
+export async function POST(request: Request) {
+  return observeOperationalRequest(request, "/api/auth/challenge", () =>
+    handleChallengeRequest(request),
+  );
 }

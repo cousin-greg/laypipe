@@ -224,6 +224,12 @@ Greg must explicitly authorize each broadcast after the independent audit.
   config may already be staged while that global gate remains closed.
 - [ ] Test exact approval, creator-mode launch, buy, sell, fee sweep, creator
    claim, deferred platform payout/retry, and 25/25/50 protocol routing.
+- [ ] From My Tokens, hand off a creator-mode pool to a checksummed test Safe.
+  Prove fresh-index/current-hook agreement, durable pre-send intent, shared
+  cross-tab mutation locking, exact zero-value calldata, a two-block canonical
+  `CreatorUpdated` receipt, reload recovery, and that only the new Safe can
+  claim afterward. Also exercise stale-state, wrong-destination, duplicate-log,
+  indeterminate-send, and canonical-revert paths.
 - [ ] For buy and sell, prove ArbSys/native-chain deadline expiry, last-moment
   account/chain/head drift rejection, indeterminate-send retry locking, exact
   calldata/value receipt binding, canonical confirmation, and post-clear
@@ -264,7 +270,8 @@ Greg must explicitly authorize each broadcast after the independent audit.
 - [ ] Enable creator-mode launches in a separate Safe transaction only after
   the website and market indexer are proven live; the internally implemented
   exact-approval buy/sell and creator claim/position flows pass independent
-  review plus real wallet E2E; and required keeper/reward automation and
+  review plus real wallet E2E; creator handoff passes independent review and a
+  current-creator-to-Safe rehearsal; and required keeper/reward automation and
   eligibility paths are implemented and tested. Until then, production scope
   is a disabled launcher plus read-only Board.
 

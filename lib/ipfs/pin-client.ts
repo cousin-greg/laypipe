@@ -1,6 +1,7 @@
 import { CID } from "multiformats/cid";
 import {
   artworkContentHash,
+  normalizeArtworkForPublicStage,
   validateArtworkFile,
   type ValidatedArtwork,
 } from "./artwork";
@@ -596,10 +597,15 @@ export async function pinLaunchAssets(options: {
   browserOrigin: string;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
+  normalizeArtwork?: (file: File) => Promise<ValidatedArtwork>;
 }): Promise<PinnedLaunchAssets> {
   const fetcher = options.fetcher ?? fetch;
   creatorModeOnly(options.metadata);
-  const artwork = await validateArtworkFile(options.file);
+  await validateArtworkFile(options.file);
+  const artwork = await (options.normalizeArtwork ?? normalizeArtworkForPublicStage)(
+    options.file,
+  );
+  await validateArtworkFile(artwork.file);
   const fileSha256 = await artworkContentHash(artwork.file);
   const stageDetails = {
     wallet: options.wallet,

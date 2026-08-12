@@ -215,6 +215,21 @@ function sameIntent(
   );
 }
 
+function exactIntent(left: PendingLaunchIntent, right: PendingLaunchIntent) {
+  return (
+    left.chainId === right.chainId &&
+    left.wallet.toLowerCase() === right.wallet.toLowerCase() &&
+    left.action === right.action &&
+    left.predictedToken.toLowerCase() === right.predictedToken.toLowerCase() &&
+    left.target.toLowerCase() === right.target.toLowerCase() &&
+    left.calldata.toLowerCase() === right.calldata.toLowerCase() &&
+    left.hash?.toLowerCase() === right.hash?.toLowerCase() &&
+    left.invokedAt === right.invokedAt &&
+    JSON.stringify(left.action === "approval" ? left.amount : left.input) ===
+      JSON.stringify(right.action === "approval" ? right.amount : right.input)
+  );
+}
+
 export function serializeLaunchInput(
   input: LaunchCallInput,
 ): SerializedLaunchCallInput {
@@ -317,17 +332,49 @@ export function savePendingLaunchHash(
   writeAll(storage, current);
 }
 
-export function removePendingLaunch(
+export function removeExactPendingLaunch(
   storage: Storage,
-  wallet: Address,
-  action: PendingLaunchIntent["action"],
-  predictedToken: Address,
+  expected: PendingLaunchIntent,
 ) {
-  writeAll(
-    storage,
-    readAll(storage).filter(
-      (candidate) =>
-        !sameIntent(candidate, wallet, action, predictedToken),
-    ),
+  const validated = parseIntent(expected, Date.now());
+  if (!validated || validated.hash === null) {
+    throw new PendingLaunchStorageError(
+      "A canonically resolved launch intent must include its exact transaction hash.",
+    );
+  }
+  const current = readAll(storage);
+  const index = current.findIndex(
+    (candidate) =>
+      candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
   );
+  if (index < 0 || !exactIntent(current[index]!, validated)) {
+    throw new PendingLaunchStorageError(
+      "The canonically resolved launch intent does not match the saved exact record.",
+    );
+  }
+  current.splice(index, 1);
+  writeAll(storage, current);
+}
+
+export function removeExactUnsubmittedPendingLaunch(
+  storage: Storage,
+  expected: PendingLaunchIntent,
+) {
+  const validated = parseIntent(expected, Date.now());
+  if (!validated || validated.hash !== null) {
+    throw new PendingLaunchStorageError(
+      "Only an exact hashless launch intent can be cleared manually.",
+    );
+  }
+  const current = readAll(storage);
+  const index = current.findIndex(
+    (candidate) => candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
+  );
+  if (index < 0 || !exactIntent(current[index]!, validated)) {
+    throw new PendingLaunchStorageError(
+      "The hashless launch intent no longer matches the saved exact record.",
+    );
+  }
+  current.splice(index, 1);
+  writeAll(storage, current);
 }

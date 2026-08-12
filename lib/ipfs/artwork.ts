@@ -26,7 +26,9 @@ export class ArtworkValidationError extends Error {
     | "MIME_MISMATCH"
     | "INVALID_IMAGE"
     | "NOT_SQUARE"
-    | "DIMENSIONS_OUT_OF_RANGE";
+    | "DIMENSIONS_OUT_OF_RANGE"
+    | "NORMALIZATION_UNAVAILABLE"
+    | "NORMALIZATION_FAILED";
 
   constructor(code: ArtworkValidationError["code"], message: string) {
     super(message);
@@ -238,4 +240,153 @@ export async function validateArtworkFile(file: File): Promise<ValidatedArtwork>
     height: inspected.height,
     safeName: sanitizeArtworkName(file.name),
   };
+}
+
+interface BrowserArtworkBitmap {
+  width: number;
+  height: number;
+  close?: () => void;
+}
+
+interface BrowserArtworkCanvas {
+  width: number;
+  height: number;
+  getContext: (contextId: "2d") =>
+    | {
+        drawImage: (
+          image: CanvasImageSource,
+          dx: number,
+          dy: number,
+          width: number,
+          height: number,
+        ) => void;
+      }
+    | null;
+  toBlob: (
+    callback: (blob: Blob | null) => void,
+    type?: string,
+    quality?: number,
+  ) => void;
+}
+
+export interface BrowserArtworkNormalizer {
+  createBitmap?: (file: Blob) => Promise<BrowserArtworkBitmap>;
+  createCanvas?: () => BrowserArtworkCanvas;
+}
+
+function defaultBitmap(file: Blob) {
+  if (typeof createImageBitmap !== "function") {
+    throw new ArtworkValidationError(
+      "NORMALIZATION_UNAVAILABLE",
+      "This browser cannot safely prepare artwork for public upload.",
+    );
+  }
+  return createImageBitmap(file, { imageOrientation: "from-image" });
+}
+
+function defaultCanvas() {
+  if (typeof document === "undefined") {
+    throw new ArtworkValidationError(
+      "NORMALIZATION_UNAVAILABLE",
+      "This browser cannot safely prepare artwork for public upload.",
+    );
+  }
+  return document.createElement("canvas") as BrowserArtworkCanvas;
+}
+
+function encodeCanvas(
+  canvas: BrowserArtworkCanvas,
+  mimeType: "image/webp" | "image/png",
+  quality?: number,
+) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, mimeType, quality);
+  });
+}
+
+function normalizedArtworkName(mimeType: ArtworkMimeType) {
+  // A source basename can contain a person's name, date, location, or camera
+  // identifier. Never copy it into Pinata's public file metadata.
+  const base = "laypipe-artwork";
+  const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1];
+  return sanitizeArtworkName(`${base}.${extension}`);
+}
+
+/**
+ * Decodes and re-encodes the selected image in the browser before its bytes are
+ * staged on public IPFS. Canvas output contains pixels, not the source file's
+ * EXIF, location, comments, or other attached metadata. The server still
+ * independently decodes and sanitizes the staged result before permanent pinning.
+ */
+export async function normalizeArtworkForPublicStage(
+  file: File,
+  dependencies: BrowserArtworkNormalizer = {},
+): Promise<ValidatedArtwork> {
+  const original = await validateArtworkFile(file);
+  const createBitmap = dependencies.createBitmap ?? defaultBitmap;
+  const createCanvas = dependencies.createCanvas ?? defaultCanvas;
+  let bitmap: BrowserArtworkBitmap | undefined;
+
+  try {
+    bitmap = await createBitmap(original.file);
+    if (
+      bitmap.width !== original.width ||
+      bitmap.height !== original.height ||
+      bitmap.width < MIN_ARTWORK_DIMENSION ||
+      bitmap.width > MAX_ARTWORK_DIMENSION
+    ) {
+      throw new ArtworkValidationError(
+        "NORMALIZATION_FAILED",
+        "The browser decoded artwork with unexpected dimensions.",
+      );
+    }
+
+    const canvas = createCanvas();
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new ArtworkValidationError(
+        "NORMALIZATION_UNAVAILABLE",
+        "This browser cannot safely prepare artwork for public upload.",
+      );
+    }
+    context.drawImage(
+      bitmap as CanvasImageSource,
+      0,
+      0,
+      bitmap.width,
+      bitmap.height,
+    );
+
+    let encoded = await encodeCanvas(canvas, "image/webp", 0.9);
+    if (!encoded || encoded.type !== "image/webp") {
+      encoded = await encodeCanvas(canvas, "image/png");
+    }
+    if (
+      !encoded ||
+      !SUPPORTED_ARTWORK_TYPES.includes(encoded.type as ArtworkMimeType)
+    ) {
+      throw new ArtworkValidationError(
+        "NORMALIZATION_FAILED",
+        "The browser could not encode sanitized artwork.",
+      );
+    }
+
+    const mimeType = encoded.type as ArtworkMimeType;
+    const normalizedFile = new File(
+      [encoded],
+      normalizedArtworkName(mimeType),
+      { type: mimeType, lastModified: 0 },
+    );
+    return await validateArtworkFile(normalizedFile);
+  } catch (error) {
+    if (error instanceof ArtworkValidationError) throw error;
+    throw new ArtworkValidationError(
+      "NORMALIZATION_FAILED",
+      "Artwork could not be decoded and re-encoded safely in this browser.",
+    );
+  } finally {
+    bitmap?.close?.();
+  }
 }

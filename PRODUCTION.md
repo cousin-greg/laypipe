@@ -196,6 +196,40 @@ plus the launched token's `poolId()` matching the event. A real browser and hard
 rehearsal remains a release gate; unit fixtures do not prove wallet UX or public
 RPC behavior.
 
+Creator-fee handoff is an irreversible maintenance mutation available only in
+My Tokens to the freshly indexed current creator. The browser displays the
+original and current creator separately, requires the destination's exact
+EIP-55 checksum, and requires the sender to acknowledge control of that exact
+wallet or Safe. The client rejects stale indexed eligibility or any disagreement
+between the index and the configured release hook. It then simulates and estimates the
+zero-value `updateCreator(poolId,newCreator)` call before repeating the full
+maintenance-manifest, current-creator, account, and chain checks immediately
+before submission.
+
+The handoff uses the same per-wallet Web Lock and cross-surface mutation guard
+as launch, trade, and claim, nested inside one non-waiting creator-store Web
+Lock. The outer lock prevents two different wallets in separate tabs from
+racing the bounded shared recovery record. Submission, automatic reconciliation,
+hashless manual clear, and corrupt-store reset all use the same global-then-wallet
+lock order. Its exact hook/pool/old-creator/new-creator intent is durably saved
+before `eth_sendTransaction`; an indeterminate wallet result remains locked
+across reload. A known transaction hash cannot be manually cleared and must be
+canonically reconciled. A hashless manual clear requires an exact intent match;
+the UI disables recovery while its own request is live. Wallet-provider calls
+are bounded, and a send timeout remains indeterminate and locked. Success
+requires an independent two-block
+canonical receipt whose sender, target, zero value, calldata, receipt/block
+identity, and exactly one `CreatorUpdated` event all match that saved intent.
+Only a fully bound canonical status-zero receipt is a typed proven revert that
+can automatically release the lock. No server wallet or signing key participates.
+
+Launch, trade, claim, and keeper recovery arrays also serialize every short
+read/modify/write section through one queued browser-wide recovery-store lock
+while retaining the non-waiting per-wallet lock across each wallet prompt.
+Manual recovery takes the wallet lock first, so another tab cannot erase a
+hashless intent while a send is unresolved. Once a hash exists, only exact
+canonical receipt reconciliation may remove that intent.
+
 `lib/web3/chains.ts` contains a Base Sepolia rehearsal descriptor, and
 `createBaseSepoliaTestManifest` requires an explicit test-only acknowledgement.
 The production environment parser has no network switch and can only construct
@@ -328,15 +362,19 @@ error/empty readiness state and never silently substitutes fixture prices.
 
 ## Artwork and metadata flow
 
-The browser validates and hashes a PNG, JPEG, or WebP, then signs a short-lived
-EIP-191 challenge binding its wallet and exact file digest. The same-origin
-stage endpoint returns a 60-second Pinata upload URL, and the browser sends the
-raw file directly to Pinata so Vercel's request-body limit is never in the data
-path. A second signed challenge binds the returned CID/file ID, SHA-256, and
-canonical launch metadata. The final same-origin pin endpoint re-fetches the
-immutable staged CID, verifies the Pinata tags and wallet, enforces the 5 MB
-cap, inspects the actual file signature, decodes and deterministically
-re-encodes it as WebP, removes embedded metadata, and rejects SVG.
+The browser validates a PNG, JPEG, or WebP, decodes and re-encodes its pixels,
+replaces the source basename with a generic filename, and hashes only those
+normalized bytes. Source EXIF, location, comments, camera details, and private
+filename text therefore never enter public Pinata staging. It then signs a
+short-lived EIP-191 challenge binding its wallet and exact normalized digest.
+The same-origin stage endpoint returns a 60-second Pinata upload URL, and the
+browser sends the normalized file directly to Pinata so Vercel's request-body
+limit is never in the data path. A second signed challenge binds the returned
+CID/file ID, SHA-256, and canonical launch metadata. The final same-origin pin
+endpoint re-fetches the immutable staged CID, verifies the Pinata tags and
+wallet, enforces the 5 MB cap, inspects the actual file signature, decodes and
+deterministically re-encodes it as WebP again, removes embedded metadata, and
+rejects SVG.
 
 Pin the normalized image first. Create deterministic token metadata whose
 `image` field is `ipfs://<image-cid>`, then pin that JSON. The launch transaction
@@ -400,18 +438,34 @@ the Hobby-plan daily cron ceiling is not sufficient for sustained heavy launch
 traffic. Permanent artwork and metadata pins are never selected for cleanup.
 
 The server parses returned CIDs with a multiformats implementation; browser
-regex checks are only an early error message. Non-zero first buys remain
-disabled until the application can derive a deterministic on-chain quote and
-apply user-selected slippage instead of asking users to guess a minimum.
+regex checks are only an early error message. Optional non-zero first buys use
+the deterministic Uniswap v4 curve model, prove the exact output and adjacent
+slippage boundary through full factory calls at one verified block, apply the
+user's 0.5%-5% tolerance as a non-zero `firstBuyMinOut`, and repeat the configured
+preflight plus protected factory simulation immediately before submission. The
+30-second/600-block freshness budget is client-side only: factory launch
+calldata has no deadline, so the on-chain execution guarantee is the non-zero
+minimum output. See `FIRST_BUY.md` for the exact release and rehearsal gates.
 
 ## Observability and incident response
 
-Failed operational requests emit bounded route/status summaries; indexer and
-cleanup jobs emit one secret-free terminal domain summary including worker
+Server-failed operational requests emit bounded route/status summaries. Routine
+public 4xx responses rely on Vercel request metadata and are not individually
+logged, preventing unauthenticated log-cost amplification. Indexer and cleanup
+jobs emit one secret-free terminal domain summary including worker
 status, safe head, next block/lag, rollback count, or cleanup truncation and
 failure totals. They never log authorization headers, RPC URLs, wallet
 signatures, webhook bodies, or environment values. Routine liveness and market
 poll successes rely on Vercel's native request metadata to avoid log spend.
+
+The production CSP is the documented static-compatible Next.js baseline. It
+removes `unsafe-eval` in production, blocks frames, objects, and script
+attributes, and allowlists only LayPipe, Pinata delivery/upload hosts, and
+Robinhood's public wallet RPC. It retains `script-src 'unsafe-inline'` because
+a nonce-based strict CSP forces dynamic rendering in Next.js and conflicts with
+this release's static/CDN path. Treat that as an accepted defense-in-depth
+limitation, not a strict-XSS claim; inspect the built page for CSP violations
+and theme first-paint behavior during the real Preview browser rehearsal.
 
 Before promotion:
 

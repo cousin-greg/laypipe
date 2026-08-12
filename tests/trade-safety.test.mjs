@@ -214,10 +214,51 @@ test("pending trade intent survives reload and creates a wallet-wide mutation lo
     pendingTrades.readPendingTrade(storage, OWNER, TOKEN, poolId).hash,
     TX_HASH,
   );
-  pendingTrades.removePendingTrade(storage, OWNER, TOKEN, poolId);
+  pendingTrades.removeExactPendingTrade(storage, { ...intent, hash: TX_HASH });
   assert.equal(
     pendingTrades.readPendingTrade(storage, OWNER, TOKEN, poolId),
     null,
+  );
+});
+
+test("a stale trade reconciler cannot erase a newer same-pool intent", () => {
+  const storage = memoryStorage();
+  const original = {
+    chainId: 4663,
+    wallet: OWNER,
+    tokenAddress: TOKEN,
+    poolId: poolIdFor(),
+    action: "approval",
+    target: PIPEDOG,
+    calldata: approvalData(10n),
+    value: "0x0",
+    approval: {
+      side: "buy",
+      token: PIPEDOG,
+      amount: "10",
+      kind: "approve-exact",
+    },
+    hash: null,
+    invokedAt: Date.now(),
+  };
+  pendingTrades.savePendingTrade(storage, original);
+  pendingTrades.savePendingTradeHash(storage, original, TX_HASH);
+  const staleResolved = pendingTrades.readPendingTradeForWallet(storage, OWNER);
+  pendingTrades.removeExactPendingTrade(storage, staleResolved);
+
+  const replacement = { ...original, invokedAt: original.invokedAt + 1 };
+  pendingTrades.savePendingTrade(storage, replacement);
+  assert.throws(
+    () => pendingTrades.removeExactPendingTrade(storage, staleResolved),
+    /does not match the saved exact record/i,
+  );
+  assert.throws(
+    () => pendingTrades.removeExactUnsubmittedPendingTrade(storage, original),
+    /no longer matches the saved exact record/i,
+  );
+  assert.deepEqual(
+    pendingTrades.readPendingTradeForWallet(storage, OWNER),
+    replacement,
   );
 });
 

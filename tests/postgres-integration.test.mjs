@@ -141,6 +141,17 @@ const WALLET_POSITION_COLUMNS = [
   "creator_address", "current_creator", "wallet_balance", "launched_by_wallet",
   "claimed_pipedog", "burned_tokens",
 ];
+const KEEPER_ACCOUNTING_COLUMNS = [
+  "total_bounty", "sequester_bounty", "treasury_bounty",
+  "sequester_calls", "treasury_calls", "sweep_calls",
+];
+const KEEPER_RECENT_COLUMNS = [
+  "kind", "transaction_hash", "block_number", "block_timestamp",
+  "processed", "routed", "bounty", "pool_id",
+];
+const KEEPER_SWEEP_COLUMNS = [
+  "pool_id", "token_address", "name", "symbol", "indexed_pending",
+];
 
 function interpolateSql(sql, parameters = []) {
   return sql.replace(/\$(\d+)/g, (_match, index) => {
@@ -202,6 +213,10 @@ function hash(nibble) {
   return `0x${nibble.repeat(64)}`;
 }
 
+function fixedHex(value, nybbles) {
+  return `0x${BigInt(value).toString(16).padStart(nybbles, "0")}`;
+}
+
 test(
   "production migration supports canonical ingest, rollback/replay, and live market reads",
   {
@@ -212,6 +227,7 @@ test(
     const migrationPlan = loadTypeScript("scripts/indexer/migration-plan.ts");
     const readModel = loadTypeScript("lib/server/market/read-model.ts");
     const walletReadModel = loadTypeScript("lib/server/wallet/read-model.ts");
+    const keeperReadModel = loadTypeScript("lib/server/keeper/read-model.ts");
     const repository = loadTypeScript("lib/server/indexer/repository.ts");
     const promotionRegistry = loadTypeScript("lib/server/ipfs/registry.ts");
     process.env.IPFS_GATEWAY_BASE_URL = "https://laypipe-test.mypinata.cloud/ipfs";
@@ -239,6 +255,7 @@ test(
         "0001_runtime_security.sql",
         "0002_market_leader_snapshot.sql",
         "0003_market_baseline_semantics.sql",
+        "0004_keeper_rewards.sql",
       ],
     );
     const container = `laypipe-pg-${process.pid}-${randomBytes(4).toString("hex")}`;
@@ -1048,6 +1065,478 @@ SELECT
   (SELECT balance::text FROM token_holder_balance_state WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}');
 `);
       assert.equal(replayed.stdout, "2\t5\t2\t2000000000000000000000\t2000000000000000000000");
+
+      const keeperBlock102 = fixedHex(50_102, 64);
+      const scaledKeeperPools = Array.from({ length: 25 }, (_, index) => ({
+        tokenAddress: fixedHex(60_000 + index, 40),
+        poolId: fixedHex(70_000 + index, 64),
+        launchTransaction: fixedHex(80_000 + index, 64),
+        feeTransaction: fixedHex(90_000 + index, 64),
+        pending: String(1_001 + index),
+      }));
+      const keeperFeeAccruedTx = fixedHex(100_001, 64);
+      const keeperFeeSweptTx = fixedHex(100_002, 64);
+      const keeperSequesterTx = fixedHex(100_003, 64);
+      const keeperTreasuryTx = fixedHex(100_004, 64);
+      const keeperPlatformCollectedTx = fixedHex(100_005, 64);
+      const keeperLogs = [];
+      const keeperProjections = [];
+      for (const [index, fixture] of scaledKeeperPools.entries()) {
+        keeperLogs.push(
+          {
+            blockNumber: "102",
+            transactionHash: fixture.launchTransaction,
+            transactionIndex: index * 2,
+            logIndex: index * 2,
+            contractAddress: hook,
+            topics: [hash("7")],
+            data: "0x",
+            eventName: "TokenLaunched",
+            decodedArgs: {},
+          },
+          {
+            blockNumber: "102",
+            transactionHash: fixture.feeTransaction,
+            transactionIndex: index * 2 + 1,
+            logIndex: index * 2 + 1,
+            contractAddress: hook,
+            topics: [hash("1")],
+            data: "0x",
+            eventName: "FeeAccrued",
+            decodedArgs: {},
+          },
+        );
+        keeperProjections.push(
+          {
+            kind: "launch",
+            transactionHash: fixture.launchTransaction,
+            logIndex: index * 2,
+            tokenAddress: fixture.tokenAddress,
+            poolId: fixture.poolId,
+            creatorAddress: creator,
+            configId: "1",
+            firstBuyIn: "0",
+            firstBuyOut: "0",
+            hookAddress: hook,
+            feeRecipientAddress: creator,
+            feeMode: "creator",
+            name: `Keeper pool ${index}`,
+            symbol: `KP${index}`,
+          },
+          {
+            kind: "fee",
+            transactionHash: fixture.feeTransaction,
+            logIndex: index * 2 + 1,
+            feeKind: "accrued",
+            poolId: fixture.poolId,
+            amount: fixture.pending,
+          },
+        );
+      }
+      const maintenanceEvents = [
+        [keeperFeeAccruedTx, 60, "FeeAccrued", hook],
+        [keeperFeeSweptTx, 61, "FeesSwept", hook],
+        [keeperSequesterTx, 62, "PipedogSequestered", address("1")],
+        [keeperTreasuryTx, 63, "TreasuryPipedogRouted", address("1")],
+        [keeperPlatformCollectedTx, 64, "PlatformPayoutCollected", hook],
+      ];
+      for (const [transactionHash, logIndex, eventName, contractAddress] of maintenanceEvents) {
+        keeperLogs.push({
+          blockNumber: "102",
+          transactionHash,
+          transactionIndex: logIndex,
+          logIndex,
+          contractAddress,
+          topics: [hash("2")],
+          data: "0x",
+          eventName,
+          decodedArgs: {},
+        });
+      }
+      keeperProjections.push(
+        {
+          kind: "fee",
+          transactionHash: keeperFeeAccruedTx,
+          logIndex: 60,
+          feeKind: "accrued",
+          poolId: pool,
+          amount: "100",
+        },
+        {
+          kind: "fee",
+          transactionHash: keeperFeeSweptTx,
+          logIndex: 61,
+          feeKind: "swept",
+          poolId: pool,
+          actorAddress: creator,
+          creatorAmount: "30",
+          platformAmount: "20",
+        },
+        {
+          kind: "revenue",
+          transactionHash: keeperSequesterTx,
+          logIndex: 62,
+          routeKind: "sequestered",
+          callerAddress: creator,
+          recipientAddress: address("0"),
+          amount: "24",
+          bounty: "1",
+        },
+        {
+          kind: "revenue",
+          transactionHash: keeperTreasuryTx,
+          logIndex: 63,
+          routeKind: "treasury",
+          callerAddress: creator,
+          recipientAddress: address("2"),
+          amount: "48",
+          bounty: "2",
+        },
+        {
+          kind: "fee",
+          transactionHash: keeperPlatformCollectedTx,
+          logIndex: 64,
+          feeKind: "platform-collected",
+          recipientAddress: creator,
+          amount: "7",
+        },
+      );
+      const keeperBatch = {
+        chainId: 4663,
+        stream: "laypipe",
+        expectedNextBlock: "102",
+        blocks: [{
+          number: "102",
+          hash: keeperBlock102,
+          parentHash: newBlock101,
+          timestamp: "2026-08-12T18:00:00.000Z",
+        }],
+        logs: keeperLogs,
+        projections: keeperProjections,
+      };
+
+      await repository.ingestCanonicalBatch(keeperBatch, repositoryDatabase(container));
+      await psql(container, `
+UPDATE indexer_cursors
+SET observed_safe_head = 102,
+    observed_at = GREATEST(COALESCE(observed_at, now()), now()) + interval '1 millisecond',
+    last_run_status = 'caught-up'
+WHERE chain_id = 4663 AND stream = 'laypipe';
+`);
+
+      const queryKeeperDatabase = async (sql, parameters = []) => {
+        if (sql === keeperReadModel.KEEPER_WATERMARK_SQL) {
+          return preparedQuery(
+            container, sql, ["bigint", "text"], parameters, WATERMARK_COLUMNS,
+          );
+        }
+        if (sql === keeperReadModel.KEEPER_ACCOUNTING_SQL) {
+          return preparedQuery(
+            container, sql, ["bigint", "evm_address"], parameters,
+            KEEPER_ACCOUNTING_COLUMNS,
+          );
+        }
+        if (sql === keeperReadModel.KEEPER_RECENT_ACTIONS_SQL) {
+          return preparedQuery(
+            container, sql, ["bigint", "evm_address"], parameters,
+            KEEPER_RECENT_COLUMNS,
+          );
+        }
+        if (sql === keeperReadModel.KEEPER_SWEEP_CANDIDATES_SQL) {
+          return preparedQuery(
+            container, sql, ["bigint"], parameters, KEEPER_SWEEP_COLUMNS,
+          );
+        }
+        throw new Error("Unexpected keeper SQL in PostgreSQL integration test.");
+      };
+      const keeperDatabase = {
+        query: queryKeeperDatabase,
+        async transaction(factory, options) {
+          assert.equal(options?.isolationLevel, "RepeatableRead");
+          assert.equal(options?.readOnly, true);
+          const queries = factory({ query: queryKeeperDatabase });
+          return Promise.all(queries);
+        },
+      };
+      const indexedKeeper = await keeperReadModel.loadKeeperRewards(
+        keeperDatabase,
+        { wallet: creator },
+      );
+      assert.equal(indexedKeeper.asOfBlock, "102");
+      assert.deepEqual(indexedKeeper.accounting, {
+        totalBountyPipedog: "3",
+        sequesterBountyPipedog: "1",
+        treasuryBountyPipedog: "2",
+        sequesterCalls: "1",
+        treasuryCalls: "1",
+        sweepCalls: "1",
+      });
+      assert.deepEqual(
+        indexedKeeper.recentActions.map((action) => [
+          action.kind,
+          action.processedPipedog,
+          action.routedPipedog,
+          action.bountyPipedog,
+        ]),
+        [
+          ["treasury", "50", "48", "2"],
+          ["sequester", "25", "24", "1"],
+          ["sweep", "50", "50", "0"],
+        ],
+      );
+      assert.equal(
+        indexedKeeper.recentActions.some(
+          (action) => action.transactionHash === keeperPlatformCollectedTx,
+        ),
+        false,
+        "platform collection has no event caller and must never be wallet-credited",
+      );
+      assert.equal(indexedKeeper.sweepCandidates.length, 20);
+      assert.equal(indexedKeeper.sweepCandidates[0].indexedPendingPipedog, "1025");
+      assert.equal(indexedKeeper.sweepCandidates[19].indexedPendingPipedog, "1006");
+
+      const keeperProjection = await psql(container, `
+SELECT count(*)::text, sum(accrued_total)::text, sum(swept_total)::text,
+  sum(indexed_pending)::text
+FROM keeper_pool_fee_state
+WHERE chain_id = 4663;
+`);
+      assert.equal(keeperProjection.stdout, "26\t25425\t50\t25375");
+      const keeperCallerProjection = await psql(container, `
+SELECT sequester_bounty::text, treasury_bounty::text,
+  sequester_calls::text, treasury_calls::text, sweep_calls::text
+FROM keeper_caller_accounting
+WHERE chain_id = 4663 AND caller_address = '${creator}';
+`);
+      assert.equal(keeperCallerProjection.stdout, "1\t2\t1\t1\t1");
+
+      await psql(container, `
+INSERT INTO fee_events (
+  chain_id, fee_kind, pool_id, actor_address, creator_address,
+  recipient_address, amount, creator_amount, platform_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+)
+SELECT chain_id, fee_kind, pool_id, actor_address, creator_address,
+  recipient_address, amount, creator_amount, platform_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+FROM fee_events
+WHERE chain_id = 4663
+  AND transaction_hash IN ('${keeperFeeAccruedTx}', '${keeperFeeSweptTx}')
+ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
+  fee_kind = EXCLUDED.fee_kind, pool_id = EXCLUDED.pool_id,
+  actor_address = EXCLUDED.actor_address,
+  creator_address = EXCLUDED.creator_address,
+  recipient_address = EXCLUDED.recipient_address,
+  amount = EXCLUDED.amount, creator_amount = EXCLUDED.creator_amount,
+  platform_amount = EXCLUDED.platform_amount,
+  block_number = EXCLUDED.block_number,
+  block_timestamp = EXCLUDED.block_timestamp;
+INSERT INTO revenue_events (
+  chain_id, route_kind, caller_address, recipient_address, amount, bounty,
+  sequester_amount, treasury_amount, operations_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+)
+SELECT chain_id, route_kind, caller_address, recipient_address, amount, bounty,
+  sequester_amount, treasury_amount, operations_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+FROM revenue_events
+WHERE chain_id = 4663
+  AND transaction_hash IN ('${keeperSequesterTx}', '${keeperTreasuryTx}')
+ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
+  route_kind = EXCLUDED.route_kind,
+  caller_address = EXCLUDED.caller_address,
+  recipient_address = EXCLUDED.recipient_address,
+  amount = EXCLUDED.amount, bounty = EXCLUDED.bounty,
+  sequester_amount = EXCLUDED.sequester_amount,
+  treasury_amount = EXCLUDED.treasury_amount,
+  operations_amount = EXCLUDED.operations_amount,
+  block_number = EXCLUDED.block_number,
+  block_timestamp = EXCLUDED.block_timestamp;
+`);
+      const idempotentKeeperProjection = await psql(container, `
+SELECT
+  (SELECT accrued_total::text || ':' || swept_total::text || ':' || indexed_pending::text
+   FROM keeper_pool_fee_state
+   WHERE chain_id = 4663 AND pool_id = '${pool}'),
+  (SELECT sequester_bounty::text || ':' || treasury_bounty::text || ':'
+      || sequester_calls::text || ':' || treasury_calls::text || ':' || sweep_calls::text
+   FROM keeper_caller_accounting
+   WHERE chain_id = 4663 AND caller_address = '${creator}');
+`);
+      assert.equal(idempotentKeeperProjection.stdout, "100:50:50\t1:2:1:1:1");
+
+      const changedFeeReplay = await psql(container, `
+INSERT INTO fee_events (
+  chain_id, fee_kind, pool_id, actor_address, creator_address,
+  recipient_address, amount, creator_amount, platform_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+)
+SELECT chain_id, fee_kind, pool_id, actor_address, creator_address,
+  recipient_address, amount + 1, creator_amount, platform_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+FROM fee_events
+WHERE chain_id = 4663 AND transaction_hash = '${keeperFeeAccruedTx}'
+ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
+  fee_kind = EXCLUDED.fee_kind, pool_id = EXCLUDED.pool_id,
+  actor_address = EXCLUDED.actor_address, creator_address = EXCLUDED.creator_address,
+  recipient_address = EXCLUDED.recipient_address, amount = EXCLUDED.amount,
+  creator_amount = EXCLUDED.creator_amount,
+  platform_amount = EXCLUDED.platform_amount, block_number = EXCLUDED.block_number,
+  block_timestamp = EXCLUDED.block_timestamp;
+`, { allowFailure: true });
+      assert.notEqual(changedFeeReplay.code, 0);
+      assert.match(changedFeeReplay.stderr, /attempted to mutate immutable indexed row in fee_events/i);
+
+      const changedRevenueReplay = await psql(container, `
+INSERT INTO revenue_events (
+  chain_id, route_kind, caller_address, recipient_address, amount, bounty,
+  sequester_amount, treasury_amount, operations_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+)
+SELECT chain_id, route_kind, caller_address, recipient_address, amount, bounty + 1,
+  sequester_amount, treasury_amount, operations_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+FROM revenue_events
+WHERE chain_id = 4663 AND transaction_hash = '${keeperSequesterTx}'
+ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
+  route_kind = EXCLUDED.route_kind,
+  caller_address = EXCLUDED.caller_address,
+  recipient_address = EXCLUDED.recipient_address,
+  amount = EXCLUDED.amount, bounty = EXCLUDED.bounty,
+  sequester_amount = EXCLUDED.sequester_amount,
+  treasury_amount = EXCLUDED.treasury_amount,
+  operations_amount = EXCLUDED.operations_amount,
+  block_number = EXCLUDED.block_number, block_timestamp = EXCLUDED.block_timestamp;
+`, { allowFailure: true });
+      assert.notEqual(changedRevenueReplay.code, 0);
+      assert.match(
+        changedRevenueReplay.stderr,
+        /attempted to mutate immutable indexed row in revenue_events/i,
+      );
+
+      const rejectedChangedKeeperProjection = await psql(container, `
+SELECT
+  (SELECT amount::text FROM fee_events
+   WHERE chain_id = 4663 AND transaction_hash = '${keeperFeeAccruedTx}'),
+  (SELECT bounty::text FROM revenue_events
+   WHERE chain_id = 4663 AND transaction_hash = '${keeperSequesterTx}'),
+  (SELECT accrued_total::text || ':' || swept_total::text || ':' || indexed_pending::text
+   FROM keeper_pool_fee_state
+   WHERE chain_id = 4663 AND pool_id = '${pool}'),
+  (SELECT sequester_bounty::text || ':' || treasury_bounty::text || ':'
+      || sequester_calls::text || ':' || treasury_calls::text || ':' || sweep_calls::text
+   FROM keeper_caller_accounting
+   WHERE chain_id = 4663 AND caller_address = '${creator}');
+`);
+      assert.equal(
+        rejectedChangedKeeperProjection.stdout,
+        "100\t1\t100:50:50\t1:2:1:1:1",
+        "changed canonical upserts must abort without mutating events or keeper projections",
+      );
+
+      const keeperCandidatePlan = await psql(container, `
+SET enable_seqscan = off;
+PREPARE laypipe_keeper_candidates(bigint) AS
+${keeperReadModel.KEEPER_SWEEP_CANDIDATES_SQL};
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+EXECUTE laypipe_keeper_candidates(4663);
+`);
+      assert.match(
+        keeperCandidatePlan.stdout,
+        /Index (?:Only )?Scan using keeper_pool_fee_state_candidates_idx[^\n]*actual rows=20 loops=1/,
+      );
+      assert.doesNotMatch(keeperCandidatePlan.stdout, /fee_events/);
+
+      const keeperAccountingPlan = await psql(container, `
+SET enable_seqscan = off;
+PREPARE laypipe_keeper_accounting(bigint, evm_address) AS
+${keeperReadModel.KEEPER_ACCOUNTING_SQL};
+EXPLAIN (COSTS OFF) EXECUTE laypipe_keeper_accounting(4663, '${creator}');
+`);
+      assert.match(keeperAccountingPlan.stdout, /keeper_caller_accounting_pkey/);
+      assert.doesNotMatch(keeperAccountingPlan.stdout, /revenue_events|fee_events/);
+
+      await psql(container, `
+UPDATE indexer_cursors
+SET observed_at = GREATEST(observed_at, now()) + interval '1 millisecond',
+    last_run_status = 'bounded'
+WHERE chain_id = 4663 AND stream = 'laypipe';
+`);
+      const staleKeeperPlan = await psql(container, `
+SET enable_seqscan = off;
+PREPARE laypipe_stale_keeper_candidates(bigint) AS
+${keeperReadModel.KEEPER_SWEEP_CANDIDATES_SQL};
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+EXECUTE laypipe_stale_keeper_candidates(4663);
+`);
+      assert.match(
+        staleKeeperPlan.stdout,
+        /Index (?:Only )?Scan using keeper_pool_fee_state_candidates_idx[^\n]*\(never executed\)/,
+      );
+      await psql(container, `
+UPDATE indexer_cursors
+SET observed_at = GREATEST(observed_at, now()) + interval '1 millisecond',
+    last_run_status = 'caught-up'
+WHERE chain_id = 4663 AND stream = 'laypipe';
+`);
+
+      const rolledKeeperBlocks = await psql(
+        container,
+        `SELECT laypipe_rollback_chain(4663, 101, '${newBlock101}')::text;`,
+      );
+      assert.equal(rolledKeeperBlocks.stdout, "1");
+      const rolledKeeperState = await psql(container, `
+SELECT
+  (SELECT count(*)::text FROM keeper_pool_fee_state WHERE chain_id = 4663),
+  (SELECT count(*)::text FROM keeper_caller_accounting WHERE chain_id = 4663),
+  (SELECT count(*)::text FROM fee_events WHERE chain_id = 4663),
+  (SELECT count(*)::text FROM revenue_events WHERE chain_id = 4663),
+  (SELECT next_block::text FROM indexer_cursors WHERE chain_id = 4663 AND stream = 'laypipe');
+`);
+      assert.equal(rolledKeeperState.stdout, "0\t0\t0\t0\t102");
+
+      await repository.ingestCanonicalBatch(keeperBatch, repositoryDatabase(container));
+      await psql(container, `
+UPDATE indexer_cursors
+SET observed_safe_head = 102, observed_at = now(), last_run_status = 'caught-up'
+WHERE chain_id = 4663 AND stream = 'laypipe';
+`);
+      const replayedKeeperProjection = await psql(container, `
+WITH canonical AS (
+  SELECT chain_id, pool_id,
+    COALESCE(sum(amount) FILTER (WHERE fee_kind = 'accrued'), 0) AS accrued,
+    COALESCE(sum(creator_amount + platform_amount)
+      FILTER (WHERE fee_kind = 'swept'), 0) AS swept
+  FROM fee_events
+  WHERE chain_id = 4663 AND fee_kind IN ('accrued', 'swept')
+  GROUP BY chain_id, pool_id
+)
+SELECT COALESCE(canonical.pool_id, state.pool_id),
+  COALESCE(canonical.accrued, 0)::text, COALESCE(state.accrued_total, 0)::text,
+  COALESCE(canonical.swept, 0)::text, COALESCE(state.swept_total, 0)::text
+FROM canonical
+FULL JOIN keeper_pool_fee_state state USING (chain_id, pool_id)
+WHERE COALESCE(canonical.chain_id, state.chain_id) = 4663
+  AND (
+    COALESCE(canonical.accrued, 0) <> COALESCE(state.accrued_total, 0)
+    OR COALESCE(canonical.swept, 0) <> COALESCE(state.swept_total, 0)
+  );
+`);
+      assert.equal(replayedKeeperProjection.stdout, "");
+      const replayedCallerProjection = await psql(container, `
+SELECT sequester_bounty::text, treasury_bounty::text,
+  sequester_calls::text, treasury_calls::text, sweep_calls::text
+FROM keeper_caller_accounting
+WHERE chain_id = 4663 AND caller_address = '${creator}';
+`);
+      assert.equal(replayedCallerProjection.stdout, "1\t2\t1\t1\t1");
+      const replayedKeeper = await keeperReadModel.loadKeeperRewards(
+        keeperDatabase,
+        { wallet: creator },
+      );
+      assert.equal(replayedKeeper.accounting.totalBountyPipedog, "3");
+      assert.equal(replayedKeeper.accounting.sweepCalls, "1");
+      assert.equal(replayedKeeper.sweepCandidates.length, 20);
     } finally {
       if (started) {
         const cleanup = await docker(

@@ -65,6 +65,7 @@ const abi = loadTypeScript("lib/web3/abi.ts");
 const launchClient = loadTypeScript("lib/web3/launch-client.ts");
 const launchMachine = loadTypeScript("lib/web3/launch-machine.ts");
 const web3Types = loadTypeScript("lib/web3/types.ts");
+const web3Units = loadTypeScript("lib/web3/units.ts");
 const pinnedCache = loadTypeScript("app/launch/pinned-cache.ts");
 const walletOperation = loadTypeScript("app/launch/wallet-operation.ts");
 
@@ -438,6 +439,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
     provider: success.provider,
     browserOrigin: "https://laypipe.fun",
     fetcher: success.fetcher,
+    normalizeArtwork: artwork.validateArtworkFile,
   });
   assert.deepEqual(pinned.metadataDocument, expectedDocument);
   assert.deepEqual(success.observations(), {
@@ -463,6 +465,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
       provider: substituted.provider,
       browserOrigin: "https://laypipe.fun",
       fetcher: substituted.fetcher,
+      normalizeArtwork: artwork.validateArtworkFile,
     }),
     /does not match/,
   );
@@ -476,6 +479,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
       provider: badCid.provider,
       browserOrigin: "https://laypipe.fun",
       fetcher: badCid.fetcher,
+      normalizeArtwork: artwork.validateArtworkFile,
     }),
     /invalid CID/,
   );
@@ -489,6 +493,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
       provider: drifted.provider,
       browserOrigin: "https://laypipe.fun",
       fetcher: drifted.fetcher,
+      normalizeArtwork: artwork.validateArtworkFile,
     }),
     /wallet changed/,
   );
@@ -503,6 +508,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
       provider: messageDrift.provider,
       browserOrigin: "https://laypipe.fun",
       fetcher: messageDrift.fetcher,
+      normalizeArtwork: artwork.validateArtworkFile,
     }),
     /invalid challenge/,
   );
@@ -520,6 +526,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
       provider: wrongGateway.provider,
       browserOrigin: "https://laypipe.fun",
       fetcher: wrongGateway.fetcher,
+      normalizeArtwork: artwork.validateArtworkFile,
     }),
     /configured Pinata HTTPS CID path/,
   );
@@ -542,6 +549,336 @@ test("approval planning never emits an unlimited approval", () => {
   assert.throws(() => launchClient.assertFirstBuyAmounts(1n, 0n), /non-zero minimum/);
   assert.throws(() => launchClient.assertFirstBuyAmounts(0n, 1n), /must be zero/);
   assert.doesNotThrow(() => launchClient.assertFirstBuyAmounts(0n, 0n));
+});
+
+test("initial first-buy math matches the separately reviewed integer curve model", () => {
+  const config = {
+    supply: 1_000_000_000n * 10n ** 18n,
+    tickSpacing: 200,
+    startTick: 69_000,
+    creatorFeeBps: 7_000,
+    baseFeeRate: 10_000,
+    launchFeeRate: 10_000,
+    launchFeeDecay: 0,
+    enabled: true,
+    selfBurn: false,
+  };
+  const quoted = launchClient.quoteInitialFirstBuy({
+    config,
+    firstBuyIn: 10n * 10n ** 18n,
+  });
+  // Exact base-unit output from contracts/scripts/curve-model.mjs for the same
+  // config. That model ports the pinned Uniswap v4 integer libraries separately.
+  assert.equal(quoted.expectedOutput, 9_820_034_946_566_340_106_510n);
+  assert.equal(quoted.hookFee, 100_000_000_000_000_000n);
+  assert.equal(
+    launchClient.applyFirstBuySlippage(quoted.expectedOutput, 100),
+    9_721_834_597_100_676_705_444n,
+  );
+  assert.throws(
+    () => launchClient.quoteInitialFirstBuy({ config, firstBuyIn: 10n ** 40n }),
+    /conservative swap limit|exceeds the launch curve/,
+  );
+});
+
+test("first-buy slippage and quote timing fail closed at every policy edge", () => {
+  for (const rejected of [49, 501, 100.5, Number.NaN]) {
+    assert.throws(
+      () => launchClient.assertFirstBuySlippageBps(rejected),
+      /between 0\.5% and 5%/,
+    );
+  }
+  assert.equal(launchClient.assertFirstBuySlippageBps(50), 50);
+  assert.equal(launchClient.assertFirstBuySlippageBps(500), 500);
+  assert.throws(
+    () => launchClient.applyFirstBuySlippage(1n, 500),
+    /too small to protect/,
+  );
+
+  const quote = {
+    owner: `0x${"11".repeat(20)}`,
+    predictedToken: `0x${"99".repeat(19)}cc`,
+    inputIdentityCalldata: "0x00",
+    expectedOutput: 100n,
+    minimumOutput: 99n,
+    slippageBps: 100,
+    verifiedBlockNumber: 1_000n,
+    maxSubmissionBlock:
+      1_000n + launchClient.FIRST_BUY_QUOTE_BLOCK_BUDGET,
+    createdAtMs: 5_000,
+    expiresAtMs: 5_000 + launchClient.FIRST_BUY_QUOTE_TTL_MS,
+  };
+  assert.doesNotThrow(() =>
+    launchClient.assertFirstBuyQuoteTiming(quote, 1_001n, quote.expiresAtMs),
+  );
+  assert.throws(
+    () => launchClient.assertFirstBuyQuoteTiming(quote, 1_001n, quote.expiresAtMs + 1),
+    /expired/,
+  );
+  assert.throws(
+    () => launchClient.assertFirstBuyQuoteTiming(quote, 999n, 5_001),
+    /older block/,
+  );
+  assert.throws(
+    () =>
+      launchClient.assertFirstBuyQuoteTiming(
+        { ...quote, maxSubmissionBlock: quote.maxSubmissionBlock + 1n },
+        1_001n,
+        5_001,
+      ),
+    /modified/,
+  );
+});
+
+test("nonzero first-buy dust never renders as zero tokens", () => {
+  assert.equal(web3Units.formatNonzeroUnits(0n, 18), "0");
+  assert.equal(web3Units.formatNonzeroUnits(1n, 18), "<0.000001");
+  assert.equal(web3Units.formatNonzeroUnits(1_000_000_000_000n, 18), "0.000001");
+});
+
+function abiWord(value) {
+  const parsed = BigInt(value);
+  const encoded = parsed < 0n ? (1n << 256n) + parsed : parsed;
+  return encoded.toString(16).padStart(64, "0");
+}
+
+function abiAddressWord(address) {
+  return address.slice(2).toLowerCase().padStart(64, "0");
+}
+
+test("factory-proven first-buy quote binds one pinned launch and exact allowance", async () => {
+  const factory = `0x${"22".repeat(20)}`;
+  const pipedog = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
+  const owner = `0x${"33".repeat(20)}`;
+  const predictedToken = `0x${"99".repeat(19)}cc`;
+  const poolId = `0x${"44".repeat(32)}`;
+  const config = {
+    supply: 1_000_000_000n * 10n ** 18n,
+    tickSpacing: 200,
+    startTick: 69_000,
+    creatorFeeBps: 7_000,
+    baseFeeRate: 10_000,
+    launchFeeRate: 10_000,
+    launchFeeDecay: 0,
+    enabled: true,
+    selfBurn: false,
+  };
+  const launchFee = 5n * 10n ** 17n;
+  const firstBuyIn = 10n * 10n ** 18n;
+  const expectedOutput = launchClient.quoteInitialFirstBuy({
+    config,
+    firstBuyIn,
+  }).expectedOutput;
+  const input = {
+    params: {
+      name: "Bound Quote",
+      symbol: "BOUND",
+      logo: "ipfs://bafy-image",
+      description: "Exact launch quote identity",
+      metadataURI: "ipfs://bafy-metadata",
+      socials: { telegram: "", twitter: "", discord: "", website: "", extra: "" },
+      creator: owner,
+    },
+    configId: 7n,
+    firstBuyIn,
+    firstBuyMinOut: launchClient.applyFirstBuySlippage(expectedOutput, 100),
+    salt: `0x${"12".repeat(32)}`,
+  };
+  const exactCall = abi.encodeLaunchCall({ ...input, firstBuyMinOut: expectedOutput });
+  const boundaryCall = abi.encodeLaunchCall({
+    ...input,
+    firstBuyMinOut: expectedOutput + 1n,
+  });
+  const protectedCall = abi.encodeLaunchCall(input);
+  const observedBlockTags = [];
+  const events = [];
+  let launchCalls = 0;
+  let allowanceValue = launchFee + firstBuyIn;
+  let boundaryErrorData = "0x7cc1d120";
+  let protectedError = null;
+  const provider = {
+    async request({ method, params }) {
+      events.push(method);
+      if (method === "eth_chainId") return "0x1237";
+      if (method === "eth_accounts") return [owner];
+      if (method === "eth_blockNumber") return "0x66";
+      if (method === "eth_estimateGas") return "0x5208";
+      if (method === "eth_sendTransaction") return `0x${"ab".repeat(32)}`;
+      assert.equal(method, "eth_call");
+      const [transaction, blockTag] = params;
+      observedBlockTags.push(blockTag);
+      const selector = transaction.data.slice(2, 10);
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.launchFee) {
+        return `0x${abiWord(launchFee)}`;
+      }
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.launchEnabled) {
+        return `0x${abiWord(1)}`;
+      }
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.quoteToken) {
+        return `0x${abiAddressWord(pipedog)}`;
+      }
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.getLaunchConfig) {
+        return `0x${[
+          config.supply,
+          config.tickSpacing,
+          config.startTick,
+          config.creatorFeeBps,
+          config.baseFeeRate,
+          config.launchFeeRate,
+          config.launchFeeDecay,
+          1,
+          0,
+        ].map(abiWord).join("")}`;
+      }
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.allowance) {
+        return `0x${abiWord(allowanceValue)}`;
+      }
+      if (selector === abi.LAYPIPE_CALL_SELECTORS.balanceOf) {
+        return `0x${abiWord(100n * 10n ** 18n)}`;
+      }
+      if (transaction.data.toLowerCase() === exactCall.toLowerCase()) {
+        launchCalls += 1;
+        return `0x${abiAddressWord(predictedToken)}${poolId.slice(2)}`;
+      }
+      if (transaction.data.toLowerCase() === boundaryCall.toLowerCase()) {
+        launchCalls += 1;
+        throw { code: 3, data: boundaryErrorData };
+      }
+      if (transaction.data.toLowerCase() === protectedCall.toLowerCase()) {
+        events.push(`protected:${blockTag}`);
+        if (protectedError) throw protectedError;
+        return `0x${abiAddressWord(predictedToken)}${poolId.slice(2)}`;
+      }
+      throw new Error(`Unexpected call ${transaction.data}`);
+    },
+  };
+  let verifiedBlock = 99n;
+  const manifest = {
+    contracts: {
+      factoryProxy: { address: factory },
+      pipedog: { address: pipedog },
+    },
+  };
+  const client = new launchClient.LaypipeLaunchClient(provider, manifest, {
+    verifyDeployment: async () => {
+      verifiedBlock += 1n;
+      events.push(`verify:${verifiedBlock}`);
+      return {
+        blockNumber: verifiedBlock,
+        blockTag: `0x${verifiedBlock.toString(16)}`,
+      };
+    },
+    now: () => 50_000,
+  });
+  const quote = await client.prepareFirstBuyQuote({
+    owner,
+    predictedToken,
+    input,
+    slippageBps: 100,
+  });
+  assert.equal(quote.expectedOutput, expectedOutput);
+  assert.equal(quote.minimumOutput, input.firstBuyMinOut);
+  assert.equal(quote.predictedToken, predictedToken);
+  assert.equal(quote.verifiedBlockNumber, 100n);
+  assert.equal(launchCalls, 2);
+  assert.ok(observedBlockTags.every((tag) => tag === "0x64"));
+
+  events.length = 0;
+  observedBlockTags.length = 0;
+  let invoked = 0;
+  await client.sendLaunch(owner, input, {
+    firstBuyQuote: quote,
+    predictedToken,
+    onSubmissionInvoked: () => {
+      invoked += 1;
+      events.push("intent-saved");
+    },
+  });
+  assert.equal(invoked, 1);
+  assert.ok(events.indexOf("eth_estimateGas") < events.indexOf("verify:102"));
+  assert.ok(events.indexOf("verify:102") < events.indexOf("protected:0x66"));
+  assert.ok(events.indexOf("protected:0x66") < events.indexOf("intent-saved"));
+  assert.ok(events.indexOf("intent-saved") < events.indexOf("eth_sendTransaction"));
+  assert.equal(observedBlockTags.at(-1), "0x66");
+
+  assert.throws(
+    () =>
+      launchClient.assertFirstBuyQuoteForInput({
+        quote: { ...quote, predictedToken: `0x${"88".repeat(19)}cc` },
+        owner,
+        predictedToken,
+        input,
+        config,
+        latestBlock: 100n,
+        nowMs: 50_001,
+      }),
+    /different predicted token/,
+  );
+  assert.throws(
+    () =>
+      launchClient.assertFirstBuyQuoteForInput({
+        quote,
+        owner,
+        predictedToken,
+        input: { ...input, salt: `0x${"13".repeat(32)}` },
+        config,
+        latestBlock: 100n,
+        nowMs: 50_001,
+      }),
+    /identity was modified/,
+  );
+
+  allowanceValue -= 1n;
+  await assert.rejects(
+    client.prepareFirstBuyQuote({
+      owner,
+      predictedToken,
+      input,
+      slippageBps: 100,
+    }),
+    /exact single-use launch fee plus first-buy allowance/,
+  );
+  allowanceValue += 1n;
+  boundaryErrorData = "0xdeadbeef";
+  await assert.rejects(
+    client.prepareFirstBuyQuote({
+      owner,
+      predictedToken,
+      input,
+      slippageBps: 100,
+    }),
+    /did not prove the exact first-buy output boundary/,
+  );
+  boundaryErrorData = "0x7cc1d120deadbeef";
+  await assert.rejects(
+    client.prepareFirstBuyQuote({
+      owner,
+      predictedToken,
+      input,
+      slippageBps: 100,
+    }),
+    /did not prove the exact first-buy output boundary/,
+  );
+  boundaryErrorData = "0x7cc1d120";
+  const freshQuote = await client.prepareFirstBuyQuote({
+    owner,
+    predictedToken,
+    input,
+    slippageBps: 100,
+  });
+  protectedError = new Error("protected simulation drifted");
+  let unsafeInvocations = 0;
+  await assert.rejects(
+    client.sendLaunch(owner, input, {
+      firstBuyQuote: freshQuote,
+      predictedToken,
+      onSubmissionInvoked: () => {
+        unsafeInvocations += 1;
+      },
+    }),
+    /protected simulation drifted/,
+  );
+  assert.equal(unsafeInvocations, 0);
 });
 
 test("RPC quantities accept odd-length canonical hex without weakening byte data", () => {

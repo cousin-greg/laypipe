@@ -61,7 +61,7 @@ function manifest() {
   };
 }
 
-function walletProvider(sendResult = hash, account = owner) {
+function walletProvider(sendResult = hash, account = owner, head = "0x1") {
   const methods = [];
   return {
     methods,
@@ -70,6 +70,7 @@ function walletProvider(sendResult = hash, account = owner) {
         methods.push(method);
         if (method === "eth_chainId") return "0x1237";
         if (method === "eth_accounts") return [account];
+        if (method === "eth_blockNumber") return head;
         if (method === "eth_estimateGas") return "0x5208";
         if (method === "eth_sendTransaction") {
           if (sendResult instanceof Error ||
@@ -198,10 +199,11 @@ test("submission re-verifies deployment and wallet context immediately before se
     hash,
   );
   assert.deepEqual(callbacks, ["invoked", hash]);
-  assert.deepEqual(order.slice(-4), [
+  assert.deepEqual(order.slice(-5), [
     "verifyDeployment",
     "eth_accounts",
     "eth_chainId",
+    "eth_blockNumber",
     "eth_sendTransaction",
   ]);
   assert.equal(order.filter((item) => item === "verifyDeployment").length, 2);
@@ -259,6 +261,29 @@ test("account drift blocks submission before the wallet send method", async () =
     },
   );
   await assert.rejects(client.sendLaunch(owner, input), /account changed/i);
+  assert.equal(wallet.methods.includes("eth_sendTransaction"), false);
+});
+
+test("a regressed wallet head cannot submit behind the final audited snapshot", async () => {
+  const wallet = walletProvider(hash, owner, "0x1");
+  const client = new launchClient.LaypipeLaunchClient(
+    wallet.provider,
+    manifest(),
+    {
+      verifyDeployment: async () => ({ blockNumber: 2n, blockTag: "0x2" }),
+      confirmationProvider: { request: async () => null },
+    },
+  );
+  let invoked = 0;
+  await assert.rejects(
+    client.sendApproval(owner, 1n, {
+      onSubmissionInvoked: () => {
+        invoked += 1;
+      },
+    }),
+    /regressed behind the final audited/i,
+  );
+  assert.equal(invoked, 0);
   assert.equal(wallet.methods.includes("eth_sendTransaction"), false);
 });
 
@@ -438,12 +463,52 @@ test("pending launch intent is keyed, durable, and malformed storage fails close
       }),
     /different pending launch action/i,
   );
-  pendingLaunches.removePendingLaunch(storage, owner, "launch", token);
+  pendingLaunches.removeExactPendingLaunch(storage, restored);
   assert.equal(pendingLaunches.readPendingLaunchForWallet(storage, owner), null);
 
   storage.setItem("laypipe.pending-launches.v1", "{not-json");
   assert.throws(
     () => pendingLaunches.readPendingLaunchForWallet(storage, owner),
     /wallet mutations are blocked/i,
+  );
+});
+
+test("a stale launch reconciler cannot erase a newer same-identity intent", () => {
+  const storage = new MemoryStorage();
+  const original = {
+    chainId: 4663,
+    wallet: owner,
+    action: "launch",
+    predictedToken: token,
+    target: factory,
+    calldata: launchClient.launchCalldata(input),
+    input: pendingLaunches.serializeLaunchInput(input),
+    hash: null,
+    invokedAt: Date.now(),
+  };
+  pendingLaunches.savePendingLaunch(storage, original);
+  pendingLaunches.savePendingLaunchHash(
+    storage,
+    owner,
+    "launch",
+    token,
+    hash,
+  );
+  const staleResolved = pendingLaunches.readPendingLaunchForWallet(storage, owner);
+  pendingLaunches.removeExactPendingLaunch(storage, staleResolved);
+
+  const replacement = { ...original, invokedAt: original.invokedAt + 1 };
+  pendingLaunches.savePendingLaunch(storage, replacement);
+  assert.throws(
+    () => pendingLaunches.removeExactPendingLaunch(storage, staleResolved),
+    /does not match the saved exact record/i,
+  );
+  assert.throws(
+    () => pendingLaunches.removeExactUnsubmittedPendingLaunch(storage, original),
+    /no longer matches the saved exact record/i,
+  );
+  assert.deepEqual(
+    pendingLaunches.readPendingLaunchForWallet(storage, owner),
+    replacement,
   );
 });

@@ -35,6 +35,23 @@ export function formatUnits(
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
+export function formatNonzeroUnits(
+  value: bigint,
+  decimals: number,
+  maximumFractionDigits = 6,
+) {
+  const formatted = formatUnits(value, decimals, maximumFractionDigits);
+  if (value === BigInt(0) || formatted !== "0") return formatted;
+
+  const visibleFractionDigits = Math.min(
+    decimals,
+    Math.max(0, Math.trunc(maximumFractionDigits)),
+  );
+  return visibleFractionDigits === 0
+    ? "<1"
+    : `<0.${"0".repeat(visibleFractionDigits - 1)}1`;
+}
+
 export function bigintToQuantity(value: bigint) {
   if (value < BigInt(0)) throw new Error("RPC quantities cannot be negative.");
   return `0x${value.toString(16)}` as const;

@@ -1,4 +1,5 @@
 import { WalletPortfolio } from "../_components/WalletPortfolio";
+import { KeeperRewardsPanel } from "../_components/KeeperRewardsPanel";
 
 export default function RewardsPage() {
   return (
@@ -11,6 +12,7 @@ export default function RewardsPage() {
         </div>
       </section>
       <WalletPortfolio view="rewards" />
+      <KeeperRewardsPanel />
     </main>
   );
 }

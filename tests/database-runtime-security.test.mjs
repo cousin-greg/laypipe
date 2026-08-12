@@ -35,7 +35,7 @@ function identity(access) {
     session_user: `laypipe_${access}_login`,
     current_user: `laypipe_${access}_login`,
     migration_fingerprint: fingerprint,
-    migration_count: "4",
+    migration_count: database.EXPECTED_DATABASE_MIGRATION_COUNT,
     expected_group: group,
     direct_memberships: group,
     in_expected_group: true,
@@ -197,7 +197,7 @@ test("runtime pair matching rejects reused credentials, marker, database, and le
       database.EXPECTED_DATABASE_MIGRATIONS[1].sha256,
       "f".repeat(64),
     ) },
-    { migration_count: "5" },
+    { migration_count: String(Number(database.EXPECTED_DATABASE_MIGRATION_COUNT) + 1) },
   ]) {
     assert.throws(
       () => database.assertMatchingRuntimeDatabaseIdentities(read, { ...write, ...patch }),

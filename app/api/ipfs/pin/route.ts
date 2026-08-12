@@ -48,6 +48,7 @@ import {
 } from "@/lib/server/ipfs/registry";
 import type { DbTransactionQuery } from "@/lib/server/db/neon";
 import type { Address } from "@/lib/web3/types";
+import { observeOperationalRequest } from "@/lib/server/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -182,7 +183,7 @@ async function loadValidatedStage(options: {
   return staged;
 }
 
-export async function POST(request: Request) {
+async function handlePinRequest(request: Request) {
   const upstreamSignal = AbortSignal.timeout(IPFS_PIN_UPSTREAM_DEADLINE_MS);
   let lease: PromotionLease | undefined;
   let promotionDatabase: DbTransactionQuery | undefined;
@@ -408,4 +409,10 @@ export async function POST(request: Request) {
     }
     return jsonError(error);
   }
+}
+
+export async function POST(request: Request) {
+  return observeOperationalRequest(request, "/api/ipfs/pin", () =>
+    handlePinRequest(request),
+  );
 }

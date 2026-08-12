@@ -23,9 +23,6 @@ export function jsonError(error: unknown) {
     );
   }
 
-  console.error("LayPipe API request failed", {
-    error: error instanceof Error ? error.name : "UnknownError",
-  });
   return Response.json(
     { error: "The request could not be completed.", code: "INTERNAL_ERROR" },
     { status: 500, headers },

@@ -34,21 +34,27 @@ export function emitOperationalSummary(
 }
 
 /**
- * Emits only failures for low-volume operational routes. Vercel already logs
- * successful request metadata; domain-specific success summaries are emitted
- * explicitly by indexer and cleanup handlers.
+ * Emits only server failures for operational routes. Routine 4xx responses are
+ * excluded because public callers can generate them before a rate-limit
+ * identity is available, turning per-request warnings into a log-cost attack.
+ * Vercel already records request status metadata; domain-specific success
+ * summaries are emitted explicitly by indexer and cleanup handlers.
  */
 export async function observeOperationalRequest(
   request: Request,
   route: string,
   handler: () => Promise<Response>,
+  options: { expectedFailureStatuses?: readonly number[] } = {},
 ) {
   const startedAt = Date.now();
   const context = { route, requestId: requestId(request) };
   try {
     const response = await handler();
-    if (response.status >= 400) {
-      emit(response.status >= 500 ? "error" : "warn", "laypipe.operation.completed", {
+    if (
+      response.status >= 500 &&
+      !options.expectedFailureStatuses?.includes(response.status)
+    ) {
+      emit("error", "laypipe.operation.completed", {
         ...context,
         status: response.status,
         durationMs: Date.now() - startedAt,

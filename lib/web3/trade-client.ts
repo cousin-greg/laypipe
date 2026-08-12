@@ -153,8 +153,8 @@ export interface TradeSwapSubmissionIntent {
 }
 
 export interface TradeSubmissionCallbacks<TIntent> {
-  onSubmissionInvoked?: (intent: TIntent) => void;
-  onSubmitted?: (hash: Hex, intent: TIntent) => void;
+  onSubmissionInvoked?: (intent: TIntent) => void | Promise<void>;
+  onSubmitted?: (hash: Hex, intent: TIntent) => void | Promise<void>;
 }
 
 export interface ConfirmedTradeApproval {
@@ -947,10 +947,10 @@ export class LaypipeTradeClient {
       target: transaction.to,
       calldata: transaction.data,
     } satisfies TradeApprovalSubmissionIntent;
-    callbacks.onSubmissionInvoked?.(submission);
+    await callbacks.onSubmissionInvoked?.(submission);
     const hash = await this.send(transaction);
     try {
-      callbacks.onSubmitted?.(hash, submission);
+      await callbacks.onSubmitted?.(hash, submission);
     } catch (error) {
       throw new TradeSubmissionIndeterminateError(
         "The wallet returned a hash, but its exact recovery intent could not be saved. Do not retry until wallet activity is reconciled.",
@@ -998,10 +998,10 @@ export class LaypipeTradeClient {
       target: transaction.to,
       calldata: transaction.data,
     } satisfies TradeApprovalSubmissionIntent;
-    callbacks.onSubmissionInvoked?.(submission);
+    await callbacks.onSubmissionInvoked?.(submission);
     const hash = await this.send(transaction);
     try {
-      callbacks.onSubmitted?.(hash, submission);
+      await callbacks.onSubmitted?.(hash, submission);
     } catch (error) {
       throw new TradeSubmissionIndeterminateError(
         "The wallet returned a hash, but its exact recovery intent could not be saved. Do not retry until wallet activity is reconciled.",
@@ -1169,10 +1169,10 @@ export class LaypipeTradeClient {
       quote,
       simulatedOutput,
     } satisfies TradeSwapSubmissionIntent;
-    callbacks.onSubmissionInvoked?.(submission);
+    await callbacks.onSubmissionInvoked?.(submission);
     const hash = await this.send(transaction);
     try {
-      callbacks.onSubmitted?.(hash, submission);
+      await callbacks.onSubmitted?.(hash, submission);
     } catch (error) {
       throw new TradeSubmissionIndeterminateError(
         "The wallet returned a hash, but its exact recovery intent could not be saved. Do not retry until wallet activity is reconciled.",

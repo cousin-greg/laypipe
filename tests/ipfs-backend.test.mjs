@@ -37,6 +37,7 @@ const metadataModule = await tsImport(
   import.meta.url,
 );
 const clientMetadata = await tsImport("../lib/ipfs/metadata.ts", import.meta.url);
+const clientArtwork = await tsImport("../lib/ipfs/artwork.ts", import.meta.url);
 const pinClient = await tsImport("../lib/ipfs/pin-client.ts", import.meta.url);
 const challengeRoute = await tsImport(
   "../app/api/auth/challenge/route.ts",
@@ -797,6 +798,7 @@ test("browser bounds requests and retries the exact final pin without another si
     provider,
     browserOrigin: "https://laypipe.fun",
     fetcher,
+    normalizeArtwork: clientArtwork.validateArtworkFile,
   });
   assert.equal(result.metadata.cid, metadataCid);
   assert.equal(pinAttempts, 2);

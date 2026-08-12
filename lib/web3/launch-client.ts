@@ -2,6 +2,7 @@ import {
   decodeAddress,
   decodeBool,
   decodeLaunchConfig,
+  decodeLaunchResult,
   decodeMineSaltResult,
   decodeUint,
   encodeAllowanceCall,
@@ -47,10 +48,52 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_POOL_ID = `0x${"00".repeat(32)}` as Hex;
 const LAUNCH_CONFIRMATION_BLOCKS = BigInt(2);
 const TOKEN_POOL_ID_CALL = "0x3e0dc34e" as Hex;
+const FIRST_BUY_SLIPPAGE_SELECTOR = "0x7cc1d120";
+const Q96 = BigInt(1) << BigInt(96);
+const MAX_UINT128 = (BigInt(1) << BigInt(128)) - BigInt(1);
+const MAX_INT128 = (BigInt(1) << BigInt(127)) - BigInt(1);
+const MAX_UINT160 = (BigInt(1) << BigInt(160)) - BigInt(1);
+const MAX_UINT256 = (BigInt(1) << BigInt(256)) - BigInt(1);
+const MIN_TICK = -887_272;
+const MAX_TICK = 887_272;
+const FEE_DENOMINATOR = BigInt(1_000_000);
+const BASIS_POINTS = BigInt(10_000);
+
+export const MIN_FIRST_BUY_SLIPPAGE_BPS = 50;
+export const MAX_FIRST_BUY_SLIPPAGE_BPS = 500;
+export const FIRST_BUY_QUOTE_TTL_MS = 30_000;
+// Client-side drift bound only. LaypipeFactory.launch has no deadline field, so
+// this cannot and must not be presented as an on-chain transaction deadline.
+export const FIRST_BUY_QUOTE_BLOCK_BUDGET = BigInt(600);
+
+const TICK_RATIOS = [
+  BigInt("0xfffcb933bd6fad37aa2d162d1a594001"),
+  BigInt("0xfff97272373d413259a46990580e213a"),
+  BigInt("0xfff2e50f5f656932ef12357cf3c7fdcc"),
+  BigInt("0xffe5caca7e10e4e61c3624eaa0941cd0"),
+  BigInt("0xffcb9843d60f6159c9db58835c926644"),
+  BigInt("0xff973b41fa98c081472e6896dfb254c0"),
+  BigInt("0xff2ea16466c96a3843ec78b326b52861"),
+  BigInt("0xfe5dee046a99a2a811c461f1969c3053"),
+  BigInt("0xfcbe86c7900a88aedcffc83b479aa3a4"),
+  BigInt("0xf987a7253ac413176f2b074cf7815e54"),
+  BigInt("0xf3392b0822b70005940c7a398e4b70f3"),
+  BigInt("0xe7159475a2c29b7443b29c7fa6e889d9"),
+  BigInt("0xd097f3bdfd2022b8845ad8f792aa5825"),
+  BigInt("0xa9f746462d870fdf8a65dc1f90e061e5"),
+  BigInt("0x70d869a156d2a1b890bb3df62baf32f7"),
+  BigInt("0x31be135f97d08fd981231505542fcfa6"),
+  BigInt("0x9aa508b5b7a84e1c677de54f3e99bc9"),
+  BigInt("0x5d6af8dedb81196699c329225ee604"),
+  BigInt("0x2216e584f5fa1ea926041bedfe98"),
+  BigInt("0x48a170391f7dc42444e8fa2"),
+] as const;
 export const TOKEN_LAUNCHED_TOPIC =
   "0x17091df68f499cf4e20dcfc5d42f064dd22359e785b77691c4c4ed0322608897";
 
 export interface FactoryPreflight {
+  blockNumber: bigint;
+  blockTag: Hex;
   launchFee: bigint;
   launchEnabled: boolean;
   quoteToken: Address;
@@ -83,16 +126,32 @@ export interface ConfirmedLaunch {
   poolId: Hex;
 }
 
+export interface FirstBuyQuote {
+  owner: Address;
+  predictedToken: Address;
+  inputIdentityCalldata: Hex;
+  expectedOutput: bigint;
+  minimumOutput: bigint;
+  slippageBps: number;
+  verifiedBlockNumber: bigint;
+  maxSubmissionBlock: bigint;
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
 type DeploymentVerifier = typeof assertAuditedDeployment;
 
 export interface LaunchClientDependencies {
   confirmationProvider?: Eip1193Provider;
   verifyDeployment?: DeploymentVerifier;
+  now?: () => number;
 }
 
 export interface LaunchSubmissionCallbacks {
-  onSubmissionInvoked?: () => void;
-  onSubmitted?: (hash: Hex) => void;
+  onSubmissionInvoked?: () => void | Promise<void>;
+  onSubmitted?: (hash: Hex) => void | Promise<void>;
+  firstBuyQuote?: FirstBuyQuote;
+  predictedToken?: Address;
 }
 
 export interface LaunchConfirmationOptions {
@@ -251,10 +310,19 @@ export function createRobinhoodLaunchConfirmationProvider(
 async function assertSubmissionContext(
   provider: Eip1193Provider,
   expectedOwner: Address,
+  options: {
+    quote?: FirstBuyQuote;
+    minimumBlockNumber?: bigint;
+    now?: () => number;
+  } = {},
 ) {
-  const [accounts, chainId] = await Promise.all([
+  const { quote, minimumBlockNumber, now = Date.now } = options;
+  const [accounts, chainId, blockNumber] = await Promise.all([
     provider.request<unknown>({ method: "eth_accounts" }),
     provider.request<unknown>({ method: "eth_chainId" }),
+    quote || minimumBlockNumber !== undefined
+      ? provider.request<unknown>({ method: "eth_blockNumber" })
+      : Promise.resolve<unknown>(undefined),
   ]);
   if (
     typeof chainId !== "string" ||
@@ -274,6 +342,20 @@ async function assertSubmissionContext(
     throw new WalletFlowError(
       "The active wallet account changed. Reconnect and try again.",
     );
+  }
+  if (quote || minimumBlockNumber !== undefined) {
+    const latestBlock = BigInt(
+      assertRpcQuantity(blockNumber, "Latest submission block"),
+    );
+    if (
+      minimumBlockNumber !== undefined &&
+      latestBlock < minimumBlockNumber
+    ) {
+      throw new WalletFlowError(
+        "Wallet RPC regressed behind the final audited launch snapshot.",
+      );
+    }
+    if (quote) assertFirstBuyQuoteTiming(quote, latestBlock, now());
   }
 }
 
@@ -543,6 +625,12 @@ export function assertLaunchPreflight(options: {
     throw new WalletFlowError("The selected fee mode does not match its on-chain config.");
   }
 
+  if (firstBuyIn < BigInt(0)) {
+    throw new WalletFlowError("First-buy input cannot be negative.");
+  }
+  if (preflight.launchFee > MAX_UINT256 - firstBuyIn) {
+    throw new WalletFlowError("Launch fee plus first buy exceeds uint256.");
+  }
   const requiredAllowance = preflight.launchFee + firstBuyIn;
   if (preflight.pipedogBalance < requiredAllowance) {
     throw new WalletFlowError(
@@ -569,6 +657,302 @@ export function assertFirstBuyAmounts(firstBuyIn: bigint, firstBuyMinOut: bigint
     throw new WalletFlowError(
       "Minimum token output must be zero when the first buy is zero.",
     );
+  }
+}
+
+export function assertFirstBuySlippageBps(slippageBps: number) {
+  if (
+    !Number.isInteger(slippageBps) ||
+    slippageBps < MIN_FIRST_BUY_SLIPPAGE_BPS ||
+    slippageBps > MAX_FIRST_BUY_SLIPPAGE_BPS
+  ) {
+    throw new WalletFlowError(
+      "First-buy slippage must be between 0.5% and 5% in 0.01% increments.",
+    );
+  }
+  return slippageBps;
+}
+
+export function applyFirstBuySlippage(output: bigint, slippageBps: number) {
+  assertFirstBuySlippageBps(slippageBps);
+  if (output <= BigInt(0)) {
+    throw new WalletFlowError("The first-buy quote returned no launched tokens.");
+  }
+  const minimumOutput =
+    (output * (BASIS_POINTS - BigInt(slippageBps))) / BASIS_POINTS;
+  if (minimumOutput <= BigInt(0)) {
+    throw new WalletFlowError(
+      "The first buy is too small to protect with this slippage setting.",
+    );
+  }
+  return minimumOutput;
+}
+
+function divRoundingUp(numerator: bigint, denominator: bigint) {
+  if (denominator <= BigInt(0)) {
+    throw new WalletFlowError("First-buy quote division is undefined.");
+  }
+  return numerator / denominator +
+    (numerator % denominator === BigInt(0) ? BigInt(0) : BigInt(1));
+}
+
+function mulDivRoundingUp(a: bigint, b: bigint, denominator: bigint) {
+  return divRoundingUp(a * b, denominator);
+}
+
+function sqrtPriceAtTick(tick: number) {
+  if (!Number.isInteger(tick) || tick < MIN_TICK || tick > MAX_TICK) {
+    throw new WalletFlowError("Launch start tick is outside the Uniswap range.");
+  }
+  const absoluteTick = Math.abs(tick);
+  let ratio =
+    absoluteTick & 1 ? TICK_RATIOS[0] : BigInt(1) << BigInt(128);
+  for (let bit = 1; bit < TICK_RATIOS.length; bit += 1) {
+    if (absoluteTick & (1 << bit)) {
+      ratio = (ratio * TICK_RATIOS[bit]!) >> BigInt(128);
+    }
+  }
+  if (tick > 0) ratio = MAX_UINT256 / ratio;
+  const remainderMask = (BigInt(1) << BigInt(32)) - BigInt(1);
+  const sqrtPrice =
+    (ratio >> BigInt(32)) +
+    (ratio & remainderMask ? BigInt(1) : BigInt(0));
+  if (sqrtPrice <= BigInt(0) || sqrtPrice > MAX_UINT160) {
+    throw new WalletFlowError("Launch start price is outside uint160.");
+  }
+  return sqrtPrice;
+}
+
+function amount0Delta(
+  sqrtPriceA: bigint,
+  sqrtPriceB: bigint,
+  liquidity: bigint,
+  roundUp: boolean,
+) {
+  let lower = sqrtPriceA;
+  let upper = sqrtPriceB;
+  if (lower > upper) [lower, upper] = [upper, lower];
+  if (lower <= BigInt(0)) {
+    throw new WalletFlowError("Launch curve has an invalid lower price.");
+  }
+  const numerator1 = liquidity << BigInt(96);
+  const numerator2 = upper - lower;
+  return roundUp
+    ? divRoundingUp(
+        mulDivRoundingUp(numerator1, numerator2, upper),
+        lower,
+      )
+    : (numerator1 * numerator2) / upper / lower;
+}
+
+function amount1Delta(
+  sqrtPriceA: bigint,
+  sqrtPriceB: bigint,
+  liquidity: bigint,
+) {
+  const difference =
+    sqrtPriceA >= sqrtPriceB
+      ? sqrtPriceA - sqrtPriceB
+      : sqrtPriceB - sqrtPriceA;
+  return (liquidity * difference) / Q96;
+}
+
+function nextSqrtFromAmount0Input(
+  sqrtPrice: bigint,
+  liquidity: bigint,
+  amount0: bigint,
+) {
+  if (amount0 === BigInt(0)) return sqrtPrice;
+  const numerator1 = liquidity << BigInt(96);
+  const product = amount0 * sqrtPrice;
+  if (product <= MAX_UINT256) {
+    const denominator = numerator1 + product;
+    if (denominator <= MAX_UINT256 && denominator >= numerator1) {
+      return mulDivRoundingUp(numerator1, sqrtPrice, denominator);
+    }
+  }
+  return divRoundingUp(numerator1, numerator1 / sqrtPrice + amount0);
+}
+
+/**
+ * Mirrors the exact integer path used by LaypipeFactory._seedLiquidity,
+ * PipedogHook's exempt first-buy fee, and Uniswap v4's one-step exact-input
+ * swap. prepareFirstBuyQuote independently proves the result against the full
+ * factory call at one pinned block before this value is trusted.
+ */
+export function quoteInitialFirstBuy(options: {
+  config: FactoryLaunchConfig;
+  firstBuyIn: bigint;
+}) {
+  const { config, firstBuyIn } = options;
+  if (firstBuyIn <= BigInt(0)) {
+    throw new WalletFlowError("A first-buy quote requires a positive PIPEDOG amount.");
+  }
+  if (firstBuyIn > MAX_INT128) {
+    throw new WalletFlowError("First-buy input exceeds the conservative swap limit.");
+  }
+  if (
+    config.supply <= BigInt(0) ||
+    !Number.isInteger(config.tickSpacing) ||
+    config.tickSpacing <= 0 ||
+    !Number.isInteger(config.startTick) ||
+    config.startTick % config.tickSpacing !== 0 ||
+    !Number.isInteger(config.baseFeeRate) ||
+    config.baseFeeRate < 0 ||
+    config.baseFeeRate >= Number(FEE_DENOMINATOR)
+  ) {
+    throw new WalletFlowError("Launch config cannot produce a trusted first-buy quote.");
+  }
+
+  const minimumTick = Math.ceil(MIN_TICK / config.tickSpacing) * config.tickSpacing;
+  if (config.startTick <= minimumTick || config.startTick > MAX_TICK) {
+    throw new WalletFlowError("Launch config has an invalid one-sided tick range.");
+  }
+  const sqrtLower = sqrtPriceAtTick(minimumTick);
+  const sqrtStart = sqrtPriceAtTick(config.startTick);
+  const liquidity =
+    (config.supply * Q96) / (sqrtStart - sqrtLower);
+  if (liquidity <= BigInt(0) || liquidity > MAX_UINT128 || liquidity > MAX_INT128) {
+    throw new WalletFlowError("Launch liquidity is outside the factory range.");
+  }
+
+  const hookFee =
+    (firstBuyIn * BigInt(config.baseFeeRate)) / FEE_DENOMINATOR;
+  const poolInput = firstBuyIn - hookFee;
+  if (poolInput <= BigInt(0)) {
+    throw new WalletFlowError("The first-buy fee leaves no PIPEDOG for the pool.");
+  }
+  const curveCapacity = amount0Delta(
+    sqrtLower,
+    sqrtStart,
+    liquidity,
+    true,
+  );
+  if (poolInput > curveCapacity) {
+    throw new WalletFlowError(
+      "The first buy exceeds the launch curve and would be rejected as a partial fill.",
+    );
+  }
+  const sqrtAfter =
+    poolInput === curveCapacity
+      ? sqrtLower
+      : nextSqrtFromAmount0Input(sqrtStart, liquidity, poolInput);
+  const expectedOutput = amount1Delta(sqrtAfter, sqrtStart, liquidity);
+  if (
+    expectedOutput <= BigInt(0) ||
+    expectedOutput > config.supply ||
+    expectedOutput > MAX_INT128
+  ) {
+    throw new WalletFlowError("The first-buy curve quote returned an invalid output.");
+  }
+  return {
+    expectedOutput,
+    hookFee,
+    poolInput,
+    liquidity,
+    sqrtAfter,
+  };
+}
+
+function launchInputIdentityCalldata(input: LaunchCallInput) {
+  return encodeLaunchCall({ ...input, firstBuyMinOut: BigInt(0) });
+}
+
+function containsExactRevertSelector(error: unknown, selector: string) {
+  const visited = new Set<unknown>();
+  function inspect(value: unknown, depth: number): boolean {
+    if (depth > 8 || value === null || value === undefined || visited.has(value)) {
+      return false;
+    }
+    if (typeof value === "string") {
+      return value.toLowerCase() === selector.toLowerCase();
+    }
+    if (typeof value !== "object") return false;
+    visited.add(value);
+    for (const key of Object.getOwnPropertyNames(value)) {
+      try {
+        const candidate = (value as Record<string, unknown>)[key];
+        if (inspect(candidate, depth + 1)) return true;
+      } catch {
+        // Hostile/non-standard provider getters are ignored; missing an exact
+        // selector fails the quote proof closed below.
+      }
+    }
+    return false;
+  }
+  return inspect(error, 0);
+}
+
+export function assertFirstBuyQuoteForInput(options: {
+  quote: FirstBuyQuote;
+  owner: Address;
+  predictedToken: Address;
+  input: LaunchCallInput;
+  config: FactoryLaunchConfig;
+  latestBlock: bigint;
+  nowMs: number;
+}) {
+  const { quote, owner, predictedToken, input, config, latestBlock, nowMs } =
+    options;
+  if (input.firstBuyIn <= BigInt(0)) {
+    throw new WalletFlowError("A first-buy quote cannot authorize a zero-value buy.");
+  }
+  if (!sameAddress(quote.owner, owner)) {
+    throw new WalletFlowError("First-buy quote belongs to a different wallet.");
+  }
+  if (!sameAddress(quote.predictedToken, predictedToken)) {
+    throw new WalletFlowError("First-buy quote belongs to a different predicted token.");
+  }
+  if (
+    quote.inputIdentityCalldata.toLowerCase() !==
+    launchInputIdentityCalldata(input).toLowerCase()
+  ) {
+    throw new WalletFlowError("First-buy quote launch identity was modified.");
+  }
+  const local = quoteInitialFirstBuy({ config, firstBuyIn: input.firstBuyIn });
+  if (quote.expectedOutput !== local.expectedOutput) {
+    throw new WalletFlowError("First-buy expected output no longer matches the launch config.");
+  }
+  const minimumOutput = applyFirstBuySlippage(
+    quote.expectedOutput,
+    quote.slippageBps,
+  );
+  if (
+    quote.minimumOutput !== minimumOutput ||
+    input.firstBuyMinOut !== minimumOutput
+  ) {
+    throw new WalletFlowError("First-buy minimum output was modified.");
+  }
+  assertFirstBuyQuoteTiming(quote, latestBlock, nowMs);
+}
+
+export function assertFirstBuyQuoteTiming(
+  quote: FirstBuyQuote,
+  latestBlock: bigint,
+  nowMs: number,
+) {
+  if (
+    !Number.isSafeInteger(quote.createdAtMs) ||
+    !Number.isSafeInteger(quote.expiresAtMs) ||
+    quote.expiresAtMs !== quote.createdAtMs + FIRST_BUY_QUOTE_TTL_MS ||
+    quote.createdAtMs > nowMs
+  ) {
+    throw new WalletFlowError("First-buy quote timing fields are invalid.");
+  }
+  if (nowMs > quote.expiresAtMs) {
+    throw new WalletFlowError("The first-buy quote expired. Prepare it again.");
+  }
+  if (latestBlock < quote.verifiedBlockNumber) {
+    throw new WalletFlowError("Wallet RPC returned an older block than the first-buy quote.");
+  }
+  if (
+    quote.maxSubmissionBlock !==
+    quote.verifiedBlockNumber + FIRST_BUY_QUOTE_BLOCK_BUDGET
+  ) {
+    throw new WalletFlowError("First-buy quote block bounds were modified.");
+  }
+  if (latestBlock > quote.maxSubmissionBlock) {
+    throw new WalletFlowError("The first-buy quote exceeded its client block-drift bound.");
   }
 }
 
@@ -709,6 +1093,7 @@ export class LaypipeLaunchClient {
   readonly auditedManifest: AuditedDeploymentManifest | null;
   private readonly verifyDeployment: DeploymentVerifier;
   private readonly confirmationProvider: Eip1193Provider;
+  private readonly now: () => number;
 
   constructor(
     provider: Eip1193Provider,
@@ -721,6 +1106,7 @@ export class LaypipeLaunchClient {
     this.confirmationProvider =
       dependencies.confirmationProvider ??
       createRobinhoodLaunchConfirmationProvider();
+    this.now = dependencies.now ?? Date.now;
     if (typeof deployment === "string") {
       this.factoryAddress = assertAddress(deployment, "Factory address");
       this.quoteTokenAddress = PIPEDOG_ADDRESS;
@@ -747,10 +1133,15 @@ export class LaypipeLaunchClient {
     return this.verifyDeployment(this.provider, this.auditedManifest);
   }
 
-  private async call(to: Address, data: Hex, from?: Address) {
+  private async call(
+    to: Address,
+    data: Hex,
+    from?: Address,
+    blockTag: Hex | "latest" = "latest",
+  ) {
     const result = await this.provider.request<unknown>({
       method: "eth_call",
-      params: [{ to, data, ...(from ? { from } : {}) }, "latest"],
+      params: [{ to, data, ...(from ? { from } : {}) }, blockTag],
     });
     return assertRpcData(result, "Contract read");
   }
@@ -759,28 +1150,38 @@ export class LaypipeLaunchClient {
     owner: Address,
     configId: bigint,
   ): Promise<FactoryPreflight> {
-    await this.verifyAuditedDeployment();
+    const deployment = await this.verifyAuditedDeployment();
+    const { blockNumber, blockTag } = deployment;
     const [
       launchFeeResult,
       launchEnabledResult,
       quoteTokenResult,
       configResult,
     ] = await Promise.all([
-      this.call(this.factoryAddress, encodeLaunchFeeCall()),
-      this.call(this.factoryAddress, encodeLaunchEnabledCall()),
-      this.call(this.factoryAddress, encodeQuoteTokenCall()),
-      this.call(this.factoryAddress, encodeGetLaunchConfigCall(configId)),
+      this.call(this.factoryAddress, encodeLaunchFeeCall(), undefined, blockTag),
+      this.call(this.factoryAddress, encodeLaunchEnabledCall(), undefined, blockTag),
+      this.call(this.factoryAddress, encodeQuoteTokenCall(), undefined, blockTag),
+      this.call(
+        this.factoryAddress,
+        encodeGetLaunchConfigCall(configId),
+        undefined,
+        blockTag,
+      ),
     ]);
     const quoteToken = decodeAddress(quoteTokenResult);
     const [allowanceResult, balanceResult] = await Promise.all([
       this.call(
         quoteToken,
         encodeAllowanceCall(owner, this.factoryAddress),
+        undefined,
+        blockTag,
       ),
-      this.call(quoteToken, encodeBalanceOfCall(owner)),
+      this.call(quoteToken, encodeBalanceOfCall(owner), undefined, blockTag),
     ]);
 
     return {
+      blockNumber,
+      blockTag,
       launchFee: decodeUint(launchFeeResult),
       launchEnabled: decodeBool(launchEnabledResult),
       quoteToken,
@@ -832,6 +1233,104 @@ export class LaypipeLaunchClient {
     );
   }
 
+  async prepareFirstBuyQuote(options: {
+    owner: Address;
+    predictedToken: Address;
+    input: LaunchCallInput;
+    slippageBps: number;
+  }): Promise<FirstBuyQuote> {
+    const { owner, predictedToken, input, slippageBps } = options;
+    if (input.firstBuyIn <= BigInt(0)) {
+      throw new WalletFlowError("A first-buy quote requires a positive PIPEDOG amount.");
+    }
+    assertFirstBuySlippageBps(slippageBps);
+    const preflight = await this.readPreflight(owner, input.configId);
+    const safety = assertLaunchPreflight({
+      preflight,
+      expectedSelfBurn: preflight.launchConfig.selfBurn,
+      firstBuyIn: input.firstBuyIn,
+    });
+    if (
+      preflight.allowance !== safety.requiredAllowance ||
+      safety.approvalPlan.steps.length !== 0
+    ) {
+      throw new WalletFlowError(
+        "First-buy quote proof requires the exact single-use launch fee plus first-buy allowance.",
+      );
+    }
+
+    const local = quoteInitialFirstBuy({
+      config: preflight.launchConfig,
+      firstBuyIn: input.firstBuyIn,
+    });
+    const minimumOutput = applyFirstBuySlippage(
+      local.expectedOutput,
+      slippageBps,
+    );
+    const protectedInput = { ...input, firstBuyMinOut: minimumOutput };
+    const exactOutputInput = {
+      ...input,
+      firstBuyMinOut: local.expectedOutput,
+    };
+    const exactResult = decodeLaunchResult(
+      await this.call(
+        this.factoryAddress,
+        encodeLaunchCall(exactOutputInput),
+        owner,
+        preflight.blockTag,
+      ),
+    );
+    if (!sameAddress(exactResult.token, predictedToken)) {
+      throw new WalletFlowError(
+        "First-buy quote simulation launched a different predicted token.",
+      );
+    }
+
+    try {
+      await this.call(
+        this.factoryAddress,
+        encodeLaunchCall({
+          ...input,
+          firstBuyMinOut: local.expectedOutput + BigInt(1),
+        }),
+        owner,
+        preflight.blockTag,
+      );
+      throw new WalletFlowError(
+        "First-buy quote boundary was not rejected by the factory.",
+      );
+    } catch (error) {
+      if (
+        error instanceof WalletFlowError &&
+        /boundary was not rejected/.test(error.message)
+      ) {
+        throw error;
+      }
+      if (!containsExactRevertSelector(error, FIRST_BUY_SLIPPAGE_SELECTOR)) {
+        throw new WalletFlowError(
+          "Factory did not prove the exact first-buy output boundary.",
+          unknownErrorCode(error),
+          error,
+        );
+      }
+    }
+
+    const createdAtMs = this.now();
+    return {
+      owner,
+      predictedToken,
+      inputIdentityCalldata: launchInputIdentityCalldata(protectedInput),
+      expectedOutput: local.expectedOutput,
+      minimumOutput,
+      slippageBps,
+      verifiedBlockNumber: preflight.blockNumber,
+      maxSubmissionBlock:
+        preflight.blockNumber + FIRST_BUY_QUOTE_BLOCK_BUDGET,
+      createdAtMs,
+      expiresAtMs: createdAtMs + FIRST_BUY_QUOTE_TTL_MS,
+    };
+  }
+
   async estimateApproval(owner: Address, amount: bigint) {
     await this.verifyAuditedDeployment();
     return this.estimate({
@@ -855,8 +1354,10 @@ export class LaypipeLaunchClient {
     } as const;
     await this.estimate(transaction);
     await ensureRobinhoodChain(this.provider);
-    await this.verifyAuditedDeployment();
-    await assertSubmissionContext(this.provider, owner);
+    const finalDeployment = await this.verifyAuditedDeployment();
+    await assertSubmissionContext(this.provider, owner, {
+      minimumBlockNumber: finalDeployment.blockNumber,
+    });
     return this.sendMutation(transaction, "approval", callbacks);
   }
 
@@ -876,8 +1377,35 @@ export class LaypipeLaunchClient {
     callbacks: LaunchSubmissionCallbacks = {},
   ) {
     assertFirstBuyAmounts(input.firstBuyIn, input.firstBuyMinOut);
-    await this.verifyAuditedDeployment();
     await ensureRobinhoodChain(this.provider);
+    let finalSnapshotBlock: bigint;
+    if (input.firstBuyIn > BigInt(0)) {
+      if (!callbacks.firstBuyQuote || !callbacks.predictedToken) {
+        throw new WalletFlowError(
+          "A non-zero first buy requires a fresh factory-proven quote.",
+        );
+      }
+      const preflight = await this.readPreflight(owner, input.configId);
+      const safety = assertLaunchPreflight({
+        preflight,
+        expectedSelfBurn: preflight.launchConfig.selfBurn,
+        firstBuyIn: input.firstBuyIn,
+      });
+      if (safety.approvalPlan.steps.length !== 0) {
+        throw new WalletFlowError(
+          "The exact single-use PIPEDOG allowance changed before launch.",
+        );
+      }
+      assertFirstBuyQuoteForInput({
+        quote: callbacks.firstBuyQuote,
+        owner,
+        predictedToken: callbacks.predictedToken,
+        input,
+        config: preflight.launchConfig,
+        latestBlock: preflight.blockNumber,
+        nowMs: this.now(),
+      });
+    }
     const transaction = {
       from: owner,
       to: this.factoryAddress,
@@ -885,8 +1413,54 @@ export class LaypipeLaunchClient {
     } as const;
     await this.estimate(transaction);
     await ensureRobinhoodChain(this.provider);
-    await this.verifyAuditedDeployment();
-    await assertSubmissionContext(this.provider, owner);
+    if (input.firstBuyIn > BigInt(0)) {
+      const quote = callbacks.firstBuyQuote!;
+      const predictedToken = callbacks.predictedToken!;
+      // This is deliberately after gas estimation: the final audited snapshot,
+      // exact allowance/balance/config reads, and protected full-factory call
+      // are all pinned to one block immediately before the wallet context check.
+      const finalPreflight = await this.readPreflight(owner, input.configId);
+      const finalSafety = assertLaunchPreflight({
+        preflight: finalPreflight,
+        expectedSelfBurn: finalPreflight.launchConfig.selfBurn,
+        firstBuyIn: input.firstBuyIn,
+      });
+      if (finalSafety.approvalPlan.steps.length !== 0) {
+        throw new WalletFlowError(
+          "The exact single-use PIPEDOG allowance changed during final simulation.",
+        );
+      }
+      assertFirstBuyQuoteForInput({
+        quote,
+        owner,
+        predictedToken,
+        input,
+        config: finalPreflight.launchConfig,
+        latestBlock: finalPreflight.blockNumber,
+        nowMs: this.now(),
+      });
+      const protectedResult = decodeLaunchResult(
+        await this.call(
+          this.factoryAddress,
+          transaction.data,
+          owner,
+          finalPreflight.blockTag,
+        ),
+      );
+      if (!sameAddress(protectedResult.token, predictedToken)) {
+        throw new WalletFlowError(
+          "Final protected launch simulation returned a different token.",
+        );
+      }
+      finalSnapshotBlock = finalPreflight.blockNumber;
+    } else {
+      finalSnapshotBlock = (await this.verifyAuditedDeployment()).blockNumber;
+    }
+    await assertSubmissionContext(this.provider, owner, {
+      quote: callbacks.firstBuyQuote,
+      minimumBlockNumber: finalSnapshotBlock,
+      now: this.now,
+    });
     return this.sendMutation(transaction, "launch", callbacks);
   }
 
@@ -911,7 +1485,7 @@ export class LaypipeLaunchClient {
     action: "approval" | "launch",
     callbacks: LaunchSubmissionCallbacks,
   ) {
-    callbacks.onSubmissionInvoked?.();
+    await callbacks.onSubmissionInvoked?.();
     try {
       const result = await this.provider.request<unknown>({
         method: "eth_sendTransaction",
@@ -922,7 +1496,7 @@ export class LaypipeLaunchClient {
           `The wallet may have broadcast the ${action} but returned an invalid hash. Do not retry until wallet activity is reconciled.`,
         );
       }
-      callbacks.onSubmitted?.(result);
+      await callbacks.onSubmitted?.(result);
       return result;
     } catch (error) {
       if (explicitWalletRejection(error)) {

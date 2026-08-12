@@ -6,12 +6,17 @@ import { useWallet } from "@/app/_components/WalletProvider";
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import {
   readPendingTradeForWallet,
-  removePendingTrade,
+  removeExactPendingTrade,
+  removeExactUnsubmittedPendingTrade,
   savePendingTrade,
   savePendingTradeHash,
   type PendingTradeIntent,
 } from "@/lib/wallet/pending-trades";
-import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import {
+  withWalletMutationLock,
+  withWalletRecoveryLocks,
+  withWalletRecoveryStoreLock,
+} from "@/lib/wallet/mutation-lock";
 import { assertNoPendingWalletMutation } from "@/lib/wallet/pending-wallet-mutations";
 import { ensureRobinhoodChain } from "@/lib/web3/launch-client";
 import {
@@ -79,6 +84,16 @@ function samePendingPool(
     intent.tokenAddress.toLowerCase() === token.tokenAddress.toLowerCase() &&
     intent.poolId.toLowerCase() === token.poolId.toLowerCase()
   );
+}
+
+function exactPendingTrade(
+  intent: PendingTradeIntent | null,
+  hash: Hex | null,
+) {
+  if (!intent) {
+    throw new Error("The exact saved trade recovery intent is missing.");
+  }
+  return { ...intent, hash } as PendingTradeIntent;
 }
 
 export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
@@ -211,24 +226,26 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     };
   }
 
-  function persistSubmission(intent: PendingTradeIntent, hash?: Hex) {
+  async function persistSubmission(intent: PendingTradeIntent, hash?: Hex) {
     if (hash) {
+      await withWalletRecoveryStoreLock(navigator.locks, () =>
+        savePendingTradeHash(window.localStorage, intent, hash),
+      );
       setRestoredIntent({ ...intent, hash });
       setPendingHash(hash);
-      savePendingTradeHash(window.localStorage, intent, hash);
       return;
     }
-    savePendingTrade(window.localStorage, intent);
+    await withWalletRecoveryStoreLock(navigator.locks, () =>
+      savePendingTrade(window.localStorage, intent),
+    );
     setRestoredIntent(intent);
   }
 
-  function clearPersistentSubmission() {
-    if (!account || !token) return;
-    removePendingTrade(
-      window.localStorage,
-      account,
-      token.tokenAddress,
-      token.poolId,
+  async function clearPersistentSubmission(expected: PendingTradeIntent) {
+    await withWalletRecoveryStoreLock(navigator.locks, () =>
+      expected.hash === null
+        ? removeExactUnsubmittedPendingTrade(window.localStorage, expected)
+        : removeExactPendingTrade(window.localStorage, expected),
     );
     setRestoredIntent(null);
   }
@@ -432,7 +449,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       await ensureRobinhoodChain(provider);
       const pending = await withWalletSubmissionLock(() =>
         tradeClient.sendNextApproval(account, side, preflight.inputAmount, {
-          onSubmissionInvoked: (submission) => {
+          onSubmissionInvoked: async (submission) => {
             const nextIntent = approvalIntent({
               amount: submission.amount,
               kind: submission.kind,
@@ -442,13 +459,13 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
             if (submission.target.toLowerCase() !== submission.token.toLowerCase()) {
               throw new Error("Approval submission target changed unexpectedly.");
             }
-            persistSubmission(nextIntent);
+            await persistSubmission(nextIntent);
             intent = nextIntent;
           },
-          onSubmitted: (hash) => {
+          onSubmitted: async (hash) => {
             submitted = hash;
             if (!intent) throw new Error("Approval recovery intent is missing.");
-            persistSubmission(intent, hash);
+            await persistSubmission(intent, hash);
           },
         }),
       );
@@ -459,7 +476,10 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         );
       }
       setPendingHash(null);
-      clearPersistentSubmission();
+      if (!intent || !submitted) {
+        throw new Error("Confirmed approval has no exact saved recovery intent.");
+      }
+      await clearPersistentSubmission(exactPendingTrade(intent, submitted));
 
       // Approval state is never assumed from a receipt. Re-run the complete
       // manifest, token, account, balance, and allowance preflight.
@@ -493,7 +513,9 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       ) {
         setPhase("pending-unknown");
       } else {
-        if (intent) clearPersistentSubmission();
+        if (intent) {
+          await clearPersistentSubmission(exactPendingTrade(intent, submitted));
+        }
         setPhase("error");
       }
     } finally {
@@ -513,7 +535,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       await ensureRobinhoodChain(provider);
       const pending = await withWalletSubmissionLock(() =>
         tradeClient.clearAllowance(account, side, {
-          onSubmissionInvoked: (submission) => {
+          onSubmissionInvoked: async (submission) => {
           const nextIntent = approvalIntent({
             amount: submission.amount,
             kind: submission.kind,
@@ -523,18 +545,20 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           if (submission.target.toLowerCase() !== submission.token.toLowerCase()) {
             throw new Error("Allowance-clear target changed unexpectedly.");
           }
-          persistSubmission(nextIntent);
+          await persistSubmission(nextIntent);
           intent = nextIntent;
           },
-          onSubmitted: (hash) => {
+          onSubmitted: async (hash) => {
           submitted = hash;
           if (!intent) throw new Error("Allowance-clear recovery intent is missing.");
-          persistSubmission(intent, hash);
+          await persistSubmission(intent, hash);
           },
         }),
       );
       if (!pending) {
-        clearPersistentSubmission();
+        if (intent) {
+          await clearPersistentSubmission(exactPendingTrade(intent, submitted));
+        }
         invalidateTrade();
         return;
       }
@@ -545,7 +569,10 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         );
       }
       invalidateTrade();
-      clearPersistentSubmission();
+      if (!intent || !submitted) {
+        throw new Error("Confirmed allowance clear has no exact saved recovery intent.");
+      }
+      await clearPersistentSubmission(exactPendingTrade(intent, submitted));
     } catch (caught) {
       const message = describeTradeError(caught);
       const canonicalRevert = isCanonicalTradeReverted(caught);
@@ -556,7 +583,9 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       ) {
         setPhase("pending-unknown");
       } else {
-        if (intent) clearPersistentSubmission();
+        if (intent) {
+          await clearPersistentSubmission(exactPendingTrade(intent, submitted));
+        }
         setPhase("error");
       }
     } finally {
@@ -583,7 +612,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       // exact-allowance preflight, then simulates the protected calldata.
       const pending = await withWalletSubmissionLock(() =>
         tradeClient.sendTrade(quote, {
-          onSubmissionInvoked: (submission) => {
+          onSubmissionInvoked: async (submission) => {
           const nextIntent = tradeIntent(submission.quote);
           if (
             nextIntent.target.toLowerCase() !== submission.target.toLowerCase() ||
@@ -591,13 +620,13 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           ) {
             throw new Error("Trade submission calldata changed unexpectedly.");
           }
-          persistSubmission(nextIntent);
+          await persistSubmission(nextIntent);
           intent = nextIntent;
           },
-          onSubmitted: (hash) => {
+          onSubmitted: async (hash) => {
           submitted = hash;
           if (!intent) throw new Error("Trade recovery intent is missing.");
-          persistSubmission(intent, hash);
+          await persistSubmission(intent, hash);
           },
         }),
       );
@@ -610,7 +639,10 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         side,
       });
       setPendingHash(null);
-      clearPersistentSubmission();
+      if (!intent || !submitted) {
+        throw new Error("Confirmed trade has no exact saved recovery intent.");
+      }
+      await clearPersistentSubmission(exactPendingTrade(intent, submitted));
       setQuote(null);
       setPreflight(null);
       setPhase("success");
@@ -624,7 +656,9 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       ) {
         setPhase("pending-unknown");
       } else {
-        if (intent) clearPersistentSubmission();
+        if (intent) {
+          await clearPersistentSubmission(exactPendingTrade(intent, submitted));
+        }
         setPhase("error");
       }
     } finally {
@@ -688,7 +722,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           );
         }
         if (operation !== reconciliationRef.current) return;
-        clearPersistentSubmission();
+        await clearPersistentSubmission(pending);
         setPendingHash(null);
         setPreflight(null);
         setQuote(null);
@@ -746,7 +780,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         allowanceCleared: confirmed.allowanceCleared,
         side: restoredQuote.side,
       });
-      clearPersistentSubmission();
+      await clearPersistentSubmission(pending);
       setPendingHash(null);
       setQuote(null);
       setPreflight(null);
@@ -754,7 +788,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     } catch (caught) {
       if (operation !== reconciliationRef.current) return;
       if (isCanonicalTradeReverted(caught)) {
-        clearPersistentSubmission();
+        await clearPersistentSubmission(pending);
         setPendingHash(null);
         setQuote(null);
         setPreflight(null);
@@ -774,17 +808,19 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     }
   }
 
-  function clearReconciledTradeLock() {
+  async function clearReconciledTradeLock() {
     if (!restoredIntent || restoredIntent.hash || !pendingStoreReady || !account) return;
-    reconciliationRef.current += 1;
-    removePendingTrade(
-      window.localStorage,
-      account,
-      restoredIntent.tokenAddress,
-      restoredIntent.poolId,
-    );
-    setRestoredIntent(null);
-    invalidateTrade();
+    try {
+      await withWalletRecoveryLocks(navigator.locks, account, () =>
+        removeExactUnsubmittedPendingTrade(window.localStorage, restoredIntent),
+      );
+      reconciliationRef.current += 1;
+      setRestoredIntent(null);
+      invalidateTrade();
+    } catch (caught) {
+      setError(describeTradeError(caught));
+      setPhase("pending-unknown");
+    }
   }
 
   function chooseSide(nextSide: TradeSide) {

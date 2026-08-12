@@ -10,6 +10,16 @@ LayPipe has up to four independent permissionless maintenance paths:
 A permissionless write is still a signed, gas-paying transaction. Only the
 revenue-lane and self-burn calls pay a PIPEDOG bounty. Hook fee sweeps do not.
 
+The public Rewards surface supports the currently reviewed hook `sweep` and
+`collectPlatform` calls plus the router's `sequesterPipedog` and
+`routeTreasuryPipedog` calls. It re-reads the complete configured release manifest,
+simulates from the connected wallet, persists the exact intent before asking
+the wallet to send, and reports a reward only after a canonical event binds the
+caller and bounty. `PlatformPayoutCollected` has no caller field, so platform
+collection is never credited to a wallet. Self-burn execution remains disabled
+in this browser surface. There is no server signer, keeper private key, or
+automatic transaction broadcaster.
+
 ## Sweep hook fees
 
 `PipedogHook.sweep(poolId)` redeems a pool's pending Uniswap v4 fee claims into

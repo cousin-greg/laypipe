@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -12,17 +11,23 @@ import {
   pendingClaimRecoveryFromError,
   readPendingClaimStateForWallet,
   removeExactPendingClaim,
-  removePendingClaim,
-  resetPendingClaimStore,
+  removeExactUnsubmittedPendingClaim,
+  resetPendingClaimForWallet,
   savePendingClaim,
   savePendingClaimHash,
   type PendingClaimIntent,
   type PendingClaimRecoveryReason,
   type PendingClaimState,
 } from "@/lib/wallet/pending-claims";
-import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import {
+  withWalletMutationLock,
+  withWalletRecoveryLocks,
+  withWalletRecoveryStoreLock,
+} from "@/lib/wallet/mutation-lock";
 import {
   assertNoPendingWalletMutation,
+  notifyPendingWalletMutationCleared,
+  PENDING_WALLET_MUTATION_CHANGE_EVENT,
   PENDING_WALLET_MUTATION_STORAGE_KEYS,
 } from "@/lib/wallet/pending-wallet-mutations";
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
@@ -36,6 +41,10 @@ import { explorerTokenUrl, explorerTransactionUrl } from "@/lib/web3/robinhood";
 import { formatUnits } from "@/lib/web3/units";
 
 import { useMarketData } from "./MarketDataProvider";
+import {
+  creatorHandoffRecoveryMessage,
+  useCreatorHandoff,
+} from "./useCreatorHandoff";
 import { useWallet } from "./WalletProvider";
 
 type View = "tokens" | "rewards";
@@ -134,6 +143,17 @@ export function WalletPortfolio({ view }: { view: View }) {
     },
     [account, marketMode],
   );
+  const reload = useCallback(() => load(null), [load]);
+  const creatorHandoff = useCreatorHandoff({
+    account,
+    provider,
+    revision,
+    reload,
+  });
+
+  function withClaimRecoveryStore<T>(operation: () => Promise<T> | T) {
+    return withWalletRecoveryStoreLock(navigator.locks, operation);
+  }
 
   useEffect(() => {
     requestRef.current += 1;
@@ -182,13 +202,7 @@ export function WalletPortfolio({ view }: { view: View }) {
 
   useEffect(() => {
     if (!account) return;
-    const handleStorage = (event: StorageEvent) => {
-      if (
-        event.storageArea !== window.localStorage ||
-        (event.key !== null && !PENDING_WALLET_MUTATION_STORAGE_KEYS.has(event.key))
-      ) {
-        return;
-      }
+    const restoreMutationState = () => {
       claimRef.current += 1;
       setClaiming(null);
       try {
@@ -218,8 +232,27 @@ export function WalletPortfolio({ view }: { view: View }) {
         setClaimError(null);
       }
     };
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea !== window.localStorage ||
+        (event.key !== null && !PENDING_WALLET_MUTATION_STORAGE_KEYS.has(event.key))
+      ) {
+        return;
+      }
+      restoreMutationState();
+    };
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
+    window.addEventListener(
+      PENDING_WALLET_MUTATION_CHANGE_EVENT,
+      restoreMutationState,
+    );
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(
+        PENDING_WALLET_MUTATION_CHANGE_EVENT,
+        restoreMutationState,
+      );
+    };
   }, [account]);
 
   const visible = useMemo(
@@ -235,9 +268,12 @@ export function WalletPortfolio({ view }: { view: View }) {
     [account, payload, view],
   );
 
-  function unlockCanonicallyRevertedClaim(intent: PendingClaimIntent) {
+  async function unlockCanonicallyRevertedClaim(intent: PendingClaimIntent) {
     try {
-      removeExactPendingClaim(window.localStorage, intent);
+      await withClaimRecoveryStore(() =>
+        removeExactPendingClaim(window.localStorage, intent),
+      );
+      notifyPendingWalletMutationCleared();
       setPendingClaim(null);
       setClaimRecovery(null);
       setClaiming(null);
@@ -262,7 +298,8 @@ export function WalletPortfolio({ view }: { view: View }) {
       !claimStorageReady ||
       pendingClaim ||
       claimRecovery ||
-      crossSurfacePending
+      crossSurfacePending ||
+      creatorHandoff.blocked
     ) return;
     const claimId = ++claimRef.current;
     const claimAccount = account;
@@ -287,7 +324,7 @@ export function WalletPortfolio({ view }: { view: View }) {
         async () => {
           assertNoPendingWalletMutation(window.localStorage, claimAccount);
           return client.claim(claimAccount, position.poolId, {
-            onSubmissionInvoked: () => {
+            onSubmissionInvoked: async () => {
               const intent: PendingClaimIntent = {
                 chainId: 4663,
                 wallet: claimAccount,
@@ -296,7 +333,9 @@ export function WalletPortfolio({ view }: { view: View }) {
                 invokedAt: Date.now(),
               };
               try {
-                savePendingClaim(window.localStorage, intent);
+                await withClaimRecoveryStore(() =>
+                  savePendingClaim(window.localStorage, intent),
+                );
               } catch (cause) {
                 setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
                 throw cause;
@@ -305,17 +344,20 @@ export function WalletPortfolio({ view }: { view: View }) {
               persisted.intent = intent;
               setPendingClaim(intent);
             },
-            onSubmitted: (hash) => {
+            onSubmitted: async (hash) => {
               submittedHash = hash;
               if (!persisted.intent) {
                 throw new Error("The pending claim intent was not saved before submission.");
               }
               try {
-                savePendingClaimHash(
-                  window.localStorage,
-                  claimAccount,
-                  position.poolId,
-                  hash,
+                await withClaimRecoveryStore(() =>
+                  savePendingClaimHash(
+                    window.localStorage,
+                    claimAccount,
+                    position.poolId,
+                    hash,
+                    persisted.intent!.invokedAt,
+                  ),
                 );
               } catch (cause) {
                 setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
@@ -331,7 +373,13 @@ export function WalletPortfolio({ view }: { view: View }) {
       submittedHash = submitted.hash;
       await client.confirmClaim(submitted.hash, { account: claimAccount, poolId: position.poolId });
       if (claimId !== claimRef.current || claimRevision !== revision) return;
-      removePendingClaim(window.localStorage, claimAccount, position.poolId);
+      if (!persisted.intent?.hash) {
+        throw new Error("Confirmed claim has no exact saved recovery hash.");
+      }
+      await withClaimRecoveryStore(() =>
+        removeExactPendingClaim(window.localStorage, persisted.intent!),
+      );
+      notifyPendingWalletMutationCleared();
       setConfirmedHash(submitted.hash);
       setPendingClaim(null);
       setClaimRecovery(null);
@@ -347,7 +395,7 @@ export function WalletPortfolio({ view }: { view: View }) {
         submittedHash &&
         revertedIntent.hash.toLowerCase() === submittedHash.toLowerCase()
       ) {
-        keepLocked = !unlockCanonicallyRevertedClaim(revertedIntent);
+        keepLocked = !(await unlockCanonicallyRevertedClaim(revertedIntent));
         return;
       }
       keepLocked = isClaimSubmissionIndeterminate(cause) || submittedHash !== null;
@@ -357,11 +405,10 @@ export function WalletPortfolio({ view }: { view: View }) {
       ) {
         if (submissionInvoked) {
           try {
-            removePendingClaim(
-              window.localStorage,
-              claimAccount,
-              position.poolId,
+            await withClaimRecoveryStore(() =>
+              removeExactUnsubmittedPendingClaim(window.localStorage, revertedIntent!),
             );
+            notifyPendingWalletMutationCleared();
           } catch (storageCause) {
             keepLocked = true;
             setClaimRecovery(pendingClaimRecoveryFromError(storageCause).reason);
@@ -394,7 +441,10 @@ export function WalletPortfolio({ view }: { view: View }) {
         poolId: pendingClaim.poolId,
       });
       if (operation !== claimRef.current) return;
-      removePendingClaim(window.localStorage, account, pendingClaim.poolId);
+      await withClaimRecoveryStore(() =>
+        removeExactPendingClaim(window.localStorage, pendingClaim),
+      );
+      notifyPendingWalletMutationCleared();
       setConfirmedHash(pendingClaim.hash);
       setPendingClaim(null);
       setClaimRecovery(null);
@@ -403,17 +453,20 @@ export function WalletPortfolio({ view }: { view: View }) {
     } catch (cause) {
       if (operation !== claimRef.current) return;
       if (isCanonicalClaimReverted(cause)) {
-        unlockCanonicallyRevertedClaim(pendingClaim);
+        await unlockCanonicallyRevertedClaim(pendingClaim);
         return;
       }
       setClaimError(describeWalletError(cause));
     }
   }
 
-  function clearReconciledClaimLock() {
-    if (!account || !pendingClaim) return;
+  async function clearReconciledClaimLock() {
+    if (!account || !pendingClaim || pendingClaim.hash !== null) return;
     try {
-      removePendingClaim(window.localStorage, account, pendingClaim.poolId);
+      await withWalletRecoveryLocks(navigator.locks, account, () =>
+        removeExactUnsubmittedPendingClaim(window.localStorage, pendingClaim),
+      );
+      notifyPendingWalletMutationCleared();
       setPendingClaim(null);
       setClaimRecovery(null);
       setClaiming(null);
@@ -424,10 +477,13 @@ export function WalletPortfolio({ view }: { view: View }) {
     }
   }
 
-  function resetClaimSafetyLock() {
-    if (!claimRecovery) return;
+  async function resetClaimSafetyLock() {
+    if (!claimRecovery || !account) return;
     try {
-      resetPendingClaimStore(window.localStorage);
+      await withWalletRecoveryLocks(navigator.locks, account, () =>
+        resetPendingClaimForWallet(window.localStorage, account),
+      );
+      notifyPendingWalletMutationCleared();
       setPendingClaim(null);
       setClaimRecovery(null);
       setClaiming(null);
@@ -485,16 +541,112 @@ export function WalletPortfolio({ view }: { view: View }) {
             <div><dt>Lifetime claimed</dt><dd>{amount(position.lifetimeCreatorClaimedPipedog)} PIPEDOG</dd></div>
             <div><dt>Tokens burned</dt><dd>{amount(position.lifetimeSelfBurnedTokens)} tokens</dd></div>
             <div><dt>Claimable</dt><dd>Verify in wallet</dd></div>
+            {view === "tokens" && position.feeMode === "creator" && (
+              <>
+                <div className="wallet-creator-address"><dt>Original creator</dt><dd><code>{position.originalCreator}</code></dd></div>
+                <div className="wallet-creator-address"><dt>Current creator</dt><dd><code>{position.currentCreator}</code></dd></div>
+              </>
+            )}
           </dl>
           <div className="wallet-position-actions">
             <a className="button button-quiet button-small" href={explorerTokenUrl(position.tokenAddress)} target="_blank" rel="noreferrer">Explorer</a>
             {position.feeMode === "creator" &&
               position.currentCreator.toLowerCase() === account.toLowerCase() && (
-              <button className="button button-accent button-small" type="button" onClick={() => void claim(position)} disabled={!claimStorageReady || claiming !== null || pendingClaim !== null || claimRecovery !== null || crossSurfacePending !== null}>
+              <button className="button button-accent button-small" type="button" onClick={() => void claim(position)} disabled={!claimStorageReady || claiming !== null || pendingClaim !== null || claimRecovery !== null || crossSurfacePending !== null || creatorHandoff.blocked}>
                 {claiming === position.poolId ? "Claiming..." : "Verify & claim"}
               </button>
             )}
+            {view === "tokens" &&
+              position.feeMode === "creator" &&
+              position.isCurrentCreator &&
+              position.currentCreator.toLowerCase() === account.toLowerCase() &&
+              creatorHandoff.draft?.poolId.toLowerCase() !== position.poolId.toLowerCase() && (
+                <button
+                  className="button button-quiet button-small"
+                  type="button"
+                  onClick={() => creatorHandoff.open(position)}
+                  disabled={
+                    creatorHandoff.blocked ||
+                    claiming !== null ||
+                    pendingClaim !== null ||
+                    claimRecovery !== null ||
+                    crossSurfacePending !== null
+                  }
+                >
+                  Hand off creator
+                </button>
+              )}
           </div>
+          {view === "tokens" &&
+            creatorHandoff.draft?.poolId.toLowerCase() === position.poolId.toLowerCase() && (
+              <form
+                className="creator-handoff-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void creatorHandoff.submit(position);
+                }}
+              >
+                <div>
+                  <h4>Hand off the creator lane</h4>
+                  <p id={`creator-handoff-warning-${position.poolId}`}>
+                    This is irreversible from the old wallet. The new wallet or Safe immediately becomes the only address that can claim this pool&apos;s current and future creator PIPEDOG.
+                  </p>
+                </div>
+                <label htmlFor={`creator-handoff-address-${position.poolId}`}>
+                  New creator / Safe address
+                  <input
+                    id={`creator-handoff-address-${position.poolId}`}
+                    name="newCreator"
+                    type="text"
+                    inputMode="text"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    value={creatorHandoff.draft.destination}
+                    aria-describedby={`creator-handoff-warning-${position.poolId}`}
+                    onChange={(event) => creatorHandoff.setDestination(event.target.value)}
+                    disabled={creatorHandoff.blocked}
+                    placeholder="0x... (exact checksum required)"
+                  />
+                </label>
+                <label className="creator-handoff-acknowledgement">
+                  <input
+                    type="checkbox"
+                    checked={creatorHandoff.draft.acknowledged}
+                    onChange={(event) => creatorHandoff.setAcknowledged(event.target.checked)}
+                    disabled={creatorHandoff.blocked}
+                  />
+                  <span>I verified that I control this exact destination and understand the old creator loses claim rights immediately.</span>
+                </label>
+                <div className="creator-handoff-actions">
+                  <button
+                    className="button button-accent button-small"
+                    type="submit"
+                    disabled={
+                      creatorHandoff.blocked ||
+                      !creatorHandoff.draft.destination ||
+                      !creatorHandoff.draft.acknowledged ||
+                      claiming !== null ||
+                      pendingClaim !== null ||
+                      claimRecovery !== null ||
+                      crossSurfacePending !== null
+                    }
+                  >
+                    {creatorHandoff.submittingPoolId === position.poolId
+                      ? "Confirming handoff..."
+                      : "Verify & hand off permanently"}
+                  </button>
+                  <button
+                    className="button button-quiet button-small"
+                    type="button"
+                    onClick={creatorHandoff.close}
+                    disabled={creatorHandoff.submittingPoolId !== null}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
         </article>
       ))}
       {nextCursor && <button className="button button-quiet" type="button" disabled={loading} onClick={() => void load(nextCursor)}>{loading ? "Loading..." : "Load more"}</button>}
@@ -509,10 +661,10 @@ export function WalletPortfolio({ view }: { view: View }) {
       {claimRecovery && (
         <div className="wallet-snapshot-note" role="alert">
           <p>
-            Claims are locked. {claimRecoveryMessage(claimRecovery)} A previous wallet request cannot be ruled out. Check recent claim activity for every wallet used in this browser before resetting all local claim locks.
+            Claims are locked. {claimRecoveryMessage(claimRecovery)} A previous wallet request cannot be ruled out. Check this wallet&apos;s recent claim activity before resetting its local lock.
           </p>
-          <button className="button button-quiet button-small" type="button" onClick={resetClaimSafetyLock}>
-            I checked wallet activity; reset all local claim locks
+          <button className="button button-quiet button-small" type="button" onClick={() => void resetClaimSafetyLock()}>
+            I checked wallet activity; reset this wallet&apos;s claim lock
           </button>
         </div>
       )}
@@ -529,13 +681,76 @@ export function WalletPortfolio({ view }: { view: View }) {
               <button className="button button-quiet button-small" type="button" onClick={() => void reconcilePendingClaim()}>Recheck canonical receipt</button>
             </>
           )}
-          <button className="button button-quiet button-small" type="button" onClick={clearReconciledClaimLock}>
-            I checked wallet activity; clear lock
-          </button>
+          {!pendingClaim.hash && (
+            <button className="button button-quiet button-small" type="button" onClick={() => void clearReconciledClaimLock()}>
+              I checked wallet activity; clear hashless lock
+            </button>
+          )}
         </div>
       )}
       {confirmedHash && <p className="form-success" role="status">Claim confirmed. <a href={explorerTransactionUrl(confirmedHash as `0x${string}`)} target="_blank" rel="noreferrer">View receipt</a></p>}
-      {view === "rewards" && <p className="wallet-snapshot-note">Keeper jobs remain unavailable until their eligibility endpoints and per-wallet reward accounting are production-ready. No fake values are shown. <Link href="/docs#keepers">How keepers work</Link></p>}
+      {view === "tokens" && creatorHandoff.error && (
+        <p className="form-error" role="alert">{creatorHandoff.error}</p>
+      )}
+      {view === "tokens" && creatorHandoff.crossSurfacePending && (
+        <div className="wallet-snapshot-note" role="alert">
+          <p>
+            Creator handoffs are locked because another LayPipe wallet action is unresolved. {creatorHandoff.crossSurfacePending}
+          </p>
+        </div>
+      )}
+      {view === "tokens" && creatorHandoff.recovery && (
+        <div className="wallet-snapshot-note" role="alert">
+          <p>
+            Creator handoffs are locked. {creatorHandoffRecoveryMessage(creatorHandoff.recovery)} A previous wallet request cannot be ruled out. Check creator-update activity for every wallet used in this browser before resetting these local locks.
+          </p>
+          <button
+            className="button button-quiet button-small"
+            type="button"
+            onClick={() => void creatorHandoff.resetSafetyLock()}
+            disabled={creatorHandoff.liveOperation || creatorHandoff.recoveryBusy}
+          >
+            I checked wallet activity; reset creator-handoff locks
+          </button>
+        </div>
+      )}
+      {view === "tokens" && creatorHandoff.pending && (
+        <div className="wallet-snapshot-note" role="status">
+          <p>
+            {creatorHandoff.pending.hash
+              ? `Creator handoff to ${creatorHandoff.pending.newCreator} was submitted. Do not retry until its canonical receipt is reconciled.`
+              : "The wallet may have submitted this creator handoff without returning a hash. Check wallet activity before any other LayPipe transaction."}
+          </p>
+          {creatorHandoff.pending.hash && (
+            <>
+              <a href={explorerTransactionUrl(creatorHandoff.pending.hash)} target="_blank" rel="noreferrer">View transaction</a>{" "}
+              <button
+                className="button button-quiet button-small"
+                type="button"
+                onClick={() => void creatorHandoff.reconcile()}
+                disabled={creatorHandoff.liveOperation || creatorHandoff.recoveryBusy}
+              >
+                Recheck canonical receipt
+              </button>
+            </>
+          )}
+          {!creatorHandoff.pending.hash && (
+            <button
+              className="button button-quiet button-small"
+              type="button"
+              onClick={() => void creatorHandoff.clearCheckedLock()}
+              disabled={creatorHandoff.liveOperation || creatorHandoff.recoveryBusy}
+            >
+              I checked wallet activity; clear unresolved lock
+            </button>
+          )}
+        </div>
+      )}
+      {view === "tokens" && creatorHandoff.confirmed && (
+        <p className="form-success" role="status">
+          Creator handoff to {creatorHandoff.confirmed.newCreator} confirmed. <a href={explorerTransactionUrl(creatorHandoff.confirmed.hash)} target="_blank" rel="noreferrer">View receipt</a>
+        </p>
+      )}
     </section>
   );
 }

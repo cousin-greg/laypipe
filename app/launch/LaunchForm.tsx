@@ -29,29 +29,38 @@ import type { FactoryTokenParams } from "@/lib/web3/abi";
 import {
   deserializeLaunchInput,
   readPendingLaunchForWallet,
-  removePendingLaunch,
+  removeExactPendingLaunch,
+  removeExactUnsubmittedPendingLaunch,
   savePendingLaunch,
   savePendingLaunchHash,
   serializeLaunchInput,
   type PendingLaunchIntent,
 } from "@/lib/wallet/pending-launches";
-import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import {
+  withWalletMutationLock,
+  withWalletRecoveryLocks,
+  withWalletRecoveryStoreLock,
+} from "@/lib/wallet/mutation-lock";
 import {
   assertNoPendingWalletMutation,
   PENDING_WALLET_MUTATION_STORAGE_KEYS,
 } from "@/lib/wallet/pending-wallet-mutations";
 import {
   approvalCalldata,
+  applyFirstBuySlippage,
   assertLaunchPreflight,
   assertFirstBuyAmounts,
+  assertFirstBuySlippageBps,
   describeWalletError,
   ensureRobinhoodChain,
   isCanonicalTransactionReverted,
   isLaunchSubmissionIndeterminate,
   launchCalldata,
   LaypipeLaunchClient,
+  quoteInitialFirstBuy,
   type ExactApprovalPlan,
   type FactoryPreflight,
+  type FirstBuyQuote,
   type LaunchCallInput,
 } from "@/lib/web3/launch-client";
 import {
@@ -64,7 +73,7 @@ import {
 } from "@/lib/web3/robinhood";
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import type { Address, Hex } from "@/lib/web3/types";
-import { formatUnits, parseUnits } from "@/lib/web3/units";
+import { formatNonzeroUnits, formatUnits, parseUnits } from "@/lib/web3/units";
 import {
   createWalletBoundPinnedCache,
   readWalletBoundPinnedAssets,
@@ -89,6 +98,8 @@ interface PreparedLaunch {
   preflight: FactoryPreflight;
   approvalPlan: ExactApprovalPlan;
   predictedToken: Address;
+  firstBuyExpectedOut: bigint;
+  firstBuySlippageBps: number;
 }
 
 interface CompletedLaunch {
@@ -116,6 +127,16 @@ function formatWholeTokens(value: bigint) {
   return formatUnits(value, 18, 0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+function parseSlippagePercentToBps(value: string) {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) {
+    throw new Error("First-buy slippage must use at most two decimal places.");
+  }
+  const bps = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  assertFirstBuySlippageBps(bps);
+  return bps;
+}
+
 export default function LaunchForm() {
   const deploymentResult = useMemo(
     () => readBrowserPublicLaunchDeployment(),
@@ -136,7 +157,7 @@ export default function LaunchForm() {
   const [description, setDescription] = useState("");
   const [mode, setMode] = useState<LaunchFeeMode>("creator");
   const [firstBuy, setFirstBuy] = useState("0");
-  const [firstBuyMinOut, setFirstBuyMinOut] = useState("");
+  const [firstBuySlippage, setFirstBuySlippage] = useState("1");
   const [website, setWebsite] = useState("");
   const [twitter, setTwitter] = useState("");
   const [telegram, setTelegram] = useState("");
@@ -368,21 +389,18 @@ export default function LaunchForm() {
 
   function changeFirstBuy(value: string) {
     edit(setFirstBuy, value);
-    if (/^0*(?:\.0*)?$/.test(value.trim())) setFirstBuyMinOut("");
   }
 
   function currentAmounts() {
     const firstBuyIn = parseUnits(firstBuy || "0", PIPEDOG_DECIMALS);
-    const minimumOut = firstBuyMinOut
-      ? parseUnits(firstBuyMinOut, LAUNCHED_TOKEN_DECIMALS)
-      : BigInt(0);
-    assertFirstBuyAmounts(firstBuyIn, minimumOut);
-    if (firstBuyIn !== BigInt(0)) {
-      throw new Error(
-        "Optional first buys stay disabled until LayPipe has a trusted quote flow.",
-      );
+    const slippageBps =
+      firstBuyIn === BigInt(0)
+        ? 100
+        : parseSlippagePercentToBps(firstBuySlippage);
+    if (firstBuyIn === BigInt(0)) {
+      assertFirstBuyAmounts(firstBuyIn, BigInt(0));
     }
-    return { firstBuyIn, firstBuyMinOut: minimumOut };
+    return { firstBuyIn, slippageBps };
   }
 
   function review(event: FormEvent<HTMLFormElement>) {
@@ -424,6 +442,18 @@ export default function LaunchForm() {
       assertNoPendingWalletMutation(window.localStorage, account);
       return operation();
     });
+  }
+
+  function withRecoveryStore<T>(operation: () => Promise<T> | T) {
+    return withWalletRecoveryStoreLock(navigator.locks, operation);
+  }
+
+  function removeStoredLaunch(expected: PendingLaunchIntent) {
+    return withRecoveryStore(() =>
+      expected.hash === null
+        ? removeExactUnsubmittedPendingLaunch(window.localStorage, expected)
+        : removeExactPendingLaunch(window.localStorage, expected),
+    );
   }
 
   async function prepareLaunch() {
@@ -529,10 +559,23 @@ export default function LaunchForm() {
         expectedSelfBurn: mode === "self-burn",
         firstBuyIn: amounts.firstBuyIn,
       });
+      const firstBuyExpectedOut =
+        amounts.firstBuyIn === BigInt(0)
+          ? BigInt(0)
+          : quoteInitialFirstBuy({
+              config: freshPreflight.launchConfig,
+              firstBuyIn: amounts.firstBuyIn,
+            }).expectedOutput;
+      const firstBuyMinOut =
+        firstBuyExpectedOut === BigInt(0)
+          ? BigInt(0)
+          : applyFirstBuySlippage(firstBuyExpectedOut, amounts.slippageBps);
+      assertFirstBuyAmounts(amounts.firstBuyIn, firstBuyMinOut);
       const input: LaunchCallInput = {
         params,
         configId,
-        ...amounts,
+        firstBuyIn: amounts.firstBuyIn,
+        firstBuyMinOut,
         salt: mined.salt,
       };
       await assertExactCurrentOperation();
@@ -544,6 +587,8 @@ export default function LaunchForm() {
         preflight: freshPreflight,
         approvalPlan: safety.approvalPlan,
         predictedToken: mined.token,
+        firstBuyExpectedOut,
+        firstBuySlippageBps: amounts.slippageBps,
       });
       dispatch({
         type: "PREPARED",
@@ -611,19 +656,23 @@ export default function LaunchForm() {
       );
       const hash = await withWalletSubmissionLock(() =>
         client.sendApproval(account, nextStep.amount, {
-          onSubmissionInvoked: () => {
-            savePendingLaunch(window.localStorage, approvalIntent);
+          onSubmissionInvoked: async () => {
+            await withRecoveryStore(() =>
+              savePendingLaunch(window.localStorage, approvalIntent),
+            );
             submissionInvoked = true;
             setPendingIntent(approvalIntent);
           },
-          onSubmitted: (hash) => {
+          onSubmitted: async (hash) => {
             submittedHash = hash;
-            savePendingLaunchHash(
-              window.localStorage,
-              account,
-              "approval",
-              predictedToken,
-              hash,
+            await withRecoveryStore(() =>
+              savePendingLaunchHash(
+                window.localStorage,
+                account,
+                "approval",
+                predictedToken,
+                hash,
+              ),
             );
             setPendingIntent({ ...approvalIntent, hash });
             setPendingHash(hash);
@@ -633,12 +682,7 @@ export default function LaunchForm() {
       setPendingHash(hash);
       await client.confirmApproval(hash, account, nextStep.amount);
       approvalConfirmed = true;
-      removePendingLaunch(
-        window.localStorage,
-        account,
-        "approval",
-        predictedToken,
-      );
+      await removeStoredLaunch({ ...approvalIntent, hash });
       setPendingIntent(null);
       setPendingHash(null);
       const preflight = await client.readPreflight(
@@ -679,12 +723,7 @@ export default function LaunchForm() {
         !canonicalRevert &&
         (isLaunchSubmissionIndeterminate(error) || submittedHash !== null);
       if ((canonicalRevert || !keepLocked) && submissionInvoked) {
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          "approval",
-          predictedToken,
-        );
+        await removeStoredLaunch({ ...approvalIntent, hash: submittedHash });
         setPendingIntent(null);
         setPendingHash(null);
       }
@@ -754,23 +793,46 @@ export default function LaunchForm() {
           return null;
         }
 
+        let firstBuyQuote: FirstBuyQuote | undefined;
+        if (prepared.input.firstBuyIn > BigInt(0)) {
+          firstBuyQuote = await client.prepareFirstBuyQuote({
+            owner: account,
+            predictedToken: prepared.predictedToken,
+            input: prepared.input,
+            slippageBps: prepared.firstBuySlippageBps,
+          });
+          if (
+            firstBuyQuote.expectedOutput !== prepared.firstBuyExpectedOut ||
+            firstBuyQuote.minimumOutput !== prepared.input.firstBuyMinOut
+          ) {
+            throw new Error(
+              "The factory-proven first-buy quote no longer matches this prepared launch.",
+            );
+          }
+        }
         await assertExactLaunchWalletContext(provider, account);
         assertPreparedLaunchCreator(prepared.params.creator, account);
         dispatch({ type: "LAUNCH_SUBMITTED" });
         return client.sendLaunch(account, prepared.input, {
-          onSubmissionInvoked: () => {
-            savePendingLaunch(window.localStorage, launchIntent);
+          firstBuyQuote,
+          predictedToken: prepared.predictedToken,
+          onSubmissionInvoked: async () => {
+            await withRecoveryStore(() =>
+              savePendingLaunch(window.localStorage, launchIntent),
+            );
             submissionInvoked = true;
             setPendingIntent(launchIntent);
           },
-          onSubmitted: (hash) => {
+          onSubmitted: async (hash) => {
             submittedHash = hash;
-            savePendingLaunchHash(
-              window.localStorage,
-              account,
-              "launch",
-              predictedToken,
-              hash,
+            await withRecoveryStore(() =>
+              savePendingLaunchHash(
+                window.localStorage,
+                account,
+                "launch",
+                predictedToken,
+                hash,
+              ),
             );
             setPendingIntent({ ...launchIntent, hash });
             setPendingHash(hash);
@@ -784,12 +846,7 @@ export default function LaunchForm() {
         predictedToken: prepared.predictedToken,
         input: prepared.input,
       });
-      removePendingLaunch(
-        window.localStorage,
-        account,
-        "launch",
-        predictedToken,
-      );
+      await removeStoredLaunch({ ...launchIntent, hash });
       setPendingIntent(null);
       let allowanceCleared: boolean | null = null;
       try {
@@ -820,12 +877,7 @@ export default function LaunchForm() {
         !canonicalRevert &&
         (isLaunchSubmissionIndeterminate(error) || submittedHash !== null);
       if ((canonicalRevert || !keepLocked) && submissionInvoked) {
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          "launch",
-          predictedToken,
-        );
+        await removeStoredLaunch({ ...launchIntent, hash: submittedHash });
         setPendingIntent(null);
         setPendingHash(null);
       }
@@ -890,19 +942,23 @@ export default function LaunchForm() {
         revocationIntent = intent;
         const hash = await withWalletSubmissionLock(() =>
           client.sendApproval(account, BigInt(0), {
-            onSubmissionInvoked: () => {
-              savePendingLaunch(window.localStorage, intent);
+            onSubmissionInvoked: async () => {
+              await withRecoveryStore(() =>
+                savePendingLaunch(window.localStorage, intent),
+              );
               submissionInvoked = true;
               setPendingIntent(intent);
             },
-            onSubmitted: (hash) => {
+            onSubmitted: async (hash) => {
               submittedHash = hash;
-              savePendingLaunchHash(
-                window.localStorage,
-                account,
-                "approval",
-                predictedToken,
-                hash,
+              await withRecoveryStore(() =>
+                savePendingLaunchHash(
+                  window.localStorage,
+                  account,
+                  "approval",
+                  predictedToken,
+                  hash,
+                ),
               );
               setPendingIntent({ ...intent, hash });
               setPendingHash(hash);
@@ -911,12 +967,7 @@ export default function LaunchForm() {
         );
         setPendingHash(hash);
         await client.confirmApproval(hash, account, BigInt(0));
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          "approval",
-          predictedToken,
-        );
+        await removeStoredLaunch({ ...intent, hash });
         setPendingIntent(null);
         setPendingHash(null);
       }
@@ -939,12 +990,10 @@ export default function LaunchForm() {
         submissionInvoked &&
         (canonicalRevert || !keepLocked)
       ) {
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          "approval",
-          revocationIntent.predictedToken,
-        );
+        await removeStoredLaunch({
+          ...revocationIntent,
+          hash: submittedHash,
+        });
         setPendingIntent(null);
         setPendingHash(null);
       }
@@ -999,12 +1048,7 @@ export default function LaunchForm() {
           amount,
         );
         if (operation !== pendingOperationRef.current) return;
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          "approval",
-          pendingIntent.predictedToken,
-        );
+        await removeStoredLaunch(pendingIntent);
         setPendingIntent(null);
         setPendingHash(null);
         setPrepared(null);
@@ -1033,12 +1077,7 @@ export default function LaunchForm() {
         input,
       });
       if (operation !== pendingOperationRef.current) return;
-      removePendingLaunch(
-        window.localStorage,
-        account,
-        "launch",
-        pendingIntent.predictedToken,
-      );
+      await removeStoredLaunch(pendingIntent);
       setCompleted({
         token: confirmed.token,
         poolId: confirmed.poolId,
@@ -1051,12 +1090,7 @@ export default function LaunchForm() {
     } catch (error) {
       if (operation !== pendingOperationRef.current) return;
       if (isCanonicalTransactionReverted(error)) {
-        removePendingLaunch(
-          window.localStorage,
-          account,
-          pendingIntent.action,
-          pendingIntent.predictedToken,
-        );
+        await removeStoredLaunch(pendingIntent);
         setPendingIntent(null);
         setPendingHash(null);
         setPrepared(null);
@@ -1070,23 +1104,24 @@ export default function LaunchForm() {
     }
   }
 
-  function clearReconciledLaunchLock() {
-    if (!account || !pendingIntent) return;
-    removePendingLaunch(
-      window.localStorage,
-      account,
-      pendingIntent.action,
-      pendingIntent.predictedToken,
-    );
-    pendingOperationRef.current += 1;
-    setPendingIntent(null);
-    setPendingHash(null);
-    setPrepared(null);
-    setPostLaunchWarning("");
-    setWalletNotice(
-      "Pending action lock cleared after wallet-activity review. Prepare again before any mutation.",
-    );
-    dispatch({ type: "CONNECTED" });
+  async function clearReconciledLaunchLock() {
+    if (!account || !pendingIntent || pendingIntent.hash !== null) return;
+    try {
+      await withWalletRecoveryLocks(navigator.locks, account, () =>
+        removeExactUnsubmittedPendingLaunch(window.localStorage, pendingIntent),
+      );
+      pendingOperationRef.current += 1;
+      setPendingIntent(null);
+      setPendingHash(null);
+      setPrepared(null);
+      setPostLaunchWarning("");
+      setWalletNotice(
+        "Hashless action lock cleared after wallet-activity review. Prepare again before any mutation.",
+      );
+      dispatch({ type: "CONNECTED" });
+    } catch (error) {
+      setPostLaunchWarning(describeWalletError(error));
+    }
   }
 
   const nextApproval = prepared?.approvalPlan.steps[0];
@@ -1294,7 +1329,7 @@ export default function LaunchForm() {
                 <span>04</span>
                 <div>
                   <h2>Optional first buy</h2>
-                  <p>Protected by a user-set minimum output in the launch transaction.</p>
+                  <p>Quoted from the exact launch curve with a nonzero on-chain minimum.</p>
                 </div>
               </div>
 
@@ -1307,28 +1342,42 @@ export default function LaunchForm() {
                       inputMode="decimal"
                       value={firstBuy}
                       onChange={(event) => changeFirstBuy(event.target.value)}
-                      disabled
                       required
                     />
                     <i>PIPEDOG</i>
                   </div>
                 </label>
                 <label>
-                  <span>Minimum launched tokens out</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={firstBuyMinOut}
-                    onChange={(event) => edit(setFirstBuyMinOut, event.target.value)}
-                    placeholder={firstBuyLooksZero ? "Not needed for zero buy" : "Required"}
-                    disabled
-                  />
+                  <span>Maximum slippage</span>
+                  <div className="affixed-input suffix">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0.5"
+                      max="5"
+                      step="0.01"
+                      value={firstBuySlippage}
+                      onChange={(event) => edit(setFirstBuySlippage, event.target.value)}
+                      disabled={firstBuyLooksZero}
+                      required={!firstBuyLooksZero}
+                    />
+                    <i>%</i>
+                  </div>
                 </label>
               </div>
               <p className={styles.safetyCopy}>
-                First buys are disabled until LayPipe exposes a trusted quote and
-                slippage flow. The production launch path currently uses zero.
+                A nonzero buy is quoted from the deterministic PIPEDOG curve and
+                proven against the full factory call after the exact allowance exists.
+                The quote expires in 30 seconds before wallet submission. The current
+                factory has no deadline field, so the nonzero minimum output is the
+                on-chain protection if signing or inclusion is delayed.
               </p>
+              {prepared && prepared.input.firstBuyIn > BigInt(0) && (
+                <p className={styles.safetyCopy}>
+                  Expected {formatNonzeroUnits(prepared.firstBuyExpectedOut, LAUNCHED_TOKEN_DECIMALS)} tokens;
+                  minimum {formatNonzeroUnits(prepared.input.firstBuyMinOut, LAUNCHED_TOKEN_DECIMALS)}.
+                </p>
+              )}
             </div>
           </fieldset>
 
@@ -1382,6 +1431,28 @@ export default function LaunchForm() {
               <dt>First buy</dt>
               <dd>{firstBuy || "0"} PIPEDOG</dd>
             </div>
+            {prepared && prepared.input.firstBuyIn > BigInt(0) && (
+              <>
+                <div>
+                  <dt>First-buy quote</dt>
+                  <dd>
+                    {formatNonzeroUnits(
+                      prepared.firstBuyExpectedOut,
+                      LAUNCHED_TOKEN_DECIMALS,
+                    )} tokens
+                  </dd>
+                </div>
+                <div>
+                  <dt>On-chain minimum</dt>
+                  <dd>
+                    {formatNonzeroUnits(
+                      prepared.input.firstBuyMinOut,
+                      LAUNCHED_TOKEN_DECIMALS,
+                    )} tokens
+                  </dd>
+                </div>
+              </>
+            )}
             <div>
               <dt>Wallet</dt>
               <dd>{account ? shortAddress(account) : "Not connected"}</dd>
@@ -1439,19 +1510,24 @@ export default function LaunchForm() {
                     </button>
                   </>
                 )}
-                <button
-                  className="button"
-                  type="button"
-                  onClick={clearReconciledLaunchLock}
-                >
-                  I checked wallet activity; clear lock
-                </button>
+                {!pendingIntent.hash && (
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => void clearReconciledLaunchLock()}
+                  >
+                    I checked wallet activity; clear hashless lock
+                  </button>
+                )}
               </div>
             )}
             {machine.phase === "draft" && (
               <>
                 <strong>Complete the launch details.</strong>
-                <p>Artwork is inspected locally before any upload is allowed.</p>
+                <p>
+                  Artwork is decoded and re-encoded locally before public upload;
+                  original file bytes are not staged.
+                </p>
               </>
             )}
             {machine.phase === "reviewed" && (
@@ -1553,8 +1629,9 @@ export default function LaunchForm() {
               <>
                 <strong>Exact allowance confirmed.</strong>
                 <p>
-                  The wallet will simulate the nonpayable launch before asking
-                  you to sign. A failed launch leaves the exact allowance in place.
+                  {prepared.input.firstBuyIn > BigInt(0)
+                    ? "LayPipe will prove a fresh 30-second first-buy quote, then simulate the protected nonpayable launch before asking you to sign."
+                    : "The wallet will simulate the nonpayable launch before asking you to sign."} A failed launch leaves the exact allowance in place.
                 </p>
                 <button className="button button-accent" type="button" onClick={submitLaunch}>
                   Launch {prepared.params.symbol}
