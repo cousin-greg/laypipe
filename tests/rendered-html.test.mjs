@@ -87,7 +87,7 @@ async function expectPage(path, patterns) {
   const html = await response.text();
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
-  assert.match(html, /Demo feed/i);
+  assert.match(html, /Fixture feed/i);
   assert.match(html, /pipedog-pipe-mark\.png/i);
   assert.match(html, /Dragon[_-]Regular[^"']*\.woff2/i);
   assert.match(html, /PPMori[_-]Regular[^"']*\.woff2/i);
@@ -101,10 +101,10 @@ async function expectPage(path, patterns) {
   return html;
 }
 
-test("server-renders the board with explicit preview data", async () => {
+test("server-renders the board with explicitly labeled fixture data", async () => {
   const html = await expectPage("/", [
     /LAY SOME PIPE, DOG\./i,
-    /All preview launches/i,
+    /Fixture launches/i,
     /THE BOARD/i,
     /Hot/i,
     /Largest/i,

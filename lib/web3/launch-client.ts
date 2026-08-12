@@ -20,7 +20,13 @@ import {
   PIPEDOG_ADDRESS,
   ROBINHOOD_CHAIN_ID_HEX,
   ROBINHOOD_WALLET_CHAIN,
+  robinhoodWalletAddChainParameters,
 } from "./robinhood";
+import {
+  assertAuditedDeployment,
+  DeploymentIntegrityError,
+  type AuditedDeploymentManifest,
+} from "./deployment-manifest";
 import {
   assertAddress,
   isAddress,
@@ -211,7 +217,7 @@ export async function ensureRobinhoodChain(provider: Eip1193Provider) {
 
     await provider.request({
       method: "wallet_addEthereumChain",
-      params: [ROBINHOOD_WALLET_CHAIN],
+      params: [robinhoodWalletAddChainParameters(ROBINHOOD_WALLET_CHAIN)],
     });
   }
 
@@ -274,9 +280,11 @@ export function assertLaunchPreflight(options: {
   preflight: FactoryPreflight;
   expectedSelfBurn: boolean;
   firstBuyIn: bigint;
+  expectedQuoteToken?: Address;
 }) {
   const { preflight, expectedSelfBurn, firstBuyIn } = options;
-  if (!sameAddress(preflight.quoteToken, PIPEDOG_ADDRESS)) {
+  const expectedQuoteToken = options.expectedQuoteToken ?? PIPEDOG_ADDRESS;
+  if (!sameAddress(preflight.quoteToken, expectedQuoteToken)) {
     throw new WalletFlowError(
       "Factory quote token does not match canonical PIPEDOG. Launch blocked.",
     );
@@ -347,10 +355,38 @@ function launchedTokenFromReceipt(
 export class LaypipeLaunchClient {
   readonly provider: Eip1193Provider;
   readonly factoryAddress: Address;
+  readonly quoteTokenAddress: Address;
+  readonly auditedManifest: AuditedDeploymentManifest | null;
 
-  constructor(provider: Eip1193Provider, factoryAddress: Address) {
+  constructor(
+    provider: Eip1193Provider,
+    deployment: Address | AuditedDeploymentManifest,
+  ) {
     this.provider = provider;
-    this.factoryAddress = assertAddress(factoryAddress, "Factory address");
+    if (typeof deployment === "string") {
+      this.factoryAddress = assertAddress(deployment, "Factory address");
+      this.quoteTokenAddress = PIPEDOG_ADDRESS;
+      this.auditedManifest = null;
+    } else {
+      this.factoryAddress = assertAddress(
+        deployment.contracts.factoryProxy.address,
+        "Factory address",
+      );
+      this.quoteTokenAddress = assertAddress(
+        deployment.contracts.pipedog.address,
+        "Quote token address",
+      );
+      this.auditedManifest = deployment;
+    }
+  }
+
+  async verifyAuditedDeployment() {
+    if (!this.auditedManifest) {
+      throw new DeploymentIntegrityError(
+        "The audited deployment manifest is not loaded. Wallet mutations are blocked.",
+      );
+    }
+    return assertAuditedDeployment(this.provider, this.auditedManifest);
   }
 
   private async call(to: Address, data: Hex, from?: Address) {
@@ -365,6 +401,7 @@ export class LaypipeLaunchClient {
     owner: Address,
     configId: bigint,
   ): Promise<FactoryPreflight> {
+    await this.verifyAuditedDeployment();
     const [
       launchFeeResult,
       launchEnabledResult,
@@ -398,7 +435,7 @@ export class LaypipeLaunchClient {
   async readCanonicalPipedogAllowance(owner: Address) {
     return decodeUint(
       await this.call(
-        PIPEDOG_ADDRESS,
+        this.quoteTokenAddress,
         encodeAllowanceCall(owner, this.factoryAddress),
       ),
     );
@@ -411,6 +448,7 @@ export class LaypipeLaunchClient {
     roundsPerCall?: bigint;
     maxCalls?: number;
   }) {
+    await this.verifyAuditedDeployment();
     const rounds = options.roundsPerCall ?? BigInt(4096);
     const maxCalls = options.maxCalls ?? 4;
     let start = BigInt(0);
@@ -437,24 +475,28 @@ export class LaypipeLaunchClient {
   }
 
   async estimateApproval(owner: Address, amount: bigint) {
+    await this.verifyAuditedDeployment();
     return this.estimate({
       from: owner,
-      to: PIPEDOG_ADDRESS,
+      to: this.quoteTokenAddress,
       data: encodeApproveCall(this.factoryAddress, amount),
     });
   }
 
   async sendApproval(owner: Address, amount: bigint) {
-    await this.estimateApproval(owner, amount);
-    return this.send({
+    await this.verifyAuditedDeployment();
+    const transaction = {
       from: owner,
-      to: PIPEDOG_ADDRESS,
+      to: this.quoteTokenAddress,
       data: encodeApproveCall(this.factoryAddress, amount),
-    });
+    } as const;
+    await this.estimate(transaction);
+    return this.send(transaction);
   }
 
   async estimateLaunch(owner: Address, input: LaunchCallInput) {
     assertFirstBuyAmounts(input.firstBuyIn, input.firstBuyMinOut);
+    await this.verifyAuditedDeployment();
     return this.estimate({
       from: owner,
       to: this.factoryAddress,
@@ -463,12 +505,15 @@ export class LaypipeLaunchClient {
   }
 
   async sendLaunch(owner: Address, input: LaunchCallInput) {
-    await this.estimateLaunch(owner, input);
-    return this.send({
+    assertFirstBuyAmounts(input.firstBuyIn, input.firstBuyMinOut);
+    await this.verifyAuditedDeployment();
+    const transaction = {
       from: owner,
       to: this.factoryAddress,
       data: encodeLaunchCall(input),
-    });
+    } as const;
+    await this.estimate(transaction);
+    return this.send(transaction);
   }
 
   private async estimate(transaction: RpcTransactionRequest) {
@@ -586,7 +631,7 @@ export class LaypipeLaunchClient {
   async confirmApproval(hash: Hex, owner: Address) {
     return this.waitForReceipt(hash, {
       expectedFrom: owner,
-      expectedTo: PIPEDOG_ADDRESS,
+      expectedTo: this.quoteTokenAddress,
     });
   }
 }

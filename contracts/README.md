@@ -195,10 +195,12 @@ The read-only preflight validates:
 | PoolManager | `0x8366a39CC670B4001A1121B8F6A443A643e40951` |
 | PIPEDOG | `0x5Cb6F181081301b44905F3ae15419112ecaBd8A6` |
 
-It also pins PIPEDOG bytecode and verifies its name, symbol, 18 decimals, total
-supply, zero-address balance, and PoolManager interface compatibility. WETH
-and PIPEDOG/WETH reference constants are not dependencies of the canonical
-LayPipe routing path.
+It pins PIPEDOG, PoolManager, and Foundry deterministic-deployer runtime
+bytecode; verifies PIPEDOG name, symbol, 18 decimals, total supply, and
+zero-address balance; exercises the PoolManager interface; and requires a
+valid Robinhood ArbSys L2 block-number response. WETH and PIPEDOG/WETH
+reference constants are not dependencies of the canonical LayPipe routing
+path.
 
 ### Robinhood block clock
 
@@ -238,14 +240,45 @@ Complete release-candidate verification:
 ```powershell
 forge clean
 forge build
+forge build --sizes
 $env:ROBINHOOD_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
 forge test -vv
 node scripts\check-source-fidelity.mjs
 node scripts\generate-abis.mjs
+git diff --exit-code -- abi
 ```
 
 Committed frontend/indexer ABIs live in `abi/`. The generator exports only the
 canonical protocol surface and removes any stale dividend ABI.
+
+The source-fidelity report is provenance evidence, not a complete source or
+release-version lock: reviewed derivatives are expected to differ from their
+mechanical baselines, and the clean-room contracts have no upstream baseline.
+An audit handoff must therefore bind the complete commit, compiler settings,
+dependency revisions, generated ABIs, and deployment artifacts together.
+
+### Frontend release identity
+
+A UUPS proxy address does not identify the code currently serving it. Before
+enabling browser mutations, record an audited deployment manifest containing:
+
+- chain ID, deployment block, source commit, compiler settings, and ABI hashes;
+- proxy and implementation addresses plus runtime codehashes;
+- token implementation, hook, self-burner, swap router, and revenue-router
+  addresses and runtime codehashes;
+- final owner, treasury, operations wallet, config IDs, and exact config
+  values; and
+- canonical PIPEDOG and PoolManager bindings.
+
+The factory implementation is stored at the standard EIP-1967 implementation
+slot
+`0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`.
+The frontend must read that slot, fetch the implementation runtime, and fail
+closed unless its address and codehash match the audited manifest. Checking
+only the proxy address, public getters, or `UPGRADE_INTERFACE_VERSION()` is
+not a version check: an upgraded implementation can preserve or spoof those
+surfaces. Any factory upgrade requires a new reviewed manifest, and launch
+mutations must remain disabled until the frontend and indexer accept it.
 
 ## No-broadcast deployment rehearsal
 

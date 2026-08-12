@@ -16,9 +16,16 @@ contract PreflightRobinhood is Script {
     error MissingCode(address target);
     error InvalidPipedogMetadata();
     error InvalidPipedogCodehash(bytes32 actual, bytes32 expected);
+    error InvalidArbSysResponse();
+    error InvalidCodehash(
+        address target,
+        bytes32 actual,
+        bytes32 expected
+    );
 
-    function run() external view {
+    function run() external {
         validate();
+        validateArbSysRpc();
         console2.log("Laypipe PIPEDOG-quote preflight passed");
         console2.log("chainId", block.chainid);
         console2.log(
@@ -39,6 +46,15 @@ contract PreflightRobinhood is Script {
         }
         _requireCode(PipedogProtocolConfig.POOL_MANAGER);
         _requireCode(PipedogProtocolConfig.PIPEDOG);
+        _requireCode(PipedogProtocolConfig.CREATE2_DEPLOYER);
+        _requireCodehash(
+            PipedogProtocolConfig.POOL_MANAGER,
+            PipedogProtocolConfig.POOL_MANAGER_CODEHASH
+        );
+        _requireCodehash(
+            PipedogProtocolConfig.CREATE2_DEPLOYER,
+            PipedogProtocolConfig.CREATE2_DEPLOYER_CODEHASH
+        );
 
         bytes32 actualCodehash;
         address tokenAddress = PipedogProtocolConfig.PIPEDOG;
@@ -69,7 +85,39 @@ contract PreflightRobinhood is Script {
             .protocolFeesAccrued(Currency.wrap(tokenAddress));
     }
 
+    /// @notice Checks ArbSys through the configured RPC rather than Foundry's
+    ///         local fork EVM, which does not emulate Robinhood precompiles.
+    /// @dev This is a script-only cheatcode gate and is called before any
+    ///      deployment broadcast begins.
+    function validateArbSysRpc()
+        public
+        returns (uint256 arbBlockNumber)
+    {
+        bytes memory result = vm.rpc(
+            "eth_call",
+            '[{"to":"0x0000000000000000000000000000000000000064","data":"0xa3b1b31d"},"latest"]'
+        );
+        if (result.length != 32) revert InvalidArbSysResponse();
+        arbBlockNumber = abi.decode(result, (uint256));
+        if (arbBlockNumber == 0) revert InvalidArbSysResponse();
+    }
+
     function _requireCode(address target) private view {
         if (target.code.length == 0) revert MissingCode(target);
+    }
+
+    function _requireCodehash(
+        address target,
+        bytes32 expectedCodehash
+    ) private view {
+        bytes32 actualCodehash;
+        assembly ("memory-safe") {
+            actualCodehash := extcodehash(target)
+        }
+        if (actualCodehash != expectedCodehash) {
+            revert InvalidCodehash(
+                target, actualCodehash, expectedCodehash
+            );
+        }
     }
 }

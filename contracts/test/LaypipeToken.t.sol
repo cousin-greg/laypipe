@@ -108,6 +108,15 @@ contract LaypipeTokenTest is Test {
         assertEq(token.balanceOfAt(HOLDER, 701), initialBalance / 2);
     }
 
+    function testCheckpointClockFailsClosedAboveUint64() public {
+        vm.roll(uint256(type(uint64).max) + 1);
+
+        LaypipeToken implementation = new LaypipeToken();
+        TokenCloneFactory cloneFactory = new TokenCloneFactory();
+        vm.expectRevert(LaypipeToken.BlockNumberTooLarge.selector);
+        cloneFactory.create(implementation, HOLDER);
+    }
+
     function _mockArbBlockNumber(uint256 number) private {
         vm.clearMockedCalls();
         vm.mockCall(

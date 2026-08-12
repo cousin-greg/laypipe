@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "db:migrate": "tsx scripts/indexer/migrate.ts",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern outputs --ignore-pattern .next"
   },
@@ -17,18 +18,24 @@
     "sharp": "0.35.3"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "multiformats": "^13.4.1",
     "next": "^16.2.12",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "sharp": "0.35.3",
+    "viem": "^2.55.13"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "dotenv-cli": "^11.0.0",
     "eslint": "9.39.4",
     "eslint-config-next": "^16.2.12",
     "tailwindcss": "4.2.1",
+    "tsx": "^4.23.12",
     "typescript": "5.9.3"
   },
   "type": "module"

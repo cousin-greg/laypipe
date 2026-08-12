@@ -61,6 +61,7 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     error NotFactory();
     error AlreadyLaunched();
     error SupplyTooLarge();
+    error BlockNumberTooLarge();
 
     /// @notice The fee engine works in pips (1e6 = 100%) and this token reports
     ///         its tax in basis points (1e4 = 100%), so a rate divides by this
@@ -218,7 +219,9 @@ contract LaypipeToken is Initializable, ERC20Upgradeable {
     }
 
     function _writeCheckpoint(BalanceCheckpoint[] storage checkpoints, uint256 value) private {
-        uint64 blockNumber = uint64(ChainBlockNumber.current());
+        uint256 currentBlock = ChainBlockNumber.current();
+        if (currentBlock > type(uint64).max) revert BlockNumberTooLarge();
+        uint64 blockNumber = uint64(currentBlock);
         uint256 length = checkpoints.length;
         // One entry per block: a later move in the same block replaces the
         // earlier one, leaving the figure this block finished on.

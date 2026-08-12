@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { tsImport } from "tsx/esm/api";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -55,7 +56,7 @@ function loadTypeScript(relativePath) {
 
 const artwork = loadTypeScript("lib/ipfs/artwork.ts");
 const metadata = loadTypeScript("lib/ipfs/metadata.ts");
-const pinClient = loadTypeScript("lib/ipfs/pin-client.ts");
+const pinClient = await tsImport("../lib/ipfs/pin-client.ts", import.meta.url);
 const abi = loadTypeScript("lib/web3/abi.ts");
 const launchClient = loadTypeScript("lib/web3/launch-client.ts");
 const launchMachine = loadTypeScript("lib/web3/launch-machine.ts");
@@ -138,93 +139,201 @@ test("metadata uses the dual-CID document shape and HTTPS-only socials", () => {
   );
 });
 
-test("pinning is same-origin and fails closed on metadata substitution", async () => {
+test("pinning uses signed same-origin staging and fails closed on drift", async () => {
   const file = pngFile();
+  const wallet = "0x1111111111111111111111111111111111111111";
+  const changedWallet = "0x2222222222222222222222222222222222222222";
   const draft = metadata.normalizeMetadataDraft({
     name: "Pinned Pipe",
     symbol: "PIN",
     description: "Pinned twice.",
     feeMode: "creator",
   });
+  const stagedCid =
+    "bafkreicnu2aqjkoglrlrd65giwo4l64pdajxffk6jtq2vb7yaiopc3yu7m";
   const imageCid =
-    "bafybeigdyrzt5sfp7udm7hu76v2m5v3ejq3w6t4x5n5x5x5x5x5x5x5x5x";
+    "bafkreig6cmq5xgc3ed4qknhtupzyqvkt3qquhyxphgxdxd3hkpdvweezly";
   const metadataCid =
-    "bafybeifaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  const stagedFileId = "e5323ea7-8a02-4486-9b6f-63c788810aeb";
   const imageUri = `ipfs://${imageCid}`;
   const expectedDocument = metadata.buildTokenMetadata(draft, imageUri);
-
-  const fetcher = async (url, init) => {
-    assert.equal(url, "https://laypipe.fun/api/ipfs/pin");
-    assert.equal(init.method, "POST");
-    assert.deepEqual(JSON.parse(init.body.get("metadata")), draft);
-    return new Response(
-      JSON.stringify({
-        image: { cid: imageCid, uri: imageUri },
-        metadata: { cid: metadataCid, uri: `ipfs://${metadataCid}` },
-        metadataDocument: expectedDocument,
-      }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
-  };
-  const pinned = await pinClient.pinLaunchAssets({
-    endpoint: "/api/ipfs/pin",
-    file,
-    metadata: draft,
-    browserOrigin: "https://laypipe.fun",
-    fetcher,
+  const fileSha256 = await artwork.artworkContentHash(file);
+  const stageDigest = await pinClient.stageAuthorizationDigest({
+    wallet,
+    fileName: "coin.png",
+    mimeType: "image/png",
+    size: file.size,
+    fileSha256,
   });
-  assert.deepEqual(pinned.metadataDocument, expectedDocument);
+  const pinDigest = await pinClient.pinAuthorizationDigest({
+    wallet,
+    stagedCid,
+    stagedFileId,
+    fileSha256,
+    metadata: draft,
+  });
 
-  await assert.rejects(
-    pinClient.pinLaunchAssets({
-      endpoint: "https://attacker.example/upload",
-      file,
-      metadata: draft,
-      browserOrigin: "https://laypipe.fun",
-      fetcher,
-    }),
-    /same-origin/,
-  );
-  await assert.rejects(
-    pinClient.pinLaunchAssets({
-      endpoint: "/api/ipfs/pin",
-      file,
-      metadata: draft,
-      browserOrigin: "https://laypipe.fun",
-      fetcher: async () =>
-        new Response(
-          JSON.stringify({
-            image: { cid: imageCid, uri: imageUri },
-            metadata: { cid: metadataCid, uri: `ipfs://${metadataCid}` },
-            metadataDocument: { ...expectedDocument, symbol: "SWAPPED" },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    }),
-    /does not match/,
-  );
-  await assert.rejects(
-    pinClient.pinLaunchAssets({
-      endpoint: "/api/ipfs/pin",
-      file,
-      metadata: draft,
-      browserOrigin: "https://laypipe.fun",
-      fetcher: async () =>
-        new Response(
-          JSON.stringify({
+  function flow(options = {}) {
+    let expectedMessage = "";
+    let accountChecks = 0;
+    let signatures = 0;
+    let finalCalls = 0;
+    const internalUrls = [];
+    const provider = {
+      async request({ method, params }) {
+        if (method === "eth_accounts") {
+          accountChecks += 1;
+          return accountChecks === options.driftAtCheck ? [changedWallet] : [wallet];
+        }
+        if (method === "personal_sign") {
+          signatures += 1;
+          assert.equal(Buffer.from(params[0].slice(2), "hex").toString("utf8"), expectedMessage);
+          assert.equal(params[1], wallet);
+          return `0x${"ab".repeat(65)}`;
+        }
+        throw new Error(`Unexpected wallet call: ${method}`);
+      },
+    };
+    const fetcher = async (url, init) => {
+      const urlString = String(url);
+      if (urlString.startsWith("https://laypipe.fun/")) internalUrls.push(urlString);
+      if (urlString === "https://laypipe.fun/api/auth/challenge") {
+        const body = JSON.parse(init.body);
+        assert.equal(
+          body.contentDigest,
+          body.action === "stage" ? stageDigest : pinDigest,
+        );
+        expectedMessage = `${body.action} exact server message`;
+        return Response.json(
+          {
+            challenge: `${body.action}-opaque-challenge`,
+            message: expectedMessage,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+          { status: 201 },
+        );
+      }
+      if (urlString === "https://laypipe.fun/api/ipfs/stage") {
+        const body = JSON.parse(init.body);
+        assert.equal(body.wallet, wallet);
+        assert.equal(body.fileSha256, fileSha256);
+        assert.equal(body.challenge, "stage-opaque-challenge");
+        assert.match(body.signature, /^0x[0-9a-f]{130}$/);
+        return Response.json(
+          {
+            uploadUrl: "https://uploads.pinata.cloud/v3/files?signature=safe",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          },
+          { status: 201 },
+        );
+      }
+      if (urlString.startsWith("https://uploads.pinata.cloud/v3/files?")) {
+        assert.equal(init.body.get("network"), "public");
+        assert.equal(init.body.get("file").name, "coin.png");
+        return Response.json({
+          data: {
+            id: stagedFileId,
+            cid: options.stagedCid ?? stagedCid,
+          },
+        });
+      }
+      if (urlString === "https://laypipe.fun/api/ipfs/pin") {
+        finalCalls += 1;
+        const body = JSON.parse(init.body);
+        assert.equal(body.stagedCid, stagedCid);
+        assert.equal(body.stagedFileId, stagedFileId);
+        assert.equal(body.challenge, "pin-opaque-challenge");
+        assert.deepEqual(body.metadata, draft);
+        return Response.json(
+          {
             image: {
               cid: imageCid,
               uri: imageUri,
-              gatewayUrl: `https://gateway.example/ipfs/${metadataCid}`,
+              gatewayUrl: `https://laypipe.mypinata.cloud/ipfs/${imageCid}`,
             },
-            metadata: { cid: metadataCid, uri: `ipfs://${metadataCid}` },
-            metadataDocument: expectedDocument,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+            metadata: {
+              cid: metadataCid,
+              uri: `ipfs://${metadataCid}`,
+              gatewayUrl: `https://laypipe.mypinata.cloud/ipfs/${metadataCid}`,
+            },
+            metadataDocument: options.metadataDocument ?? expectedDocument,
+          },
+          { status: 201 },
+        );
+      }
+      throw new Error(`Unexpected network call: ${urlString}`);
+    };
+    return {
+      provider,
+      fetcher,
+      observations: () => ({ accountChecks, signatures, finalCalls, internalUrls }),
+    };
+  }
+
+  const success = flow();
+  const pinned = await pinClient.pinLaunchAssets({
+    file,
+    metadata: draft,
+    wallet,
+    provider: success.provider,
+    browserOrigin: "https://laypipe.fun",
+    fetcher: success.fetcher,
+  });
+  assert.deepEqual(pinned.metadataDocument, expectedDocument);
+  assert.deepEqual(success.observations(), {
+    accountChecks: 3,
+    signatures: 2,
+    finalCalls: 1,
+    internalUrls: [
+      "https://laypipe.fun/api/auth/challenge",
+      "https://laypipe.fun/api/ipfs/stage",
+      "https://laypipe.fun/api/auth/challenge",
+      "https://laypipe.fun/api/ipfs/pin",
+    ],
+  });
+
+  const substituted = flow({
+    metadataDocument: { ...expectedDocument, symbol: "SWAPPED" },
+  });
+  await assert.rejects(
+    pinClient.pinLaunchAssets({
+      file,
+      metadata: draft,
+      wallet,
+      provider: substituted.provider,
+      browserOrigin: "https://laypipe.fun",
+      fetcher: substituted.fetcher,
     }),
-    /match its CID path/,
+    /does not match/,
   );
+
+  const badCid = flow({ stagedCid: "not-a-real-cid" });
+  await assert.rejects(
+    pinClient.pinLaunchAssets({
+      file,
+      metadata: draft,
+      wallet,
+      provider: badCid.provider,
+      browserOrigin: "https://laypipe.fun",
+      fetcher: badCid.fetcher,
+    }),
+    /invalid CID/,
+  );
+
+  const drifted = flow({ driftAtCheck: 3 });
+  await assert.rejects(
+    pinClient.pinLaunchAssets({
+      file,
+      metadata: draft,
+      wallet,
+      provider: drifted.provider,
+      browserOrigin: "https://laypipe.fun",
+      fetcher: drifted.fetcher,
+    }),
+    /wallet changed/,
+  );
+  assert.equal(drifted.observations().finalCalls, 0);
 });
 
 test("approval planning never emits an unlimited approval", () => {

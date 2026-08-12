@@ -392,6 +392,10 @@ dd {
   animation-play-state: paused;
 }
 
+.marquee-track.empty {
+  animation: none;
+}
+
 .marquee-track a {
   display: inline-flex;
   min-height: 38px;
@@ -422,6 +426,15 @@ dd {
   color: var(--muted);
 }
 
+.marquee-track > .marquee-empty {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  padding: 0 18px;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
 .marquee-track em,
 .change,
 .token-price em {
@@ -435,6 +448,20 @@ dd {
 
 .down {
   color: var(--negative);
+}
+
+.market-metric-unavailable {
+  display: grid;
+  min-height: 82px;
+  place-items: center;
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
 }
 
 @keyframes marquee-scroll {

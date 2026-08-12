@@ -16,6 +16,15 @@ library PipedogProtocolConfig {
 
     address internal constant POOL_MANAGER =
         0x8366a39CC670B4001A1121B8F6A443A643e40951;
+    bytes32 internal constant POOL_MANAGER_CODEHASH =
+        0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626;
+
+    /// @dev Foundry's deterministic deployment proxy. Hook address mining
+    ///      depends on this exact runtime being present before deployment.
+    address internal constant CREATE2_DEPLOYER =
+        0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    bytes32 internal constant CREATE2_DEPLOYER_CODEHASH =
+        0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989;
 
     address internal constant UNIVERSAL_ROUTER =
         0x8876789976dEcBfCbBbe364623C63652db8C0904;

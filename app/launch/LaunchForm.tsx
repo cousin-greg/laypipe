@@ -51,8 +51,6 @@ import styles from "./launch.module.css";
 
 const PIPEDOG_DECIMALS = 18;
 const LAUNCHED_TOKEN_DECIMALS = 18;
-const IPFS_PIN_ENDPOINT = "/api/ipfs/pin";
-
 interface PreparedLaunch {
   assets: PinnedLaunchAssets;
   params: FactoryTokenParams;
@@ -96,12 +94,74 @@ export default function LaunchForm() {
   const deploymentResult = useMemo(
     () =>
       readPublicLaunchDeployment({
+        NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS:
+          process.env.NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_DEPLOYMENT_BLOCK:
+          process.env.NEXT_PUBLIC_LAYPIPE_DEPLOYMENT_BLOCK,
         NEXT_PUBLIC_LAYPIPE_FACTORY_ADDRESS:
           process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_FACTORY_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_HOOK_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_HOOK_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_HOOK_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_HOOK_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_SELF_BURNER_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURNER_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_SELF_BURNER_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURNER_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_RUNTIME_CODEHASH:
+          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_RUNTIME_CODEHASH,
+        NEXT_PUBLIC_LAYPIPE_FINAL_OWNER_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_FINAL_OWNER_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_TREASURY_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_TREASURY_ADDRESS,
+        NEXT_PUBLIC_LAYPIPE_OPERATIONS_ADDRESS:
+          process.env.NEXT_PUBLIC_LAYPIPE_OPERATIONS_ADDRESS,
         NEXT_PUBLIC_LAYPIPE_CREATOR_CONFIG_ID:
           process.env.NEXT_PUBLIC_LAYPIPE_CREATOR_CONFIG_ID,
         NEXT_PUBLIC_LAYPIPE_SELF_BURN_CONFIG_ID:
           process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_CONFIG_ID,
+        NEXT_PUBLIC_LAYPIPE_LAUNCH_FEE_WEI:
+          process.env.NEXT_PUBLIC_LAYPIPE_LAUNCH_FEE_WEI,
+        NEXT_PUBLIC_LAYPIPE_LAUNCH_SUPPLY_WEI:
+          process.env.NEXT_PUBLIC_LAYPIPE_LAUNCH_SUPPLY_WEI,
+        NEXT_PUBLIC_LAYPIPE_TICK_SPACING:
+          process.env.NEXT_PUBLIC_LAYPIPE_TICK_SPACING,
+        NEXT_PUBLIC_LAYPIPE_START_TICK:
+          process.env.NEXT_PUBLIC_LAYPIPE_START_TICK,
+        NEXT_PUBLIC_LAYPIPE_SELF_BURN_MAX_PER_CALL_WEI:
+          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_MAX_PER_CALL_WEI,
+        NEXT_PUBLIC_LAYPIPE_SELF_BURN_BOUNTY_BPS:
+          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_BOUNTY_BPS,
+        NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_SEQUESTER_PER_CALL_WEI:
+          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_SEQUESTER_PER_CALL_WEI,
+        NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_TREASURY_ROUTE_PER_CALL_WEI:
+          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_TREASURY_ROUTE_PER_CALL_WEI,
+        NEXT_PUBLIC_LAYPIPE_REVENUE_BOUNTY_BPS:
+          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_BOUNTY_BPS,
+        NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT:
+          process.env.NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT,
+        NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION:
+          process.env.NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION,
+        NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256:
+          process.env.NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256,
+        NEXT_PUBLIC_LAYPIPE_ARTIFACT_BUNDLE_SHA256:
+          process.env.NEXT_PUBLIC_LAYPIPE_ARTIFACT_BUNDLE_SHA256,
       }),
     [],
   );
@@ -288,7 +348,7 @@ export default function LaunchForm() {
           : deploymentResult.deployment.creatorConfigId;
       const client = new LaypipeLaunchClient(
         provider,
-        deploymentResult.deployment.factoryAddress,
+        deploymentResult.deployment,
       );
 
       const firstPreflight = await client.readPreflight(account, configId);
@@ -303,9 +363,10 @@ export default function LaunchForm() {
         pinnedCache?.fingerprint === fingerprint
           ? pinnedCache.assets
           : await pinLaunchAssets({
-              endpoint: IPFS_PIN_ENDPOINT,
               file: artwork.file,
               metadata,
+              wallet: account,
+              provider,
               browserOrigin: window.location.origin,
             });
       if (pinnedCache?.fingerprint !== fingerprint) {
@@ -383,7 +444,7 @@ export default function LaunchForm() {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
         provider,
-        deploymentResult.deployment.factoryAddress,
+        deploymentResult.deployment,
       );
       const hash = await client.sendApproval(account, nextStep.amount);
       setPendingHash(hash);
@@ -428,7 +489,7 @@ export default function LaunchForm() {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
         provider,
-        deploymentResult.deployment.factoryAddress,
+        deploymentResult.deployment,
       );
       const preflight = await client.readPreflight(
         account,
@@ -498,7 +559,7 @@ export default function LaunchForm() {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
         provider,
-        deploymentResult.deployment.factoryAddress,
+        deploymentResult.deployment,
       );
       const before = await client.readCanonicalPipedogAllowance(account);
       if (before !== BigInt(0)) {

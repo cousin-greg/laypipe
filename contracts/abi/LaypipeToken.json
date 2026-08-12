@@ -723,6 +723,11 @@
   },
   {
     "type": "error",
+    "name": "BlockNumberTooLarge",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ERC20InsufficientAllowance",
     "inputs": [
       {

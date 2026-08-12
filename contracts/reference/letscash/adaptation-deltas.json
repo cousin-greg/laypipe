@@ -19,7 +19,7 @@
       "status": "reviewed PIPEDOG and Robinhood block-clock derivative of verified-source mechanical adaptation",
       "intentionalDeltas": [
         "NatSpec pairing and fee-unit descriptions name canonical PIPEDOG instead of native ETH",
-        "Robinhood launch and checkpoint ids use ArbSys L2 block numbers instead of Solidity's Ethereum L1 block estimate"
+        "Robinhood launch and checkpoint ids use bounded ArbSys L2 block numbers instead of Solidity's Ethereum L1 block estimate, failing closed before uint64 narrowing"
       ]
     },
     {

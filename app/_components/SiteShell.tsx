@@ -3,14 +3,17 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
-import { newestDemoTokens } from "../_data/market";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import type { MarketDataMode } from "@/lib/server/market/mode";
+import {
+  type BoardToken,
+  fixtureBoardSource,
+  selectMarketAdapter,
+} from "../_data/adapter";
 import { compactMoney } from "./format";
 
 const CHAIN_ID = 4663;
 const CHAIN_HEX = `0x${CHAIN_ID.toString(16)}`;
-const latestTokens = newestDemoTokens(16);
-
 type Theme = "light" | "dark";
 
 type EthereumProvider = {
@@ -43,12 +46,43 @@ function shortAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function SiteShell({ children }: { children: ReactNode }) {
+export function SiteShell({
+  children,
+  marketMode,
+}: {
+  children: ReactNode;
+  marketMode: MarketDataMode;
+}) {
   const pathname = usePathname();
+  const marketAdapter = useMemo(() => selectMarketAdapter(marketMode), [marketMode]);
+  const [latestTokens, setLatestTokens] = useState<BoardToken[]>(
+    marketMode === "fixture" ? fixtureBoardSource.tokens.slice(0, 16) : [],
+  );
+  const [feedState, setFeedState] = useState<"ready" | "error">("ready");
   const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const [walletLabel, setWalletLabel] = useState("Connect wallet");
   const [walletBusy, setWalletBusy] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        const source = await marketAdapter.listTokens(controller.signal);
+        setLatestTokens(source.tokens.slice(0, 16));
+        setFeedState("ready");
+      } catch {
+        if (controller.signal.aborted) return;
+        setFeedState("error");
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 15_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [marketAdapter]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -250,11 +284,18 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <div className="launch-marquee" aria-label="Latest preview launches">
+        <div
+          className="launch-marquee"
+          aria-label={marketMode === "live" ? "Latest indexed launches" : "Latest fixture launches"}
+        >
           <span className="marquee-label">Latest</span>
           <div className="marquee-window">
-            <div className="marquee-track">
-              {[...latestTokens, ...latestTokens].map((token, index) => (
+            <div className={`marquee-track ${latestTokens.length === 0 ? "empty" : ""}`}>
+              {latestTokens.length === 0 ? (
+                <span className="marquee-empty">
+                  {feedState === "error" ? "Live feed unavailable" : "Waiting for indexed launches"}
+                </span>
+              ) : [...latestTokens, ...latestTokens].map((token, index) => (
                 <Link
                   href={`/token/${token.slug}`}
                   key={`${token.slug}-${index}`}
@@ -263,16 +304,29 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 >
                   <i style={{ background: token.accent }} aria-hidden="true" />
                   <strong>${token.symbol}</strong>
-                  <span>{compactMoney(token.marketCap)}</span>
-                  <em className={token.change24h >= 0 ? "up" : "down"}>
-                    {token.change24h >= 0 ? "+" : ""}
-                    {token.change24h.toFixed(1)}%
+                  <span>
+                    {token.marketCap === null ? "Market cap unavailable" : compactMoney(token.marketCap)}
+                  </span>
+                  <em
+                    className={
+                      token.change24h === null
+                        ? undefined
+                        : token.change24h >= 0
+                          ? "up"
+                          : "down"
+                    }
+                  >
+                    {token.change24h === null
+                      ? "24h unavailable"
+                      : `${token.change24h >= 0 ? "+" : ""}${token.change24h.toFixed(1)}%`}
                   </em>
                 </Link>
               ))}
             </div>
           </div>
-          <span className="preview-tag">Demo feed</span>
+          <span className="preview-tag">
+            {marketMode === "live" ? "Live index" : "Fixture feed"}
+          </span>
         </div>
       </header>
 
@@ -302,8 +356,9 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </a>
         </nav>
         <p className="footer-risk">
-          Preview interface. LayPipe contracts and indexer are not deployed.
-          Memecoins can go to zero.
+          {marketMode === "live"
+            ? "Live indexed markets. Verify contracts before trading. Memecoins can go to zero."
+            : "Fixture interface. Sample coins are not deployed. Memecoins can go to zero."}
         </p>
       </footer>
     </div>

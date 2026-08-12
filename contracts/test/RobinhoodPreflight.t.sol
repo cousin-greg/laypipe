@@ -83,6 +83,27 @@ contract RobinhoodPreflightTest is Test {
         new PreflightRobinhood().validate();
     }
 
+    function testPreflightRejectsUnexpectedPoolManagerRuntime()
+        public
+    {
+        PreflightRobinhood preflight = new PreflightRobinhood();
+        bytes memory unexpectedRuntime = hex"60006000fd";
+        vm.etch(
+            PipedogProtocolConfig.POOL_MANAGER,
+            unexpectedRuntime
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PreflightRobinhood.InvalidCodehash.selector,
+                PipedogProtocolConfig.POOL_MANAGER,
+                keccak256(unexpectedRuntime),
+                PipedogProtocolConfig.POOL_MANAGER_CODEHASH
+            )
+        );
+        preflight.validate();
+    }
+
     function testCanonicalPipedogExactAllowanceAndDirectRouting()
         public
     {

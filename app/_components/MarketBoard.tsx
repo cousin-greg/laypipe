@@ -8,13 +8,13 @@ import {
   useMemo,
   useState,
 } from "react";
-import { demoMarketAdapter } from "../_data/adapter";
+import type { MarketDataMode } from "@/lib/server/market/mode";
 import {
-  LaunchMode,
-  LaunchToken,
-  marketSource,
-  protocolPreviewStats,
-} from "../_data/market";
+  type BoardToken,
+  fixtureBoardSource,
+  selectMarketAdapter,
+} from "../_data/adapter";
+import { LaunchMode, protocolPreviewStats } from "../_data/market";
 import {
   compactMoney,
   compactNumber,
@@ -47,13 +47,15 @@ const featureTabs: Array<{ id: FeatureTab; label: string }> = [
   { id: "mover", label: "Biggest mover" },
 ];
 
-function rankedToken(tab: FeatureTab, sourceTokens: LaunchToken[]) {
-  const tokens = [
-    ...(sourceTokens.length > 0 ? sourceTokens : marketSource.tokens),
-  ];
+function metric(value: number | null) {
+  return value ?? Number.NEGATIVE_INFINITY;
+}
+
+function rankedToken(tab: FeatureTab, sourceTokens: BoardToken[]) {
+  const tokens = [...sourceTokens];
 
   if (tab === "largest") {
-    return tokens.sort((a, b) => b.marketCap - a.marketCap)[0];
+    return tokens.sort((a, b) => metric(b.marketCap) - metric(a.marketCap))[0];
   }
 
   if (tab === "newest") {
@@ -61,21 +63,23 @@ function rankedToken(tab: FeatureTab, sourceTokens: LaunchToken[]) {
   }
 
   if (tab === "mover") {
-    return tokens.sort((a, b) => b.change24h - a.change24h)[0];
+    return tokens.sort((a, b) => metric(b.change24h) - metric(a.change24h))[0];
   }
 
-  return tokens.sort(
-    (a, b) =>
-      b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
-      a.volume24h * (1 + Math.max(a.change24h, 0) / 100),
-  )[0];
+  return tokens.sort((a, b) => {
+    if (a.source === "live" || b.source === "live") return b.trades - a.trades;
+    return (
+      b.volume24h * (1 + Math.max(b.change24h ?? 0, 0) / 100) -
+      a.volume24h * (1 + Math.max(a.change24h ?? 0, 0) / 100)
+    );
+  })[0];
 }
 
 function TokenAvatar({
   token,
   size = "medium",
 }: {
-  token: LaunchToken;
+  token: BoardToken;
   size?: "small" | "medium" | "large";
 }) {
   return (
@@ -89,7 +93,8 @@ function TokenAvatar({
   );
 }
 
-function Change({ value }: { value: number }) {
+function Change({ value }: { value: number | null }) {
+  if (value === null) return <span className="change">Unavailable</span>;
   return (
     <span className={`change ${value >= 0 ? "up" : "down"}`}>
       {value >= 0 ? "+" : ""}
@@ -98,7 +103,20 @@ function Change({ value }: { value: number }) {
   );
 }
 
-function TokenCard({ token }: { token: LaunchToken }) {
+function formatTokenPrice(token: BoardToken) {
+  if (token.price === null) return "Unavailable";
+  if (token.priceUnit === "USD") return formatMoney(token.price);
+  return `${token.price.toLocaleString("en-US", {
+    maximumSignificantDigits: 6,
+  })} PIPEDOG`;
+}
+
+function formatTokenVolume(token: BoardToken) {
+  if (token.volumeUnit === "USD") return compactMoney(token.volume24h);
+  return `${compactNumber(token.volume24h)} PIPEDOG`;
+}
+
+function TokenCard({ token }: { token: BoardToken }) {
   return (
     <article className="token-card">
       <div className="token-card-top">
@@ -107,29 +125,33 @@ function TokenCard({ token }: { token: LaunchToken }) {
           <Link href={`/token/${token.slug}`}>{token.name}</Link>
           <span>${token.symbol}</span>
         </div>
-        <span className="demo-chip">Demo</span>
+        <span className="demo-chip">{token.source === "live" ? "Live" : "Fixture"}</span>
       </div>
 
-      <Sparkline
-        values={token.chart}
-        positive={token.change24h >= 0}
-        label={`${token.name} illustrative price trend`}
-        compact
-      />
+      {token.chart.length > 1 ? (
+        <Sparkline
+          values={token.chart}
+          positive={(token.change24h ?? 0) >= 0}
+          label={`${token.name} ${token.source === "live" ? "indexed" : "illustrative"} price trend`}
+          compact
+        />
+      ) : (
+        <p className="market-metric-unavailable">Chart unavailable until indexed price history is enabled.</p>
+      )}
 
       <div className="token-price-line">
-        <strong>{formatMoney(token.price)}</strong>
+        <strong>{formatTokenPrice(token)}</strong>
         <Change value={token.change24h} />
       </div>
 
       <dl className="token-card-stats">
         <div>
           <dt>Market cap</dt>
-          <dd>{compactMoney(token.marketCap)}</dd>
+          <dd>{token.marketCap === null ? "Unavailable" : compactMoney(token.marketCap)}</dd>
         </div>
         <div>
           <dt>24h volume</dt>
-          <dd>{compactMoney(token.volume24h)}</dd>
+          <dd>{formatTokenVolume(token)}</dd>
         </div>
         <div>
           <dt>Launched</dt>
@@ -147,14 +169,18 @@ function TokenCard({ token }: { token: LaunchToken }) {
   );
 }
 
-export function MarketBoard() {
+export function MarketBoard({ marketMode }: { marketMode: MarketDataMode }) {
+  const adapter = useMemo(() => selectMarketAdapter(marketMode), [marketMode]);
+  const initialSource = marketMode === "fixture" ? fixtureBoardSource : null;
   const [featureTab, setFeatureTab] = useState<FeatureTab>("hot");
   const [featurePaused, setFeaturePaused] = useState(false);
-  const [tokens, setTokens] = useState<LaunchToken[]>(marketSource.tokens);
+  const [tokens, setTokens] = useState<BoardToken[]>(initialSource?.tokens ?? []);
   const [refreshState, setRefreshState] = useState<
     "ready" | "refreshing" | "error"
-  >("ready");
-  const [lastUpdated, setLastUpdated] = useState(marketSource.updatedAt);
+  >(marketMode === "fixture" ? "ready" : "refreshing");
+  const [lastUpdated, setLastUpdated] = useState<string | null>(
+    initialSource?.updatedAt ?? null,
+  );
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("hot");
   const [mode, setMode] = useState<"all" | LaunchMode>("all");
@@ -163,6 +189,16 @@ export function MarketBoard() {
   const [view, setView] = useState<BoardView>("cards");
   const [urlReady, setUrlReady] = useState(false);
   const [page, setPage] = useState(1);
+  const visibleFeatureTabs = useMemo(
+    () =>
+      marketMode === "live"
+        ? [
+            { id: "hot" as const, label: "Most traded" },
+            { id: "newest" as const, label: "Newest" },
+          ]
+        : featureTabs,
+    [marketMode],
+  );
 
   const featured = useMemo(
     () => rankedToken(featureTab, tokens),
@@ -181,6 +217,10 @@ export function MarketBoard() {
       if (
         ["hot", "market-cap", "newest", "volume", "gainers"].includes(
           sortValue ?? "",
+        ) &&
+        !(
+          marketMode === "live" &&
+          (sortValue === "market-cap" || sortValue === "gainers")
         )
       ) {
         setSort(sortValue as SortMode);
@@ -188,7 +228,10 @@ export function MarketBoard() {
       if (["all", "creator", "self-burn"].includes(modeValue ?? "")) {
         setMode(modeValue as "all" | LaunchMode);
       }
-      if (["all", "micro", "mid", "large"].includes(capValue ?? "")) {
+      if (
+        marketMode === "fixture" &&
+        ["all", "micro", "mid", "large"].includes(capValue ?? "")
+      ) {
         setCap(capValue as CapFilter);
       }
       if (["all", "day", "week"].includes(dateValue ?? "")) {
@@ -199,36 +242,43 @@ export function MarketBoard() {
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, []);
+  }, [marketMode]);
 
   useEffect(() => {
     if (featurePaused) return;
 
     const interval = window.setInterval(() => {
       setFeatureTab((current) => {
-        const currentIndex = featureTabs.findIndex((tab) => tab.id === current);
-        return featureTabs[(currentIndex + 1) % featureTabs.length].id;
+        const currentIndex = visibleFeatureTabs.findIndex((tab) => tab.id === current);
+        return visibleFeatureTabs[(currentIndex + 1) % visibleFeatureTabs.length].id;
       });
     }, 8000);
 
     return () => window.clearInterval(interval);
-  }, [featurePaused]);
+  }, [featurePaused, visibleFeatureTabs]);
 
   useEffect(() => {
-    const refresh = window.setInterval(async () => {
+    const controller = new AbortController();
+    const refresh = async () => {
       setRefreshState("refreshing");
       try {
-        const result = await demoMarketAdapter.listTokens();
+        const result = await adapter.listTokens(controller.signal);
         setTokens(result.tokens);
         setLastUpdated(result.updatedAt);
         setRefreshState("ready");
       } catch {
+        if (controller.signal.aborted) return;
         setRefreshState("error");
       }
-    }, 10000);
+    };
+    void refresh();
+    const interval = window.setInterval(refresh, 15_000);
 
-    return () => window.clearInterval(refresh);
-  }, []);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [adapter]);
 
   useEffect(() => {
     if (!urlReady) return;
@@ -264,11 +314,12 @@ export function MarketBoard() {
       const matchesMode = mode === "all" || token.mode === mode;
       const matchesCap =
         cap === "all" ||
-        (cap === "micro" && token.marketCap < 50000) ||
+        (token.marketCap !== null && cap === "micro" && token.marketCap < 50000) ||
         (cap === "mid" &&
+          token.marketCap !== null &&
           token.marketCap >= 50000 &&
           token.marketCap < 150000) ||
-        (cap === "large" && token.marketCap >= 150000);
+        (token.marketCap !== null && cap === "large" && token.marketCap >= 150000);
       const matchesDate =
         date === "all" ||
         (date === "day" && token.ageHours <= 24) ||
@@ -278,16 +329,17 @@ export function MarketBoard() {
     });
 
     return matchingTokens.sort((a, b) => {
-      if (sort === "market-cap") return b.marketCap - a.marketCap;
+      if (sort === "market-cap") return metric(b.marketCap) - metric(a.marketCap);
       if (sort === "newest") return a.ageHours - b.ageHours;
       if (sort === "volume") return b.volume24h - a.volume24h;
-      if (sort === "gainers") return b.change24h - a.change24h;
+      if (sort === "gainers") return metric(b.change24h) - metric(a.change24h);
+      if (marketMode === "live") return b.trades - a.trades;
       return (
-        b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
-        a.volume24h * (1 + Math.max(a.change24h, 0) / 100)
+        b.volume24h * (1 + Math.max(b.change24h ?? 0, 0) / 100) -
+        a.volume24h * (1 + Math.max(a.change24h ?? 0, 0) / 100)
       );
     });
-  }, [cap, date, mode, search, sort, tokens]);
+  }, [cap, date, marketMode, mode, search, sort, tokens]);
 
   const pageCount = Math.max(1, Math.ceil(filteredTokens.length / PAGE_SIZE));
   const visibleTokens = filteredTokens.slice(
@@ -302,19 +354,19 @@ export function MarketBoard() {
     let nextIndex: number | null = null;
 
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-      nextIndex = (tabIndex + 1) % featureTabs.length;
+      nextIndex = (tabIndex + 1) % visibleFeatureTabs.length;
     } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-      nextIndex = (tabIndex - 1 + featureTabs.length) % featureTabs.length;
+      nextIndex = (tabIndex - 1 + visibleFeatureTabs.length) % visibleFeatureTabs.length;
     } else if (event.key === "Home") {
       nextIndex = 0;
     } else if (event.key === "End") {
-      nextIndex = featureTabs.length - 1;
+      nextIndex = visibleFeatureTabs.length - 1;
     }
 
     if (nextIndex === null) return;
 
     event.preventDefault();
-    const nextTab = featureTabs[nextIndex];
+    const nextTab = visibleFeatureTabs[nextIndex];
     setFeatureTab(nextTab.id);
     event.currentTarget
       .closest('[role="tablist"]')
@@ -358,14 +410,17 @@ export function MarketBoard() {
         onFocusCapture={() => setFeaturePaused(true)}
         onBlurCapture={() => setFeaturePaused(false)}
       >
-        <article className="featured-token">
+        {featured ? (
+          <article className="featured-token">
           <header className="featured-header">
             <div className="featured-context">
               <span className="featured-kicker">
-                {featureTabs.find((tab) => tab.id === featureTab)?.label} right
+                {visibleFeatureTabs.find((tab) => tab.id === featureTab)?.label} right
                 now
               </span>
-              <span className="demo-chip">Demo</span>
+              <span className="demo-chip">
+                {marketMode === "live" ? "Live index" : "Fixture"}
+              </span>
             </div>
 
             <div
@@ -373,7 +428,7 @@ export function MarketBoard() {
               role="tablist"
               aria-label="Featured token ranking"
             >
-              {featureTabs.map((tab, tabIndex) => (
+              {visibleFeatureTabs.map((tab, tabIndex) => (
                 <button
                   id={`feature-tab-${tab.id}`}
                   key={tab.id}
@@ -413,7 +468,7 @@ export function MarketBoard() {
                   className="button button-accent"
                   href={`/token/${featured.slug}`}
                 >
-                  View demo market
+                  {marketMode === "live" ? "View indexed market" : "View fixture market"}
                 </Link>
                 <span className={`mode-badge ${featured.mode}`}>
                   {featured.mode === "self-burn"
@@ -426,16 +481,24 @@ export function MarketBoard() {
             <div className="featured-chart">
               <div className="chart-heading">
                 <div>
-                  <span>Illustrative price</span>
-                  <strong>{formatMoney(featured.price)}</strong>
+                  <span>
+                    {marketMode === "live" ? "Last indexed price" : "Illustrative price"}
+                  </span>
+                  <strong>{formatTokenPrice(featured)}</strong>
                 </div>
                 <Change value={featured.change24h} />
               </div>
-              <Sparkline
-                values={featured.chart}
-                positive={featured.change24h >= 0}
-                label={`${featured.name} illustrative 24 hour price trend`}
-              />
+              {featured.chart.length > 1 ? (
+                <Sparkline
+                  values={featured.chart}
+                  positive={(featured.change24h ?? 0) >= 0}
+                  label={`${featured.name} illustrative 24 hour price trend`}
+                />
+              ) : (
+                <p className="market-metric-unavailable">
+                  Price history is unavailable until chart indexing is enabled.
+                </p>
+              )}
               <div className="chart-axis" aria-hidden="true">
                 <span>24h ago</span>
                 <span>Now</span>
@@ -445,34 +508,81 @@ export function MarketBoard() {
             <dl className="featured-stats">
               <div>
                 <dt>Market cap</dt>
-                <dd>{compactMoney(featured.marketCap)}</dd>
+                <dd>
+                  {featured.marketCap === null
+                    ? "Unavailable"
+                    : compactMoney(featured.marketCap)}
+                </dd>
               </div>
               <div>
                 <dt>24h volume</dt>
-                <dd>{compactMoney(featured.volume24h)}</dd>
+                <dd>{formatTokenVolume(featured)}</dd>
               </div>
               <div>
                 <dt>Liquidity</dt>
-                <dd>{compactMoney(featured.liquidity)}</dd>
+                <dd>
+                  {featured.liquidity === null
+                    ? "Unavailable"
+                    : compactMoney(featured.liquidity)}
+                </dd>
               </div>
               <div>
                 <dt>Holders</dt>
-                <dd>{compactNumber(featured.holders)}</dd>
+                <dd>
+                  {featured.holders === null
+                    ? "Unavailable"
+                    : compactNumber(featured.holders)}
+                </dd>
               </div>
             </dl>
           </div>
-        </article>
+          </article>
+        ) : (
+          <article className="featured-token empty-state">
+            <h2>{refreshState === "refreshing" ? "Loading the live pipe…" : "No indexed launches yet."}</h2>
+            <p>
+              {refreshState === "error"
+                ? "The live market API is unavailable. Fixture data was not substituted."
+                : "This space fills only from verified LayPipe factory events."}
+            </p>
+          </article>
+        )}
       </section>
 
       <section className="protocol-strip" aria-label="Protocol preview stats">
         <div className="content-width">
-          {protocolPreviewStats.map((stat) => (
-            <div key={stat.label}>
-              <span>{stat.label}</span>
-              <strong>{stat.value}</strong>
-              <small>{stat.note}</small>
-            </div>
-          ))}
+          {marketMode === "fixture" ? (
+            protocolPreviewStats.map((stat) => (
+              <div key={stat.label}>
+                <span>{stat.label}</span>
+                <strong>{stat.value}</strong>
+                <small>{stat.note}</small>
+              </div>
+            ))
+          ) : (
+            <>
+              <div>
+                <span>Indexed launches</span>
+                <strong>{tokens.length}</strong>
+                <small>current API page</small>
+              </div>
+              <div>
+                <span>Market feed</span>
+                <strong>{refreshState === "ready" ? "Live" : refreshState}</strong>
+                <small>no fixture fallback</small>
+              </div>
+              <div>
+                <span>USD market cap</span>
+                <strong>Unavailable</strong>
+                <small>no trusted price oracle</small>
+              </div>
+              <div>
+                <span>Holder count</span>
+                <strong>Unavailable</strong>
+                <small>aggregation not enabled</small>
+              </div>
+            </>
+          )}
           <div className="protocol-mark">
             <Image
               src="/brand/pipedog.png"
@@ -493,9 +603,11 @@ export function MarketBoard() {
         <div className="section-title-row">
           <div>
             <p className="eyebrow">THE BOARD</p>
-            <h2>All preview launches</h2>
+            <h2>{marketMode === "live" ? "Indexed launches" : "Fixture launches"}</h2>
             <p>
-              Sorted, filtered, and ready for the live factory event stream.
+              {marketMode === "live"
+                ? "Read-only markets from the canonical Robinhood Chain index."
+                : "Illustrative fixtures for interface preview only."}
             </p>
           </div>
           <Link className="button button-accent" href="/launch">
@@ -527,11 +639,17 @@ export function MarketBoard() {
                 setPage(1);
               }}
             >
-              <option value="hot">Hot</option>
-              <option value="market-cap">Market cap</option>
+              <option value="hot">
+                {marketMode === "live" ? "Most traded" : "Hot"}
+              </option>
+              <option value="market-cap" disabled={marketMode === "live"}>
+                Market cap{marketMode === "live" ? " (unavailable)" : ""}
+              </option>
               <option value="newest">Newest</option>
               <option value="volume">24h volume</option>
-              <option value="gainers">Biggest mover</option>
+              <option value="gainers" disabled={marketMode === "live"}>
+                Biggest mover{marketMode === "live" ? " (unavailable)" : ""}
+              </option>
             </select>
           </label>
 
@@ -554,6 +672,7 @@ export function MarketBoard() {
             <span>Market cap</span>
             <select
               value={cap}
+              disabled={marketMode === "live"}
               onChange={(event) => {
                 setCap(event.target.value as CapFilter);
                 setPage(1);
@@ -607,17 +726,19 @@ export function MarketBoard() {
 
         <div className="results-meta" aria-live="polite">
           <span>
-            {filteredTokens.length} preview{" "}
+            {filteredTokens.length} {marketMode === "live" ? "indexed" : "fixture"}{" "}
             {filteredTokens.length === 1 ? "coin" : "coins"}
           </span>
           <span>
             {refreshState === "refreshing"
-              ? "Refreshing demo adapter…"
+              ? `Refreshing ${marketMode === "live" ? "live index" : "fixture adapter"}…`
               : refreshState === "error"
-                ? "Adapter refresh failed · showing last snapshot"
-                : `Illustrative data · refreshed ${formatRefreshTime(
-                    lastUpdated,
-                  )}`}
+                ? marketMode === "live"
+                  ? "Live API unavailable · no fixture fallback"
+                  : "Fixture refresh failed · showing last fixture snapshot"
+                : lastUpdated
+                  ? `${marketMode === "live" ? "Indexer watermark" : "Fixture data"} · ${formatRefreshTime(lastUpdated)}`
+                  : "Live index connected · watermark unavailable"}
           </span>
         </div>
 
@@ -631,7 +752,11 @@ export function MarketBoard() {
               unoptimized
             />
             <h3>The launch feed is empty.</h3>
-            <p>The Board will fill as the indexer receives factory events.</p>
+            <p>
+              {marketMode === "live" && refreshState === "error"
+                ? "The live API failed. No fixture coins are shown in live mode."
+                : "The Board will fill as the indexer receives factory events."}
+            </p>
           </div>
         ) : visibleTokens.length === 0 ? (
           <div className="empty-state">
@@ -688,16 +813,22 @@ export function MarketBoard() {
                         <TokenAvatar token={token} size="small" />
                         <span>
                           <strong>{token.name}</strong>
-                          <small>${token.symbol} · Demo</small>
+                          <small>
+                            ${token.symbol} · {token.source === "live" ? "Live" : "Fixture"}
+                          </small>
                         </span>
                       </Link>
                     </td>
-                    <td>{formatMoney(token.price)}</td>
+                    <td>{formatTokenPrice(token)}</td>
                     <td>
                       <Change value={token.change24h} />
                     </td>
-                    <td>{compactMoney(token.marketCap)}</td>
-                    <td>{compactMoney(token.volume24h)}</td>
+                    <td>
+                      {token.marketCap === null
+                        ? "Unavailable"
+                        : compactMoney(token.marketCap)}
+                    </td>
+                    <td>{formatTokenVolume(token)}</td>
                     <td>
                       <span className={`mode-badge ${token.mode}`}>
                         {token.mode === "self-burn" ? "Self-burn" : "Creator"}

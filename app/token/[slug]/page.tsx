@@ -1,6 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { mapLiveTokenToBoardToken, type BoardToken } from "../../_data/adapter";
+import { readMarketDataMode, type MarketDataMode } from "@/lib/server/market/mode";
+import { loadLiveTokenPage } from "@/lib/server/market/page-token";
 import {
   compactMoney,
   compactNumber,
@@ -10,6 +13,8 @@ import {
 import { Sparkline } from "../../_components/Sparkline";
 import { findDemoToken, marketSource } from "../../_data/market";
 
+export const dynamic = "force-dynamic";
+
 export function generateStaticParams() {
   return [
     { slug: "pipedog" },
@@ -18,6 +23,50 @@ export function generateStaticParams() {
 }
 
 const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
+
+function tokenPrice(token: BoardToken) {
+  if (token.price === null) return "Unavailable";
+  if (token.priceUnit === "USD") return formatMoney(token.price);
+  return `${token.price.toLocaleString("en-US", {
+    maximumSignificantDigits: 6,
+  })} PIPEDOG`;
+}
+
+function tokenVolume(token: BoardToken) {
+  if (token.volumeUnit === "USD") return compactMoney(token.volume24h);
+  return `${compactNumber(token.volume24h)} PIPEDOG`;
+}
+
+type TokenResolution =
+  | { status: "ready"; token: BoardToken }
+  | { status: "not_found" }
+  | { status: "unavailable" };
+
+async function resolveToken(
+  slug: string,
+  marketMode: MarketDataMode,
+): Promise<TokenResolution> {
+  if (marketMode === "fixture") {
+    const fixture = findDemoToken(slug);
+    return fixture
+      ? {
+          status: "ready",
+          token: {
+            ...fixture,
+            source: "fixture" as const,
+            tokenAddress: null,
+            priceUnit: "USD" as const,
+            volumeUnit: "USD" as const,
+          },
+        }
+      : { status: "not_found" };
+  }
+
+  const result = await loadLiveTokenPage(slug);
+  return result.status === "ready"
+    ? { status: "ready", token: mapLiveTokenToBoardToken(result.payload.token) }
+    : result;
+}
 
 function PipedogPage() {
   return (
@@ -112,6 +161,42 @@ function PipedogPage() {
   );
 }
 
+function LiveTokenUnavailable({ slug }: { slug: string }) {
+  return (
+    <main className="inner-page content-width token-page">
+      <div className="breadcrumb">
+        <Link href="/">Board</Link>
+        <span>→</span>
+        <span>Market unavailable</span>
+      </div>
+
+      <aside className="preview-notice token-notice">
+        <span>Live data unavailable</span>
+        <p>
+          The indexed market could not be loaded within the safe read deadline.
+          No fixture token or estimated metric has been substituted.
+        </p>
+        <Link href="/">Return to Board →</Link>
+      </aside>
+
+      <section className="empty-state">
+        <Image
+          src="/brand/pipedog-cutout.png"
+          alt=""
+          width={386}
+          height={351}
+          unoptimized
+        />
+        <h1>This pipe is temporarily unavailable.</h1>
+        <p>
+          The token address {slug} is not being presented as missing; the live
+          database or indexer read failed. Try again after service recovers.
+        </p>
+      </section>
+    </main>
+  );
+}
+
 export default async function TokenPage({
   params,
 }: {
@@ -120,9 +205,14 @@ export default async function TokenPage({
   const { slug } = await params;
   if (slug === "pipedog") return <PipedogPage />;
 
-  const token = findDemoToken(slug);
+  const marketMode = readMarketDataMode();
+  const resolution = await resolveToken(slug, marketMode);
 
-  if (!token) notFound();
+  if (resolution.status === "not_found") notFound();
+  if (resolution.status === "unavailable") {
+    return <LiveTokenUnavailable slug={slug} />;
+  }
+  const token = resolution.token;
 
   return (
     <main className="inner-page content-width token-page token-market-page">
@@ -133,9 +223,11 @@ export default async function TokenPage({
       </div>
 
       <aside className="preview-notice token-notice">
-        <span>Demo market</span>
+        <span>{marketMode === "live" ? "Indexed market" : "Fixture market"}</span>
         <p>
-          This is an interface fixture, not a deployed token or tradeable pool.
+          {marketMode === "live"
+            ? "Read-only market data from canonical indexed events. Unavailable metrics are never estimated."
+            : "This is an interface fixture, not a deployed token or tradeable pool."}
         </p>
         <Link href="/docs#readiness">Why? →</Link>
       </aside>
@@ -150,7 +242,9 @@ export default async function TokenPage({
             {token.symbol.slice(0, 2)}
           </span>
           <div>
-            <span className="demo-chip">Preview coin</span>
+            <span className="demo-chip">
+              {marketMode === "live" ? "Live index" : "Fixture coin"}
+            </span>
             <h1>{token.name}</h1>
             <p>
               ${token.symbol} · launched {formatAge(token.ageHours)} ago
@@ -159,12 +253,16 @@ export default async function TokenPage({
         </div>
         <p className="token-description">{token.description}</p>
         <div className="token-price">
-          <span>Illustrative price</span>
-          <strong>{formatMoney(token.price)}</strong>
-          <em className={token.change24h >= 0 ? "up" : "down"}>
-            {token.change24h >= 0 ? "+" : ""}
-            {token.change24h.toFixed(1)}% 24h
-          </em>
+          <span>{marketMode === "live" ? "Last indexed price" : "Illustrative price"}</span>
+          <strong>{tokenPrice(token)}</strong>
+          {token.change24h === null ? (
+            <em>24h change unavailable</em>
+          ) : (
+            <em className={token.change24h >= 0 ? "up" : "down"}>
+              {token.change24h >= 0 ? "+" : ""}
+              {token.change24h.toFixed(1)}% 24h
+            </em>
+          )}
         </div>
       </section>
 
@@ -175,13 +273,19 @@ export default async function TokenPage({
               <span>Price movement</span>
               <strong>24 hours</strong>
             </div>
-            <span>Fixture series</span>
+            <span>{marketMode === "live" ? "Indexed series" : "Fixture series"}</span>
           </div>
-          <Sparkline
-            values={token.chart}
-            positive={token.change24h >= 0}
-            label={`${token.name} illustrative 24 hour price trend`}
-          />
+          {token.chart.length > 1 ? (
+            <Sparkline
+              values={token.chart}
+              positive={(token.change24h ?? 0) >= 0}
+              label={`${token.name} illustrative 24 hour price trend`}
+            />
+          ) : (
+            <p className="market-metric-unavailable">
+              Chart history is unavailable until indexed candle aggregation is enabled.
+            </p>
+          )}
           <div className="chart-axis" aria-hidden="true">
             <span>24h ago</span>
             <span>12h</span>
@@ -210,7 +314,7 @@ export default async function TokenPage({
             <strong>— ${token.symbol}</strong>
           </div>
           <button className="button button-disabled" type="button" disabled>
-            Pool not deployed
+            {marketMode === "live" ? "Trading UI not enabled" : "Pool not deployed"}
           </button>
           <p>
             Trading activates only for verified LayPipe pools. A live buy needs
@@ -222,19 +326,25 @@ export default async function TokenPage({
       <section className="token-stat-grid">
         <article>
           <span>Market cap</span>
-          <strong>{compactMoney(token.marketCap)}</strong>
+          <strong>
+            {token.marketCap === null ? "Unavailable" : compactMoney(token.marketCap)}
+          </strong>
         </article>
         <article>
           <span>24h volume</span>
-          <strong>{compactMoney(token.volume24h)}</strong>
+          <strong>{tokenVolume(token)}</strong>
         </article>
         <article>
           <span>Liquidity</span>
-          <strong>{compactMoney(token.liquidity)}</strong>
+          <strong>
+            {token.liquidity === null ? "Unavailable" : compactMoney(token.liquidity)}
+          </strong>
         </article>
         <article>
           <span>Holders</span>
-          <strong>{compactNumber(token.holders)}</strong>
+          <strong>
+            {token.holders === null ? "Unavailable" : compactNumber(token.holders)}
+          </strong>
         </article>
         <article>
           <span>Trades</span>

@@ -36,6 +36,13 @@ This simplifies custody and prevents liquidity extraction, but it also means:
 Do not describe these launches as graduating to another venue. Adding
 graduation requires a separately designed and audited state machine.
 
+The locked LayPipe pool is permanent, not exclusive. A launched token is a
+plain transferable ERC-20, so any holder can seed another v3, v4, or external
+DEX pool without the LayPipe hook. Those venues do not feed the protocol's
+creator, platform, or self-burn lanes and can fragment liquidity. Fee and burn
+forecasts must account for this leakage; preventing it would require a
+materially different, separately audited token-level venue-control design.
+
 ## PIPEDOG assumptions
 
 The protocol pins canonical PIPEDOG on Robinhood Chain:
@@ -92,11 +99,15 @@ Exact-output fees use full-precision ceiling gross-up so the configured rate
 is measured against total PIPEDOG flow. Without that gross-up, a nominal 1%
 fee on a net amount would produce an effective gross rate of about 0.9901%.
 
-Self-burns intentionally have no minimum output. They are permissionless,
-publicly visible market orders and can be sandwiched. The immutable
-PIPEDOG-per-call cap and one-call-per-pool-per-block rule bound each attempt;
-they do not eliminate MEV. Configure the cap against actual pool depth and
-monitor realized burn execution.
+Self-burns currently have no independent on-chain minimum-output reference.
+They are permissionless, publicly visible market orders that can be
+manipulated and sandwiched: an attacker can move the price before the
+protocol-funded buy and unwind afterward. The immutable PIPEDOG-per-call cap
+and one-call-per-pool-per-block rule only bound each loss; they do not make the
+execution safe. Keep the self-burn launch configuration disabled until an
+independently audited TWAP/oracle or otherwise bounded execution design is in
+place. A caller-supplied minimum alone is not protection when the caller is
+permissionless.
 
 The platform revenue router performs no market swap. Its sequestration and
 treasury calls transfer PIPEDOG directly, so the old WETH/PIPEDOG buyback MEV
@@ -188,6 +199,11 @@ LayPipe implementations.
 Run the reference fetch, source-fidelity check, full build/test suite, live
 preflight, ABI generation, and no-broadcast deployment simulation immediately
 before an audit handoff.
+
+The Robinhood preflight pins canonical PIPEDOG, Uniswap v4 PoolManager, and
+the deterministic CREATE2 deployer runtime codehashes, exercises the
+PoolManager interface, and requires a valid ArbSys L2 block-number response.
+Any dependency-runtime change fails closed pending explicit review.
 
 ## Secrets and broadcasts
 

@@ -23,9 +23,6 @@ import {PreflightRobinhood} from "./PreflightRobinhood.s.sol";
 
 /// @notice Deploys the fresh PIPEDOG-quote stack and leaves launch disabled.
 contract DeployLaypipe is Script {
-    address internal constant CREATE2_DEPLOYER =
-        0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
     error InvalidDeploymentConfig();
     error HookAddressMismatch(address expected, address actual);
     error HookFlagsMismatch(uint160 expected, uint160 actual);
@@ -42,7 +39,9 @@ contract DeployLaypipe is Script {
     }
 
     function run() external returns (Deployment memory deployed) {
-        new PreflightRobinhood().validate();
+        PreflightRobinhood preflight = new PreflightRobinhood();
+        preflight.validate();
+        preflight.validateArbSysRpc();
 
         address finalOwner = vm.envAddress("FINAL_OWNER");
         address treasuryWallet = vm.envAddress("TREASURY_WALLET");
@@ -136,7 +135,7 @@ contract DeployLaypipe is Script {
             deployer
         );
         (address predictedHook, bytes32 hookSalt) = HookMiner.find(
-            CREATE2_DEPLOYER,
+            PipedogProtocolConfig.CREATE2_DEPLOYER,
             flags,
             type(PipedogHook).creationCode,
             constructorArgs

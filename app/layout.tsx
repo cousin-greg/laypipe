@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { readMarketDataMode } from "@/lib/server/market/mode";
 import { SiteShell } from "./_components/SiteShell";
 import "./globals.css";
 
@@ -139,7 +140,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <SiteShell>{children}</SiteShell>
+        <SiteShell marketMode={readMarketDataMode()}>{children}</SiteShell>
       </body>
     </html>
   );
