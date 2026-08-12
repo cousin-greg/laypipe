@@ -333,7 +333,7 @@ contract LaypipeFactoryIntegrationTest is Test {
             )
         );
         vm.prank(TRADER);
-        swapRouter.buy(key, quoteIn, 1, TRADER);
+        swapRouter.buy(key, quoteIn, 1, TRADER, type(uint256).max);
         assertEq(
             pipedog.allowance(TRADER, address(swapRouter)),
             quoteIn + 1
@@ -343,7 +343,7 @@ contract LaypipeFactoryIntegrationTest is Test {
         pipedog.approve(address(swapRouter), quoteIn);
         vm.prank(TRADER);
         uint256 bought =
-            swapRouter.buy(key, quoteIn, 1, TRADER);
+            swapRouter.buy(key, quoteIn, 1, TRADER, type(uint256).max);
         assertGt(bought, 0);
         assertEq(
             pipedog.balanceOf(TRADER),
@@ -365,7 +365,7 @@ contract LaypipeFactoryIntegrationTest is Test {
             )
         );
         vm.prank(TRADER);
-        swapRouter.sell(key, sellAmount, 1, TRADER);
+        swapRouter.sell(key, sellAmount, 1, TRADER, type(uint256).max);
         assertEq(
             token.allowance(TRADER, address(swapRouter)),
             sellAmount + 1
@@ -375,7 +375,7 @@ contract LaypipeFactoryIntegrationTest is Test {
         token.approve(address(swapRouter), sellAmount);
         vm.prank(TRADER);
         uint256 quoteOut =
-            swapRouter.sell(key, sellAmount, 1, TRADER);
+            swapRouter.sell(key, sellAmount, 1, TRADER, type(uint256).max);
         assertGt(quoteOut, 0);
         assertEq(
             pipedog.balanceOf(TRADER),
@@ -512,7 +512,11 @@ contract LaypipeFactoryIntegrationTest is Test {
         );
         vm.prank(TRADER);
         swapRouter.buy(
-            key, quoteIn, type(uint256).max, TRADER
+            key,
+            quoteIn,
+            type(uint256).max,
+            TRADER,
+            type(uint256).max
         );
         assertEq(pipedog.balanceOf(TRADER), quoteBefore);
         assertEq(
@@ -520,7 +524,7 @@ contract LaypipeFactoryIntegrationTest is Test {
         );
 
         vm.prank(TRADER);
-        uint256 bought = swapRouter.buy(key, quoteIn, 1, TRADER);
+        uint256 bought = swapRouter.buy(key, quoteIn, 1, TRADER, type(uint256).max);
         uint256 sellAmount = bought / 2;
         uint256 tokenBefore = token.balanceOf(TRADER);
         vm.prank(TRADER);
@@ -530,7 +534,11 @@ contract LaypipeFactoryIntegrationTest is Test {
         );
         vm.prank(TRADER);
         swapRouter.sell(
-            key, sellAmount, type(uint256).max, TRADER
+            key,
+            sellAmount,
+            type(uint256).max,
+            TRADER,
+            type(uint256).max
         );
         assertEq(token.balanceOf(TRADER), tokenBefore);
         assertEq(
@@ -557,7 +565,9 @@ contract LaypipeFactoryIntegrationTest is Test {
         // back together.
         vm.expectRevert();
         vm.prank(TRADER);
-        swapRouter.buy(key, oversizedInput, 0, TRADER);
+        swapRouter.buy(
+            key, oversizedInput, 0, TRADER, type(uint256).max
+        );
 
         assertEq(pipedog.balanceOf(TRADER), quoteBefore);
         assertEq(token.balanceOf(TRADER), tokenBefore);
@@ -839,13 +849,13 @@ contract LaypipeFactoryIntegrationTest is Test {
             pipedog.approve(address(swapRouter), quoteIn);
             vm.prank(TRADER);
             uint256 out =
-                swapRouter.buy(key, quoteIn, 1, TRADER);
+                swapRouter.buy(key, quoteIn, 1, TRADER, type(uint256).max);
 
             uint256 sellAmount = out / 2;
             vm.prank(TRADER);
             token.approve(address(swapRouter), sellAmount);
             vm.prank(TRADER);
-            swapRouter.sell(key, sellAmount, 1, TRADER);
+            swapRouter.sell(key, sellAmount, 1, TRADER, type(uint256).max);
 
             assertEq(pipedog.balanceOf(address(swapRouter)), 0);
             assertEq(token.balanceOf(address(swapRouter)), 0);
@@ -946,7 +956,9 @@ contract LaypipeFactoryIntegrationTest is Test {
         vm.prank(buyer);
         pipedog.approve(address(swapRouter), amount);
         vm.prank(buyer);
-        out = swapRouter.buy(key, amount, 1, buyer);
+        out = swapRouter.buy(
+            key, amount, 1, buyer, type(uint256).max
+        );
     }
 
     function _deployHook(address hookTreasury)

@@ -6,12 +6,16 @@ import {
 import { runCanonicalIndexer } from "@/lib/server/indexer/ingestion";
 import { acquireIndexerLease } from "@/lib/server/indexer/lease";
 import { readBoundedWebhookBody } from "@/lib/server/indexer/webhook";
+import {
+  emitOperationalSummary,
+  observeOperationalRequest,
+} from "@/lib/server/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST(request: Request) {
+async function handle(request: Request) {
   try {
     if (
       !process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ||
@@ -38,6 +42,11 @@ export async function POST(request: Request) {
     }
     const lease = await acquireIndexerLease();
     if (!lease.acquired) {
+      emitOperationalSummary(
+        "laypipe.indexer.completed",
+        { runStatus: "busy", source: "webhook" },
+        "warn",
+      );
       return Response.json(
         { accepted: true, eventId: envelope.id, sync: { status: "busy" } },
         { status: 202, headers: { "Cache-Control": "no-store" } },
@@ -45,6 +54,22 @@ export async function POST(request: Request) {
     }
     try {
       const result = await runCanonicalIndexer();
+      const blockLag = result.nextBlock === null
+        ? null
+        : (BigInt(result.safeHead) - BigInt(result.nextBlock) + BigInt(1)).toString();
+      emitOperationalSummary(
+        "laypipe.indexer.completed",
+        {
+          runStatus: result.status,
+          source: "webhook",
+          safeHead: result.safeHead,
+          nextBlock: result.nextBlock,
+          blockLag,
+          batches: result.batches,
+          rolledBackBlocks: result.rolledBackBlocks,
+        },
+        result.status === "caught-up" ? "info" : "warn",
+      );
       return Response.json(
         { accepted: true, eventId: envelope.id, sync: result },
         { headers: { "Cache-Control": "no-store" } },
@@ -55,4 +80,10 @@ export async function POST(request: Request) {
   } catch (error) {
     return jsonError(error);
   }
+}
+
+export async function POST(request: Request) {
+  return observeOperationalRequest(request, "/api/indexer/webhook", () =>
+    handle(request),
+  );
 }

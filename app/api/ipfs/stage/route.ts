@@ -1,4 +1,5 @@
 import { verifyWalletAuthorization } from "@/lib/server/auth/challenge";
+import { sanitizeArtworkName } from "@/lib/ipfs/artwork";
 import {
   getRequestIp,
   HttpError,
@@ -41,7 +42,8 @@ export async function POST(request: Request) {
       (size as number) < 1 ||
       (size as number) > 5 * 1024 * 1024 ||
       !ALLOWED_IMAGE_TYPES.includes(mimeType as never) ||
-      !/^[0-9a-f]{64}$/.test(fileSha256)
+      !/^[0-9a-f]{64}$/.test(fileSha256) ||
+      sanitizeArtworkName(fileName) !== fileName
     ) {
       throw new HttpError(
         400,

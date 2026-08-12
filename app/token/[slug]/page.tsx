@@ -11,7 +11,11 @@ import {
   formatMoney,
 } from "../../_components/format";
 import { Sparkline } from "../../_components/Sparkline";
+import { TokenAvatar } from "../../_components/TokenAvatar";
 import { findDemoToken, marketSource } from "../../_data/market";
+import type { LiveMarketToken } from "@/lib/market/live";
+import type { TradeTokenIdentity } from "@/lib/web3/trade-client";
+import { TradePanel } from "./TradePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +42,11 @@ function tokenVolume(token: BoardToken) {
 }
 
 type TokenResolution =
-  | { status: "ready"; token: BoardToken }
+  | {
+      status: "ready";
+      token: BoardToken;
+      tradeToken: TradeTokenIdentity | null;
+    }
   | { status: "not_found" }
   | { status: "unavailable" };
 
@@ -55,17 +63,34 @@ async function resolveToken(
             ...fixture,
             source: "fixture" as const,
             tokenAddress: null,
+            artworkUrl: null,
             priceUnit: "USD" as const,
             volumeUnit: "USD" as const,
           },
+          tradeToken: null,
         }
       : { status: "not_found" };
   }
 
   const result = await loadLiveTokenPage(slug);
   return result.status === "ready"
-    ? { status: "ready", token: mapLiveTokenToBoardToken(result.payload.token) }
+    ? {
+        status: "ready",
+        token: mapLiveTokenToBoardToken(result.payload.token),
+        tradeToken: liveTradeIdentity(result.payload.token),
+      }
     : result;
+}
+
+function liveTradeIdentity(token: LiveMarketToken): TradeTokenIdentity {
+  return {
+    chainId: token.chainId,
+    tokenAddress: token.tokenAddress,
+    poolId: token.poolId,
+    hookAddress: token.hookAddress,
+    configId: token.configId,
+    feeMode: token.feeMode,
+  };
 }
 
 function PipedogPage() {
@@ -226,7 +251,7 @@ export default async function TokenPage({
         <span>{marketMode === "live" ? "Indexed market" : "Fixture market"}</span>
         <p>
           {marketMode === "live"
-            ? "Read-only market data from canonical indexed events. Unavailable metrics are never estimated."
+            ? "Canonical indexed market data. Wallet trading activates only when the complete audited production manifest matches on-chain; unavailable metrics are never estimated."
             : "This is an interface fixture, not a deployed token or tradeable pool."}
         </p>
         <Link href="/docs#readiness">Why? →</Link>
@@ -234,13 +259,7 @@ export default async function TokenPage({
 
       <section className="token-hero">
         <div className="token-profile">
-          <span
-            className="token-avatar xlarge"
-            style={{ "--token-accent": token.accent } as React.CSSProperties}
-            aria-hidden="true"
-          >
-            {token.symbol.slice(0, 2)}
-          </span>
+          <TokenAvatar token={token} size="xlarge" descriptive />
           <div>
             <span className="demo-chip">
               {marketMode === "live" ? "Live index" : "Fixture coin"}
@@ -293,34 +312,11 @@ export default async function TokenPage({
           </div>
         </section>
 
-        <aside className="trade-panel">
-          <div className="trade-tabs">
-            <button type="button" aria-pressed="true">
-              Buy
-            </button>
-            <button type="button" aria-pressed="false">
-              Sell
-            </button>
-          </div>
-          <label>
-            <span>You pay</span>
-            <div>
-              <input value="0.00" readOnly aria-label="Trade amount" />
-              <strong>PIPEDOG</strong>
-            </div>
-          </label>
-          <div className="trade-quote">
-            <span>You receive</span>
-            <strong>— ${token.symbol}</strong>
-          </div>
-          <button className="button button-disabled" type="button" disabled>
-            {marketMode === "live" ? "Trading UI not enabled" : "Pool not deployed"}
-          </button>
-          <p>
-            Trading activates only for verified LayPipe pools. A live buy needs
-            an exact PIPEDOG approval; native ETH pays gas only.
-          </p>
-        </aside>
+        <TradePanel
+          enabled={marketMode === "live"}
+          symbol={token.symbol}
+          token={resolution.tradeToken}
+        />
       </div>
 
       <section className="token-stat-grid">

@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import { readMarketDataMode } from "@/lib/server/market/mode";
 import { MarketDataProvider } from "./_components/MarketDataProvider";
 import { SiteShell } from "./_components/SiteShell";
+import { WalletProvider } from "./_components/WalletProvider";
 import "./globals.css";
 
 const mori = localFont({
@@ -144,7 +145,9 @@ export default function RootLayout({
       </head>
       <body>
         <MarketDataProvider marketMode={marketMode}>
-          <SiteShell>{children}</SiteShell>
+          <WalletProvider>
+            <SiteShell>{children}</SiteShell>
+          </WalletProvider>
         </MarketDataProvider>
       </body>
     </html>

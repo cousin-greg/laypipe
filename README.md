@@ -6,7 +6,9 @@ Native ETH is used for network gas only.
 
 ## Product surface
 
-- latest-token marquee and rotating Hot/Largest/Newest/Mover feature;
+- latest-token marquee and rotating fixture Hot/Largest/Newest/Mover feature;
+  live mode currently exposes only indexed Most traded/Newest until trusted
+  PIPEDOG-denominated size and historical-mover metrics are implemented;
 - responsive 1–5-column Board with card/table views and URL-backed filters;
 - Board, My Tokens, Rewards, Tokenomics, Docs, Launch, and token-detail routes;
 - persistent light/dark themes, injected-wallet connection, and Robinhood
@@ -14,7 +16,8 @@ Native ETH is used for network gas only.
 - local PP Mori and Dragon webfonts;
 - canonical PIPEDOG artwork composited with separately generated pipe and
   furnace scenery, plus the favicon and social card;
-- explicit demo-data adapter with typed seams for the future live indexer;
+- fixture and live market adapters behind an explicit fail-closed deployment
+  mode, signed keyset pagination, and a reorg-safe canonical indexer;
 - Foundry factory, permanent one-sided v4 pool, token, self-burner, and direct
   25/25/50 PIPEDOG revenue router, plus deployment preflight, fork tests,
   invariants, and committed ABIs under `contracts/`.
@@ -26,6 +29,9 @@ production-calibrated. Read [contracts/README.md](./contracts/README.md) and
 [contracts/SECURITY.md](./contracts/SECURITY.md) before any test deployment.
 The infrastructure, account, metadata, indexing, and staged-release gates are
 tracked in [PRODUCTION.md](./PRODUCTION.md).
+The shorter owner/operator sequence is in
+[LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md), and the external-review boundary
+is in [contracts/AUDIT_HANDOFF.md](./contracts/AUDIT_HANDOFF.md).
 
 PIPEDOG has no native `burn()` method. The platform’s 25% sink lane sends
 PIPEDOG directly to `0x000000000000000000000000000000000000dEaD`; this removes
@@ -48,12 +54,15 @@ npx tsc --noEmit
 ```
 
 Production is hosted on Vercel. The repository intentionally has no Sites or
-Cloudflare Worker deployment binding; the standard Next.js scripts are the
-single build path used locally, in CI, and by Vercel.
+Cloudflare Worker deployment binding. Vercel runs the standard Next.js build;
+GitHub's `Release gates` workflow adds tests, lint, type-checking, a real
+PostgreSQL rehearsal, dependency audit, and local protocol invariants.
 
-The Board currently uses clearly marked fixture data. Switch
-`demoMarketAdapter` to `createApiMarketAdapter` only after the event indexer and
-reviewed deployment addresses are available.
+The Board currently uses clearly marked fixture data. Keep
+`LAYPIPE_MARKET_MODE=fixture` until the database migration, canonical backfill,
+audited deployment manifest, readiness checks, and live Preview rehearsal are
+all green. `live` selects the Neon-backed API explicitly and never falls back
+to fixture prices when the database or indexer is unavailable.
 
 ## Contract verification
 

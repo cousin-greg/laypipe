@@ -70,6 +70,11 @@
         "name": "recipient",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "deadlineBlock",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -170,6 +175,11 @@
         "name": "recipient",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "deadlineBlock",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -292,6 +302,11 @@
   },
   {
     "type": "error",
+    "name": "ArbSysUnavailable",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidPool",
     "inputs": []
   },
@@ -337,6 +352,22 @@
       },
       {
         "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TradeExpired",
+    "inputs": [
+      {
+        "name": "deadlineBlock",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentBlock",
         "type": "uint256",
         "internalType": "uint256"
       }

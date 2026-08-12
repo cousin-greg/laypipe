@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
+const multiformatsCid = await import("multiformats/cid");
 const ts = require("typescript");
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cache = new Map();
@@ -25,6 +26,7 @@ function loadTypeScript(relativePath) {
     fileName: filename,
   }).outputText;
   const localRequire = (specifier) => {
+    if (specifier === "multiformats/cid") return multiformatsCid;
     if (!specifier.startsWith(".")) return require(specifier);
     const unresolved = resolve(dirname(filename), specifier);
     const dependency = extname(unresolved) ? unresolved : `${unresolved}.ts`;
@@ -65,6 +67,7 @@ function liveTokenRow(overrides = {}) {
     description: "Indexed fixture used only inside the test double.",
     logo_uri: "ipfs://art",
     metadata_uri: "ipfs://metadata",
+    approved_logo_cid: null,
     socials: {},
     block_number: "123",
     log_index: 7,
@@ -81,14 +84,47 @@ function liveTokenRow(overrides = {}) {
   };
 }
 
-function databaseFor({ tokenRows = [], watermarkRows = [] } = {}) {
+function readyWatermarkRow(overrides = {}) {
+  return {
+    stream: "laypipe",
+    next_block: "125",
+    last_processed_block: "124",
+    last_processed_hash: hash("a"),
+    observed_safe_head: "124",
+    observed_at: new Date().toISOString(),
+    last_run_status: "caught-up",
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function databaseFor({
+  tokenRows = [],
+  watermarkRows = [readyWatermarkRow()],
+  snapshotWatermarkRows = watermarkRows,
+} = {}) {
   const calls = [];
   return {
     calls,
-    async query(sql, params = []) {
-      calls.push({ sql, params });
+    async query(sql, params = [], options) {
+      calls.push({ sql, params, options });
       if (sql === readModel.INDEXER_WATERMARK_SQL) return watermarkRows;
       return tokenRows;
+    },
+    async transaction(factory, options) {
+      const transaction = {
+        async query(sql, params = [], queryOptions) {
+          calls.push({ sql, params, options: queryOptions, inTransaction: true });
+          if (sql === readModel.MARKET_SNAPSHOT_WATERMARK_SQL) {
+            return snapshotWatermarkRows;
+          }
+          return tokenRows;
+        },
+      };
+      const queries = factory(transaction);
+      const result = await Promise.all(queries);
+      calls.push({ transactionOptions: options });
+      return result;
     },
   };
 }
@@ -162,7 +198,10 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   const result = await readModel.listLiveTokens(database, { limit: 10, cursor });
   const tokenCall = database.calls.find((call) => call.sql === readModel.TOKEN_LIST_SQL);
   assert.ok(tokenCall);
+  assert.equal(tokenCall.inTransaction, true);
   assert.deepEqual(tokenCall.params, [4663, "123", 7, address("a"), 11]);
+  assert.ok(tokenCall.options?.fetchOptions?.signal instanceof AbortSignal);
+  assert.equal(tokenCall.options.fetchOptions.signal.aborted, false);
   assert.match(tokenCall.sql, /\$1::bigint/);
   assert.match(tokenCall.sql, /\$5::integer/);
   assert.doesNotMatch(tokenCall.sql, new RegExp(address("a")));
@@ -170,6 +209,57 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   assert.equal(result.tokens[0].metrics.volume24hPipedog.status, "observed");
   assert.equal(result.tokens[0].metrics.marketCapUsd.status, "unavailable");
   assert.equal(result.tokens[0].metrics.marketCapUsd.value, null);
+  assert.match(tokenCall.sql, /WITH watermark AS MATERIALIZED/);
+  assert.match(tokenCall.sql, /s\.block_number <= w\.last_processed_block/);
+  assert.match(tokenCall.sql, /w\.last_processed_at - interval '24 hours'/);
+  assert.doesNotMatch(tokenCall.sql, /now\(\) - interval '24 hours'/);
+  assert.match(tokenCall.sql, /pool_market_totals/);
+  assert.doesNotMatch(tokenCall.sql, /total_swap_stats/);
+  const transactionCall = database.calls.find((call) => call.transactionOptions);
+  assert.equal(transactionCall.transactionOptions.isolationLevel, "RepeatableRead");
+  assert.equal(transactionCall.transactionOptions.readOnly, true);
+  assert.equal(transactionCall.transactionOptions.deferrable, true);
+});
+
+test("stale market precheck never opens a token snapshot", async () => {
+  const database = databaseFor({
+    watermarkRows: [readyWatermarkRow({ observed_at: "2020-01-01T00:00:00.000Z" })],
+    tokenRows: [liveTokenRow()],
+  });
+  await assert.rejects(
+    readModel.listLiveTokens(database, { limit: 10, cursor: null }),
+    /not ready/,
+  );
+  assert.equal(database.calls.length, 1);
+  assert.equal(database.calls[0].sql, readModel.INDEXER_WATERMARK_SQL);
+});
+
+test("market response uses the watermark and token rows from one concurrent snapshot", async () => {
+  const precheck = readyWatermarkRow({
+    next_block: "125",
+    last_processed_block: "124",
+    observed_safe_head: "124",
+  });
+  const snapshot = readyWatermarkRow({
+    next_block: "127",
+    last_processed_block: "126",
+    observed_safe_head: "126",
+  });
+  const database = databaseFor({
+    watermarkRows: [precheck],
+    snapshotWatermarkRows: [snapshot],
+    tokenRows: [liveTokenRow({ block_number: "125" })],
+  });
+  const result = await readModel.listLiveTokens(database, { limit: 10, cursor: null });
+  assert.equal(result.indexer.lastProcessedBlock, "126");
+  assert.equal(result.tokens[0].blockNumber, "125");
+  assert.deepEqual(
+    database.calls.slice(1, 3).map((call) => ({ sql: call.sql, inTransaction: call.inTransaction })),
+    [
+      { sql: readModel.MARKET_SNAPSHOT_WATERMARK_SQL, inTransaction: true },
+      { sql: readModel.TOKEN_LIST_SQL, inTransaction: true },
+    ],
+  );
 });
 
 test("market routes set explicit cache policy and never expose backend errors", async () => {
@@ -212,6 +302,44 @@ test("token detail is address-parameterized and distinguishes not found", async 
   assert.ok(tokenCall);
   assert.deepEqual(tokenCall.params, [4663, address("a")]);
   assert.doesNotMatch(tokenCall.sql, new RegExp(address("a")));
+  assert.equal((await ok.json()).token.logoGatewayUrl, null);
+
+  const previousGateway = process.env.IPFS_GATEWAY_BASE_URL;
+  const artworkCid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  process.env.IPFS_GATEWAY_BASE_URL = "https://laypipe-test.mypinata.cloud";
+  try {
+    const artwork = await http.handleTokenDetailRequest(address("a"), {
+      marketMode: () => "live",
+      database: async () =>
+        databaseFor({
+          tokenRows: [liveTokenRow({
+            logo_uri: `ipfs://${artworkCid}`,
+            approved_logo_cid: artworkCid,
+          })],
+        }),
+    });
+    assert.equal(artwork.status, 200);
+    assert.equal(
+      (await artwork.json()).token.logoGatewayUrl,
+      `https://laypipe-test.mypinata.cloud/ipfs/${artworkCid}`,
+    );
+  } finally {
+    if (previousGateway === undefined) delete process.env.IPFS_GATEWAY_BASE_URL;
+    else process.env.IPFS_GATEWAY_BASE_URL = previousGateway;
+  }
+
+  const unapproved = await http.handleTokenDetailRequest(address("a"), {
+    marketMode: () => "live",
+    database: async () => databaseFor({
+      tokenRows: [liveTokenRow({
+        logo_uri: `ipfs://${artworkCid}`,
+        metadata_uri: `ipfs://${artworkCid}`,
+        approved_logo_cid: null,
+      })],
+    }),
+  });
+  assert.equal(unapproved.status, 200);
+  assert.equal((await unapproved.json()).token.logoGatewayUrl, null);
 
   const missing = await http.handleTokenDetailRequest(address("f"), {
     marketMode: () => "live",
@@ -271,9 +399,19 @@ test("detail and health routes validate identifiers and readiness", async () => 
     },
   });
 
+  const fixtureReadiness = await http.handleMarketHealthRequest(
+    {
+      marketMode: () => "fixture",
+      database: async () => { throw new Error("must not connect"); },
+    },
+    { requireLive: true },
+  );
+  assert.equal(fixtureReadiness.status, 503);
+  assert.equal((await fixtureReadiness.json()).readyForLiveMarkets, false);
+
   const liveNotReady = await http.handleMarketHealthRequest({
     marketMode: () => "live",
-    database: async () => databaseFor(),
+    database: async () => databaseFor({ watermarkRows: [] }),
   });
   assert.equal(liveNotReady.status, 503);
   assert.deepEqual(await liveNotReady.json(), {
@@ -313,19 +451,18 @@ test("fixture mode gates public live-token APIs before any database access", asy
   assert.equal(databaseCalls, 0);
 });
 
-test("live health reports DB and indexer readiness without claiming freshness", async () => {
+test("live health requires a recent indexer cursor and rejects stale or future watermarks", async () => {
+  const now = new Date("2026-08-11T12:11:00.000Z").getTime();
   const ready = await http.handleMarketHealthRequest({
     marketMode: () => "live",
+    now: () => now,
     database: async () =>
       databaseFor({
         watermarkRows: [
-          {
-            stream: "laypipe",
-            next_block: "125",
-            last_processed_block: "124",
-            last_processed_hash: hash("a"),
+          readyWatermarkRow({
+            observed_at: "2026-08-11T12:10:00.000Z",
             updated_at: "2026-08-11T12:10:00.000Z",
-          },
+          }),
         ],
       }),
   });
@@ -337,8 +474,164 @@ test("live health reports DB and indexer readiness without claiming freshness", 
   assert.equal(body.readyForLiveMarkets, true);
   assert.equal(body.database.status, "reachable");
   assert.equal(body.indexer.status, "ready");
-  assert.equal(body.indexer.freshness, "not_assessed");
+  assert.deepEqual(body.indexer.freshness, {
+    status: "fresh",
+    ageSeconds: 60,
+    staleAfterSeconds: 300,
+    blockLag: 0,
+    maxBlockLag: 2,
+  });
   assert.equal(body.indexer.cursor.lastProcessedBlock, "124");
+
+  const regressedHead = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () =>
+      databaseFor({
+        watermarkRows: [
+          readyWatermarkRow({
+            last_processed_block: "125",
+            next_block: "126",
+            observed_safe_head: "124",
+            observed_at: "2026-08-11T12:10:59.000Z",
+          }),
+        ],
+      }),
+  });
+  assert.equal(regressedHead.status, 503);
+  const regressedBody = await regressedHead.json();
+  assert.equal(regressedBody.indexer.freshness.reason, "observation_behind_cursor");
+  assert.equal(regressedBody.indexer.freshness.blockLag, null);
+
+  const stale = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () =>
+      databaseFor({
+        watermarkRows: [
+          readyWatermarkRow({
+            observed_at: "2026-08-11T12:05:59.000Z",
+            updated_at: "2026-08-11T12:05:59.000Z",
+          }),
+        ],
+      }),
+  });
+  assert.equal(stale.status, 503);
+  const staleBody = await stale.json();
+  assert.equal(staleBody.readyForLiveMarkets, false);
+  assert.equal(staleBody.indexer.status, "stale");
+  assert.equal(staleBody.indexer.freshness.reason, "observation_too_old");
+
+  const uninitialized = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () =>
+      databaseFor({
+        watermarkRows: [
+          {
+            stream: "laypipe",
+            next_block: "100",
+            last_processed_block: null,
+            last_processed_hash: null,
+            observed_safe_head: "124",
+            observed_at: "2026-08-11T12:10:59.000Z",
+            last_run_status: "caught-up",
+            updated_at: "2026-08-11T12:10:59.000Z",
+          },
+        ],
+      }),
+  });
+  assert.equal(uninitialized.status, 503);
+  const uninitializedBody = await uninitialized.json();
+  assert.equal(uninitializedBody.readyForLiveMarkets, false);
+  assert.equal(uninitializedBody.indexer.status, "stale");
+  assert.equal(
+    uninitializedBody.indexer.freshness.reason,
+    "cursor_uninitialized",
+  );
+
+  const inconsistent = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () =>
+      databaseFor({
+        watermarkRows: [
+          {
+            stream: "laypipe",
+            next_block: "125",
+            last_processed_block: "124",
+            last_processed_hash: null,
+            observed_safe_head: "124",
+            observed_at: "2026-08-11T12:10:59.000Z",
+            last_run_status: "caught-up",
+            updated_at: "2026-08-11T12:10:59.000Z",
+          },
+        ],
+      }),
+  });
+  assert.equal(inconsistent.status, 503);
+  assert.equal((await inconsistent.json()).status, "unavailable");
+
+  const future = readModel.assessIndexerFreshness(
+    {
+      stream: "laypipe",
+      nextBlock: "125",
+      lastProcessedBlock: "124",
+      lastProcessedHash: hash("a"),
+      updatedAt: "2026-08-11T12:12:00.000Z",
+      observedSafeHead: "124",
+      observedAt: "2026-08-11T12:12:00.000Z",
+      lastRunStatus: "caught-up",
+    },
+    now,
+  );
+  assert.equal(future.status, "stale");
+  assert.equal(future.reason, "observation_from_future");
+
+  const behindDatabase = databaseFor({
+    tokenRows: [liveTokenRow()],
+    watermarkRows: [readyWatermarkRow({
+      observed_safe_head: "1000",
+      observed_at: "2026-08-11T12:10:59.000Z",
+      updated_at: "2026-08-11T12:10:59.000Z",
+    })],
+  });
+  const behindHealth = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () => behindDatabase,
+  });
+  assert.equal(behindHealth.status, 503);
+  assert.equal(
+    (await behindHealth.json()).indexer.freshness.reason,
+    "block_lag_too_high",
+  );
+  const behindList = await http.handleTokenListRequest(
+    new Request("https://laypipe.fun/api/tokens"),
+    {
+      marketMode: () => "live",
+      now: () => now,
+      database: async () => behindDatabase,
+    },
+  );
+  assert.equal(behindList.status, 503);
+  assert.equal(behindList.headers.get("cache-control"), "no-store");
+
+  const bounded = readModel.assessIndexerFreshness(
+    {
+      stream: "laypipe",
+      nextBlock: "125",
+      lastProcessedBlock: "124",
+      lastProcessedHash: hash("a"),
+      updatedAt: "2026-08-11T12:10:59.000Z",
+      observedSafeHead: "124",
+      observedAt: "2026-08-11T12:10:59.000Z",
+      lastRunStatus: "bounded",
+    },
+    now,
+  );
+  assert.equal(bounded.status, "stale");
+  assert.equal(bounded.reason, "indexer_not_caught_up");
 
   const unavailable = await http.handleMarketHealthRequest({
     marketMode: () => "live",

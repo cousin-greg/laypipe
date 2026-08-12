@@ -57,6 +57,10 @@ function loadTypeScript(relativePath) {
 const artwork = loadTypeScript("lib/ipfs/artwork.ts");
 const metadata = loadTypeScript("lib/ipfs/metadata.ts");
 const pinClient = await tsImport("../lib/ipfs/pin-client.ts", import.meta.url);
+const challengeMessage = await tsImport(
+  "../lib/ipfs/challenge-message.ts",
+  import.meta.url,
+);
 const abi = loadTypeScript("lib/web3/abi.ts");
 const launchClient = loadTypeScript("lib/web3/launch-client.ts");
 const launchMachine = loadTypeScript("lib/web3/launch-machine.ts");
@@ -180,6 +184,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
     let signatures = 0;
     let finalCalls = 0;
     const internalUrls = [];
+    const issuedChallenges = {};
     const provider = {
       async request({ method, params }) {
         if (method === "eth_accounts") {
@@ -204,12 +209,26 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
           body.contentDigest,
           body.action === "stage" ? stageDigest : pinDigest,
         );
-        expectedMessage = `${body.action} exact server message`;
+        const issuedAt = Math.floor(Date.now() / 1000);
+        const challengePayload = {
+          v: challengeMessage.WALLET_CHALLENGE_VERSION,
+          wallet: wallet.toLowerCase(),
+          action: body.action,
+          digest: body.contentDigest,
+          nonce: `${body.action}_nonce_for_exact_artwork`,
+          issuedAt,
+          expiresAt: issuedAt + challengeMessage.WALLET_CHALLENGE_TTL_SECONDS,
+        };
+        const encoded = Buffer.from(JSON.stringify(challengePayload)).toString("base64url");
+        issuedChallenges[body.action] = `${encoded}.${Buffer.alloc(32, 7).toString("base64url")}`;
+        expectedMessage = challengeMessage.buildChallengeMessage(challengePayload);
         return Response.json(
           {
-            challenge: `${body.action}-opaque-challenge`,
-            message: expectedMessage,
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            challenge: issuedChallenges[body.action],
+            message: options.challengeMessageDrift
+              ? `${expectedMessage}\nAuthorize an unrelated login.`
+              : expectedMessage,
+            expiresAt: new Date(challengePayload.expiresAt * 1000).toISOString(),
           },
           { status: 201 },
         );
@@ -218,7 +237,7 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
         const body = JSON.parse(init.body);
         assert.equal(body.wallet, wallet);
         assert.equal(body.fileSha256, fileSha256);
-        assert.equal(body.challenge, "stage-opaque-challenge");
+        assert.equal(body.challenge, issuedChallenges.stage);
         assert.match(body.signature, /^0x[0-9a-f]{130}$/);
         return Response.json(
           {
@@ -243,14 +262,16 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
         const body = JSON.parse(init.body);
         assert.equal(body.stagedCid, stagedCid);
         assert.equal(body.stagedFileId, stagedFileId);
-        assert.equal(body.challenge, "pin-opaque-challenge");
+        assert.equal(body.challenge, issuedChallenges.pin);
         assert.deepEqual(body.metadata, draft);
         return Response.json(
           {
             image: {
               cid: imageCid,
               uri: imageUri,
-              gatewayUrl: `https://laypipe.mypinata.cloud/ipfs/${imageCid}`,
+              gatewayUrl:
+                options.gatewayUrl ??
+                `https://laypipe.mypinata.cloud/ipfs/${imageCid}`,
             },
             metadata: {
               cid: metadataCid,
@@ -334,6 +355,36 @@ test("pinning uses signed same-origin staging and fails closed on drift", async 
     /wallet changed/,
   );
   assert.equal(drifted.observations().finalCalls, 0);
+
+  const messageDrift = flow({ challengeMessageDrift: true });
+  await assert.rejects(
+    pinClient.pinLaunchAssets({
+      file,
+      metadata: draft,
+      wallet,
+      provider: messageDrift.provider,
+      browserOrigin: "https://laypipe.fun",
+      fetcher: messageDrift.fetcher,
+    }),
+    /invalid challenge/,
+  );
+  assert.equal(messageDrift.observations().signatures, 0);
+  assert.equal(messageDrift.observations().finalCalls, 0);
+
+  const wrongGateway = flow({
+    gatewayUrl: `https://attacker.example/ipfs/${imageCid}`,
+  });
+  await assert.rejects(
+    pinClient.pinLaunchAssets({
+      file,
+      metadata: draft,
+      wallet,
+      provider: wrongGateway.provider,
+      browserOrigin: "https://laypipe.fun",
+      fetcher: wrongGateway.fetcher,
+    }),
+    /configured Pinata HTTPS CID path/,
+  );
 });
 
 test("approval planning never emits an unlimited approval", () => {
@@ -447,7 +498,7 @@ test("launch config decoder handles signed int24 and rejects malformed booleans"
   );
 });
 
-test("launch receipt is bound to hash, factory, creator, event, and prediction", async () => {
+test("wallet receipt polling remains bound to hash, factory, and creator", async () => {
   const factory = "0x2222222222222222222222222222222222222222";
   const creator = "0x3333333333333333333333333333333333333333";
   const token = "0x44444444444444444444444444444444444444cc";
@@ -476,20 +527,11 @@ test("launch receipt is bound to hash, factory, creator, event, and prediction",
   };
   const provider = { request: async () => receipt };
   const client = new launchClient.LaypipeLaunchClient(provider, factory);
-  const confirmed = await client.confirmLaunch(hash, {
-    creator,
-    predictedToken: token,
+  const confirmed = await client.waitForReceipt(hash, {
+    expectedFrom: creator,
+    expectedTo: factory,
   });
-  assert.equal(confirmed.token.toLowerCase(), token.toLowerCase());
-  assert.equal(confirmed.poolId, poolId);
-
-  await assert.rejects(
-    client.confirmLaunch(hash, {
-      creator,
-      predictedToken: "0x55555555555555555555555555555555555555cc",
-    }),
-    /does not match the mined prediction/,
-  );
+  assert.equal(confirmed.transactionHash, hash);
   await assert.rejects(
     client.waitForReceipt(`0x${"aa".repeat(32)}`),
     /different transaction/,

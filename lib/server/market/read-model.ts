@@ -1,5 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { DbClient, DbRow } from "../db/neon";
+import {
+  DATABASE_READ_TIMEOUT_MS,
+  databaseFetchOptions,
+  type DbClient,
+  type DbRow,
+} from "../db/neon";
 import {
   LAYPIPE_CHAIN_ID,
   type IndexerWatermark,
@@ -9,9 +14,13 @@ import {
   type PipedogPriceRatio,
 } from "../../market/live";
 import { normalizeAddress, normalizeBytes32, normalizeUint256 } from "../indexer/model";
+import { ipfsCidFromUri, resolveIpfsGatewayUrl } from "../../ipfs/gateway";
 
 export const TOKEN_LIST_DEFAULT_LIMIT = 20;
 export const TOKEN_LIST_MAX_LIMIT = 50;
+export const MARKET_INDEXER_STALE_AFTER_MS = 5 * 60 * 1_000;
+export const MARKET_INDEXER_MAX_CLOCK_SKEW_MS = 30 * 1_000;
+export const MARKET_INDEXER_MAX_BLOCK_LAG = 2;
 const INDEXER_STREAM = "laypipe";
 const CURSOR_DOMAIN = "laypipe.market.cursor.v1";
 
@@ -161,6 +170,25 @@ export function parseLiveTokenSlug(value: string) {
   }
 }
 
+const MARKET_SNAPSHOT_WATERMARK_CTE = `watermark AS MATERIALIZED (
+  SELECT c.last_processed_block, b.block_timestamp AS last_processed_at
+  FROM indexer_cursors c
+  JOIN chain_blocks b
+    ON b.chain_id = c.chain_id
+    AND b.block_number = c.last_processed_block
+    AND b.block_hash = c.last_processed_hash
+  WHERE c.chain_id = $1::bigint AND c.stream = '${INDEXER_STREAM}'
+    AND c.last_processed_block IS NOT NULL
+    AND c.last_processed_hash IS NOT NULL
+    AND c.observed_safe_head IS NOT NULL
+    AND c.observed_at IS NOT NULL
+    AND c.last_run_status = 'caught-up'
+    AND c.observed_safe_head >= c.last_processed_block
+    AND c.observed_safe_head - c.last_processed_block <= ${MARKET_INDEXER_MAX_BLOCK_LAG}
+    AND c.observed_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
+    AND c.observed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'
+)`;
+
 const TOKEN_METRICS_CTES = `
 , latest_swap AS (
   SELECT DISTINCT ON (s.pool_id)
@@ -168,7 +196,10 @@ const TOKEN_METRICS_CTES = `
     s.token_amount::text AS last_token_amount, s.block_timestamp::text AS last_trade_at
   FROM swaps s
   JOIN selected p ON p.pool_id = s.pool_id AND p.chain_id = s.chain_id
+  CROSS JOIN watermark w
   WHERE s.token_amount > 0
+    AND s.block_number <= w.last_processed_block
+    AND s.block_timestamp <= w.last_processed_at
   ORDER BY s.pool_id, s.block_number DESC, s.log_index DESC
 ), baseline_swap AS (
   SELECT DISTINCT ON (s.pool_id)
@@ -176,39 +207,60 @@ const TOKEN_METRICS_CTES = `
     s.token_amount::text AS baseline_token_amount
   FROM swaps s
   JOIN selected p ON p.pool_id = s.pool_id AND p.chain_id = s.chain_id
-  WHERE s.token_amount > 0 AND s.block_timestamp >= now() - interval '24 hours'
+  CROSS JOIN watermark w
+  WHERE s.token_amount > 0
+    AND s.block_number <= w.last_processed_block
+    AND s.block_timestamp > w.last_processed_at - interval '24 hours'
+    AND s.block_timestamp <= w.last_processed_at
   ORDER BY s.pool_id, s.block_number ASC, s.log_index ASC
 ), swap_stats AS (
   SELECT s.pool_id,
-    count(*)::text AS total_trades,
-    count(*) FILTER (WHERE s.block_timestamp >= now() - interval '24 hours')::text AS trades_24h,
-    coalesce(sum(s.pipedog_amount) FILTER (
-      WHERE s.block_timestamp >= now() - interval '24 hours'
-    ), 0)::text AS volume_24h_pipedog
+    count(*)::text AS trades_24h,
+    coalesce(sum(s.pipedog_amount), 0)::text AS volume_24h_pipedog
   FROM swaps s
   JOIN selected p ON p.pool_id = s.pool_id AND p.chain_id = s.chain_id
+  CROSS JOIN watermark w
+  WHERE s.token_amount > 0
+    AND s.block_number <= w.last_processed_block
+    AND s.block_timestamp > w.last_processed_at - interval '24 hours'
+    AND s.block_timestamp <= w.last_processed_at
   GROUP BY s.pool_id
 )
 SELECT p.chain_id::text, p.token_address, p.pool_id, p.creator_address,
   p.config_id::text, p.first_buy_in::text, p.first_buy_out::text,
   p.hook_address, p.fee_recipient_address, p.fee_mode, p.name, p.symbol,
-  p.description, p.logo_uri, p.metadata_uri, p.socials,
+  p.description, p.logo_uri, p.metadata_uri, approved_artwork.image_cid AS approved_logo_cid,
+  p.socials,
   p.block_number::text, p.log_index, p.launched_at::text,
   ls.last_pipedog_amount, ls.last_token_amount, ls.last_trade_at,
   bs.baseline_pipedog_amount, bs.baseline_token_amount,
   coalesce(ss.volume_24h_pipedog, '0') AS volume_24h_pipedog,
   coalesce(ss.trades_24h, '0') AS trades_24h,
-  coalesce(ss.total_trades, '0') AS total_trades
+  coalesce(mt.total_trades::text, '0') AS total_trades
 FROM selected p
+LEFT JOIN LATERAL (
+  SELECT promotion.image_cid
+  FROM ipfs_promotions promotion
+  WHERE promotion.status = 'completed'
+    AND promotion.image_cid = substring(p.logo_uri FROM 8)
+    AND promotion.metadata_cid = substring(p.metadata_uri FROM 8)
+    AND p.logo_uri = 'ipfs://' || promotion.image_cid
+    AND p.metadata_uri = 'ipfs://' || promotion.metadata_cid
+  LIMIT 1
+) approved_artwork ON true
 LEFT JOIN latest_swap ls ON ls.pool_id = p.pool_id
 LEFT JOIN baseline_swap bs ON bs.pool_id = p.pool_id
-LEFT JOIN swap_stats ss ON ss.pool_id = p.pool_id`;
+LEFT JOIN swap_stats ss ON ss.pool_id = p.pool_id
+LEFT JOIN pool_market_totals mt
+  ON mt.chain_id = p.chain_id AND mt.pool_id = p.pool_id`;
 
 export const TOKEN_LIST_SQL = `
-WITH selected AS (
+WITH ${MARKET_SNAPSHOT_WATERMARK_CTE}, selected AS (
   SELECT l.*
   FROM launches l
+  CROSS JOIN watermark w
   WHERE l.chain_id = $1::bigint
+    AND l.block_number <= w.last_processed_block
     AND (
       $2::bigint IS NULL
       OR (l.block_number, l.log_index, l.token_address)
@@ -221,19 +273,42 @@ ${TOKEN_METRICS_CTES}
 ORDER BY p.block_number DESC, p.log_index DESC, p.token_address DESC`;
 
 export const TOKEN_DETAIL_SQL = `
-WITH selected AS (
+WITH ${MARKET_SNAPSHOT_WATERMARK_CTE}, selected AS (
   SELECT l.*
   FROM launches l
+  CROSS JOIN watermark w
   WHERE l.chain_id = $1::bigint AND l.token_address = $2::evm_address
+    AND l.block_number <= w.last_processed_block
   LIMIT 1
 )
 ${TOKEN_METRICS_CTES}`;
 
 export const INDEXER_WATERMARK_SQL = `
 SELECT stream, next_block::text, last_processed_block::text,
-  last_processed_hash, updated_at::text
+  last_processed_hash, observed_safe_head::text, observed_at::text,
+  last_run_status, updated_at::text
 FROM indexer_cursors
 WHERE chain_id = $1::bigint AND stream = $2::text`;
+
+export const MARKET_SNAPSHOT_WATERMARK_SQL = `
+SELECT c.stream, c.next_block::text, c.last_processed_block::text,
+  c.last_processed_hash, c.observed_safe_head::text, c.observed_at::text,
+  c.last_run_status, c.updated_at::text
+FROM indexer_cursors c
+JOIN chain_blocks b
+  ON b.chain_id = c.chain_id
+  AND b.block_number = c.last_processed_block
+  AND b.block_hash = c.last_processed_hash
+WHERE c.chain_id = $1::bigint AND c.stream = $2::text
+  AND c.last_processed_block IS NOT NULL
+  AND c.last_processed_hash IS NOT NULL
+  AND c.observed_safe_head IS NOT NULL
+  AND c.observed_at IS NOT NULL
+  AND c.last_run_status = 'caught-up'
+  AND c.observed_safe_head >= c.last_processed_block
+  AND c.observed_safe_head - c.last_processed_block <= ${MARKET_INDEXER_MAX_BLOCK_LAG}
+  AND c.observed_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
+  AND c.observed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'`;
 
 interface TokenRow extends DbRow {
   chain_id: string;
@@ -251,6 +326,7 @@ interface TokenRow extends DbRow {
   description: string | null;
   logo_uri: string | null;
   metadata_uri: string | null;
+  approved_logo_cid: string | null;
   socials: unknown;
   block_number: string;
   log_index: number;
@@ -270,6 +346,9 @@ interface WatermarkRow extends DbRow {
   next_block: string;
   last_processed_block: string | null;
   last_processed_hash: string | null;
+  observed_safe_head: string | null;
+  observed_at: string | null;
+  last_run_status: string | null;
   updated_at: string;
 }
 
@@ -291,6 +370,19 @@ function nullableText(value: unknown, label: string) {
   if (value === null) return null;
   if (typeof value !== "string") throw new Error(`${label} is not text.`);
   return value;
+}
+
+function approvedLogoGatewayUrl(value: unknown) {
+  const cid = nullableText(value, "Approved artwork CID");
+  if (!cid) return null;
+  if (ipfsCidFromUri(`ipfs://${cid}`) !== cid) {
+    throw new Error("Approved artwork CID is invalid.");
+  }
+  return resolveIpfsGatewayUrl({
+    cid,
+    configured: process.env.IPFS_GATEWAY_BASE_URL,
+    requireConfigured: process.env.NODE_ENV === "production",
+  });
 }
 
 function timestamp(value: string, label: string) {
@@ -355,6 +447,7 @@ function mapToken(row: TokenRow): LiveMarketToken {
     symbol: nullableText(row.symbol, "Indexed token symbol"),
     description: nullableText(row.description, "Indexed token description"),
     logoUri: nullableText(row.logo_uri, "Indexed logo URI"),
+    logoGatewayUrl: approvedLogoGatewayUrl(row.approved_logo_cid),
     metadataUri: nullableText(row.metadata_uri, "Indexed metadata URI"),
     socials: socials(row.socials),
     blockNumber: normalizeUint256(row.block_number, "Indexed launch block"),
@@ -405,13 +498,24 @@ function mapToken(row: TokenRow): LiveMarketToken {
   };
 }
 
-async function loadWatermark(database: DbClient): Promise<IndexerWatermark | null> {
-  const rows = await database.query<WatermarkRow>(INDEXER_WATERMARK_SQL, [
-    LAYPIPE_CHAIN_ID,
-    INDEXER_STREAM,
-  ]);
-  const row = rows[0];
-  if (!row) return null;
+function mapWatermark(row: WatermarkRow): IndexerWatermark {
+  const hasLastBlock = row.last_processed_block !== null;
+  const hasLastHash = row.last_processed_hash !== null;
+  if (hasLastBlock !== hasLastHash) {
+    throw new Error("Indexer watermark is internally inconsistent.");
+  }
+  let lastRunStatus: IndexerWatermark["lastRunStatus"];
+  if (
+    row.last_run_status === "caught-up" ||
+    row.last_run_status === "bounded" ||
+    row.last_run_status === "deadline"
+  ) {
+    lastRunStatus = row.last_run_status;
+  } else if (row.last_run_status === null) {
+    lastRunStatus = null;
+  } else {
+    throw new Error("Indexer run status is invalid.");
+  }
   return {
     stream: row.stream,
     nextBlock: normalizeUint256(row.next_block, "Indexer next block"),
@@ -424,29 +528,84 @@ async function loadWatermark(database: DbClient): Promise<IndexerWatermark | nul
         ? null
         : normalizeBytes32(row.last_processed_hash, "Indexer last hash"),
     updatedAt: timestamp(row.updated_at, "Indexer update time"),
+    observedSafeHead:
+      row.observed_safe_head === null
+        ? null
+        : normalizeUint256(row.observed_safe_head, "Observed safe head"),
+    observedAt:
+      row.observed_at === null
+        ? null
+        : timestamp(row.observed_at, "Indexer observation time"),
+    lastRunStatus,
   };
 }
+
+async function loadWatermark(database: DbClient): Promise<IndexerWatermark | null> {
+  const rows = await database.query<WatermarkRow>(
+    INDEXER_WATERMARK_SQL,
+    [LAYPIPE_CHAIN_ID, INDEXER_STREAM],
+    databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+  );
+  const row = rows[0];
+  return row ? mapWatermark(row) : null;
+}
+
+async function requireFreshMarketPrecheck(database: DbClient, nowMs: number) {
+  const indexer = await loadWatermark(database);
+  if (!indexer || assessIndexerFreshness(indexer, nowMs).status !== "fresh") {
+    throw new Error("Live market indexer is not ready.");
+  }
+}
+
+const MARKET_SNAPSHOT_TRANSACTION_OPTIONS = {
+  isolationLevel: "RepeatableRead",
+  readOnly: true,
+  deferrable: true,
+} as const;
 
 export async function listLiveTokens(
   database: DbClient,
   options: { limit: number; cursor: CursorValue | null },
   cursorSecret = readMarketCursorSecret(),
+  nowMs = Date.now(),
 ): Promise<LiveTokenListResponse> {
   const limit = options.limit;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > TOKEN_LIST_MAX_LIMIT) {
     throw new MarketInputError(`limit must be between 1 and ${TOKEN_LIST_MAX_LIMIT}.`);
   }
   const cursor = options.cursor;
-  const [rows, indexer] = await Promise.all([
-    database.query<TokenRow>(TOKEN_LIST_SQL, [
-      LAYPIPE_CHAIN_ID,
-      cursor?.blockNumber ?? null,
-      cursor?.logIndex ?? null,
-      cursor?.tokenAddress ?? null,
-      limit + 1,
-    ]),
-    loadWatermark(database),
-  ]);
+  await requireFreshMarketPrecheck(database, nowMs);
+  const [watermarkRows, rows] = await database.transaction(
+    (transaction) => [
+      transaction.query<WatermarkRow>(
+        MARKET_SNAPSHOT_WATERMARK_SQL,
+        [LAYPIPE_CHAIN_ID, INDEXER_STREAM],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+      transaction.query<TokenRow>(
+        TOKEN_LIST_SQL,
+        [
+          LAYPIPE_CHAIN_ID,
+          cursor?.blockNumber ?? null,
+          cursor?.logIndex ?? null,
+          cursor?.tokenAddress ?? null,
+          limit + 1,
+        ],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+    ] as const,
+    {
+      ...MARKET_SNAPSHOT_TRANSACTION_OPTIONS,
+      fetchOptions: { signal: AbortSignal.timeout(DATABASE_READ_TIMEOUT_MS) },
+    },
+  );
+  if (watermarkRows.length !== 1) {
+    throw new Error("Live market indexer is not ready.");
+  }
+  const indexer = mapWatermark(watermarkRows[0]);
+  if (assessIndexerFreshness(indexer, nowMs).status !== "fresh") {
+    throw new Error("Live market indexer is not ready.");
+  }
   const visible = rows.slice(0, limit);
   const last = visible.at(-1);
   return {
@@ -471,12 +630,35 @@ export async function listLiveTokens(
 export async function getLiveToken(
   database: DbClient,
   slug: string,
+  nowMs = Date.now(),
 ): Promise<LiveTokenDetailResponse | null> {
   const address = parseLiveTokenSlug(slug);
-  const [rows, indexer] = await Promise.all([
-    database.query<TokenRow>(TOKEN_DETAIL_SQL, [LAYPIPE_CHAIN_ID, address]),
-    loadWatermark(database),
-  ]);
+  await requireFreshMarketPrecheck(database, nowMs);
+  const [watermarkRows, rows] = await database.transaction(
+    (transaction) => [
+      transaction.query<WatermarkRow>(
+        MARKET_SNAPSHOT_WATERMARK_SQL,
+        [LAYPIPE_CHAIN_ID, INDEXER_STREAM],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+      transaction.query<TokenRow>(
+        TOKEN_DETAIL_SQL,
+        [LAYPIPE_CHAIN_ID, address],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+    ] as const,
+    {
+      ...MARKET_SNAPSHOT_TRANSACTION_OPTIONS,
+      fetchOptions: { signal: AbortSignal.timeout(DATABASE_READ_TIMEOUT_MS) },
+    },
+  );
+  if (watermarkRows.length !== 1) {
+    throw new Error("Live market indexer is not ready.");
+  }
+  const indexer = mapWatermark(watermarkRows[0]);
+  if (assessIndexerFreshness(indexer, nowMs).status !== "fresh") {
+    throw new Error("Live market indexer is not ready.");
+  }
   const row = rows[0];
   if (!row) return null;
   return {
@@ -489,4 +671,127 @@ export async function getLiveToken(
 
 export async function getMarketHealth(database: DbClient) {
   return loadWatermark(database);
+}
+
+export type IndexerFreshness =
+  | {
+      status: "fresh";
+      ageSeconds: number;
+      staleAfterSeconds: number;
+      blockLag: number;
+      maxBlockLag: number;
+    }
+  | {
+      status: "stale";
+      ageSeconds: number;
+      staleAfterSeconds: number;
+      blockLag: number | null;
+      maxBlockLag: number;
+      reason:
+        | "cursor_uninitialized"
+        | "observation_missing"
+        | "observation_too_old"
+        | "observation_from_future"
+        | "observation_behind_cursor"
+        | "indexer_not_caught_up"
+        | "block_lag_too_high";
+    };
+
+export function assessIndexerFreshness(
+  watermark: IndexerWatermark,
+  nowMs = Date.now(),
+): IndexerFreshness {
+  if (!Number.isFinite(nowMs)) throw new Error("Indexer freshness clock is invalid.");
+  const observedAtMs = watermark.observedAt
+    ? new Date(watermark.observedAt).getTime()
+    : Number.NaN;
+  const ageMs = nowMs - observedAtMs;
+  const ageSeconds = Number.isFinite(ageMs)
+    ? Math.max(0, Math.floor(ageMs / 1_000))
+    : 0;
+  const staleAfterSeconds = MARKET_INDEXER_STALE_AFTER_MS / 1_000;
+  const maxBlockLag = MARKET_INDEXER_MAX_BLOCK_LAG;
+  if (
+    watermark.lastProcessedBlock === null ||
+    watermark.lastProcessedHash === null
+  ) {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag: null,
+      maxBlockLag,
+      reason: "cursor_uninitialized",
+    };
+  }
+  if (
+    watermark.observedSafeHead === null ||
+    watermark.observedAt === null ||
+    watermark.lastRunStatus === null ||
+    !Number.isFinite(observedAtMs)
+  ) {
+    return {
+      status: "stale",
+      ageSeconds: 0,
+      staleAfterSeconds,
+      blockLag: null,
+      maxBlockLag,
+      reason: "observation_missing",
+    };
+  }
+  const rawLag = BigInt(watermark.observedSafeHead) - BigInt(watermark.lastProcessedBlock);
+  if (rawLag < BigInt(0)) {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag: null,
+      maxBlockLag,
+      reason: "observation_behind_cursor",
+    };
+  }
+  const blockLag = rawLag > BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number.MAX_SAFE_INTEGER
+    : Number(rawLag);
+  if (ageMs < -MARKET_INDEXER_MAX_CLOCK_SKEW_MS) {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag,
+      maxBlockLag,
+      reason: "observation_from_future",
+    };
+  }
+  if (ageMs > MARKET_INDEXER_STALE_AFTER_MS) {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag,
+      maxBlockLag,
+      reason: "observation_too_old",
+    };
+  }
+  if (watermark.lastRunStatus !== "caught-up") {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag,
+      maxBlockLag,
+      reason: "indexer_not_caught_up",
+    };
+  }
+  if (blockLag > maxBlockLag) {
+    return {
+      status: "stale",
+      ageSeconds,
+      staleAfterSeconds,
+      blockLag,
+      maxBlockLag,
+      reason: "block_lag_too_high",
+    };
+  }
+  return { status: "fresh", ageSeconds, staleAfterSeconds, blockLag, maxBlockLag };
 }

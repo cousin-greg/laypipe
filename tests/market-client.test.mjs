@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
+const multiformatsCid = await import("multiformats/cid");
 const ts = require("typescript");
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cache = new Map();
@@ -24,6 +25,7 @@ function loadTypeScript(relativePath) {
     fileName: filename,
   }).outputText;
   const localRequire = (specifier) => {
+    if (specifier === "multiformats/cid") return multiformatsCid;
     if (!specifier.startsWith(".") && !specifier.startsWith("@/")) {
       return require(specifier);
     }
@@ -64,6 +66,7 @@ function liveToken(tokenAddress = `0x${"a".repeat(40)}`) {
     symbol: "CURSOR",
     description: null,
     logoUri: null,
+    logoGatewayUrl: null,
     metadataUri: null,
     socials: null,
     blockNumber: "123",
@@ -198,6 +201,20 @@ test("live adapter requests and returns the server keyset cursor", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("live adapter accepts only canonical Pinata artwork URLs", () => {
+  const cid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  const trusted = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    logoGatewayUrl: `https://laypipe.mypinata.cloud/ipfs/${cid}`,
+  });
+  assert.equal(trusted.artworkUrl, `https://laypipe.mypinata.cloud/ipfs/${cid}`);
+  const rejected = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    logoGatewayUrl: `https://attacker.example/ipfs/${cid}`,
+  });
+  assert.equal(rejected.artworkUrl, null);
 });
 
 test("shared provider owns polling, visibility pause, and pagination", () => {

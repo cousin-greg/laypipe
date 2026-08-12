@@ -8,7 +8,10 @@ import test from "node:test";
 
 import {
   encodeAbiParameters,
+  keccak256,
   padHex,
+  toBytes,
+  toEventSelector,
   toHex,
 } from "viem";
 
@@ -58,10 +61,13 @@ const rpcModule = loadTypeScript("lib/server/indexer/rpc.ts");
 const leaseModule = loadTypeScript("lib/server/indexer/lease.ts");
 const webhookModule = loadTypeScript("lib/server/indexer/webhook.ts");
 const model = loadTypeScript("lib/server/indexer/model.ts");
+const observability = loadTypeScript("lib/server/observability.ts");
+const repository = loadTypeScript("lib/server/indexer/repository.ts");
 
 const address = (byte) => `0x${byte.repeat(40)}`;
 const hash = (byte) => `0x${byte.repeat(64)}`;
 const topicAddress = (value) => padHex(value, { size: 32 });
+const topicUint = (value) => padHex(toHex(BigInt(value)), { size: 32 });
 const quantity = (value) => toHex(BigInt(value));
 
 const factory = address("f");
@@ -126,6 +132,26 @@ function rawLog({
   };
 }
 
+function operationalLog({
+  contractAddress,
+  signature,
+  indexed = [],
+  inputs = [],
+  values = [],
+  transactionHash = hash("5"),
+  logIndex = 0,
+}) {
+  return {
+    blockNumber: 100n,
+    transactionHash,
+    transactionIndex: 0,
+    logIndex,
+    contractAddress,
+    topics: [keccak256(toBytes(signature)), ...indexed],
+    data: encodeAbiParameters(inputs, values),
+  };
+}
+
 test("bounded worker ingests factory launches, canonical PoolManager swaps, and token transfers atomically", async () => {
   const block100 = {
     number: quantity(100),
@@ -161,7 +187,7 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
         { type: "address" },
         { type: "address" },
       ],
-      [1n, 5n, 10n, hook, creator],
+      [2n, 5n, 10n, hook, burner],
     ),
   });
   const swapLog = rawLog({
@@ -197,6 +223,52 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
       topicAddress(recipient),
     ],
     data: encodeAbiParameters([{ type: "uint256" }], [1_000n]),
+  });
+  const hookFeeLog = rawLog({
+    address: hook,
+    blockNumber: 100,
+    blockHash: block100.hash,
+    transactionHash,
+    transactionIndex: 0,
+    logIndex: 4,
+    topics: [events.HOOK_OPERATIONAL_TOPICS[0], poolId],
+    data: encodeAbiParameters([{ type: "uint256" }], [77n]),
+  });
+  const launchFeeLog = rawLog({
+    address: factory,
+    blockNumber: 100,
+    blockHash: block100.hash,
+    transactionHash,
+    transactionIndex: 0,
+    logIndex: 5,
+    topics: [events.FACTORY_OPERATIONAL_TOPICS[0], topicAddress(address("5"))],
+    data: encodeAbiParameters([{ type: "uint256" }], [88n]),
+  });
+  const revenueLog = rawLog({
+    address: address("5"),
+    blockNumber: 101,
+    blockHash: block101.hash,
+    transactionHash: hash("8"),
+    transactionIndex: 0,
+    logIndex: 0,
+    topics: [events.REVENUE_OPERATIONAL_TOPICS[0]],
+    data: encodeAbiParameters(
+      [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+      [25n, 25n, 50n],
+    ),
+  });
+  const burnLog = rawLog({
+    address: burner,
+    blockNumber: 101,
+    blockHash: block101.hash,
+    transactionHash: hash("9"),
+    transactionIndex: 1,
+    logIndex: 0,
+    topics: [events.SELF_BURN_OPERATIONAL_TOPICS[0], poolId, topicAddress(token)],
+    data: encodeAbiParameters(
+      [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+      [90n, 180n, 10n],
+    ),
   });
 
   const stringResult = (value) => encodeAbiParameters([{ type: "string" }], [value]);
@@ -254,7 +326,14 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
       if (method === "eth_getLogs") {
         const filter = params[0];
         filters.push(filter);
-        if (filter.address === factory) return [launchLog];
+        if (
+          filter.address === factory &&
+          filter.topics[0] === events.TOKEN_LAUNCHED_TOPIC
+        ) return [launchLog];
+        if (filter.address === factory) return [launchFeeLog];
+        if (filter.address === hook) return [hookFeeLog];
+        if (filter.address === burner) return [burnLog];
+        if (filter.address === address("5")) return [revenueLog];
         if (filter.address === poolManager) return [swapLog];
         if (Array.isArray(filter.address) && filter.address.includes(token)) {
           return [transferLog];
@@ -328,11 +407,25 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
 
   assert.equal(result.status, "ingested");
   assert.equal(result.nextBlock, "102");
-  assert.equal(committed.logs.length, 3);
-  assert.deepEqual(committed.logs.map((log) => log.eventName), ["Transfer", "Swap", "TokenLaunched"]);
+  assert.equal(committed.logs.length, 7);
+  assert.deepEqual(committed.logs.map((log) => log.eventName), [
+    "Transfer",
+    "Swap",
+    "TokenLaunched",
+    "FeeAccrued",
+    "LaunchFeeRouted",
+    "RevenueAllocated",
+    "Burned",
+  ]);
   const launch = committed.projections.find((projection) => projection.kind === "launch");
   const swap = committed.projections.find((projection) => projection.kind === "swap");
   const transfer = committed.projections.find((projection) => projection.kind === "transfer");
+  const feeKinds = committed.projections
+    .filter((projection) => projection.kind === "fee")
+    .map((projection) => projection.feeKind)
+    .sort();
+  const revenue = committed.projections.find((projection) => projection.kind === "revenue");
+  const burn = committed.projections.find((projection) => projection.kind === "burn");
   assert.equal(launch.name, "Pipe Runner");
   assert.equal(launch.metadataUri, "ipfs://metadata");
   assert.equal(launch.socials.twitter, "https://x.com/runner");
@@ -340,6 +433,9 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
   assert.equal(swap.pipedogAmount, 5n);
   assert.equal(swap.tokenAmount, 10n);
   assert.equal(transfer.amount, 1_000n);
+  assert.deepEqual(feeKinds, ["accrued", "launch-fee"]);
+  assert.equal(revenue.amount, 100n);
+  assert.equal(burn.tokensBurned, 180n);
   assert.ok(tokenCallBlockTags.length > 0);
   assert.ok(
     tokenCallBlockTags.every((tag) => tag === quantity(100)),
@@ -354,6 +450,472 @@ test("bounded worker ingests factory launches, canonical PoolManager swaps, and 
     ),
     "PoolManager swaps must be filtered by canonical LayPipe pool IDs",
   );
+});
+
+test("an eth_getLogs result at the exact query ceiling fails before cursor advance", async () => {
+  const block100 = {
+    number: quantity(100),
+    hash: hash("a"),
+    parentHash: hash("0"),
+    timestamp: quantity(1_786_000_000),
+  };
+  let ingestCalls = 0;
+  let cursorNextBlock = "100";
+  const repository = {
+    async initializeCursor() {
+      throw new Error("cursor is already initialized");
+    },
+    async readHealth() {
+      return {
+        start_block: "100",
+        next_block: cursorNextBlock,
+        last_processed_block: null,
+        last_processed_hash: null,
+      };
+    },
+    async loadLaunches() {
+      return [];
+    },
+    async loadRecentBlocks() {
+      throw new Error("reorg scan should not run on an empty cursor");
+    },
+    async rollback() {
+      throw new Error("rollback should not run");
+    },
+    async ingest() {
+      ingestCalls += 1;
+      cursorNextBlock = "101";
+      throw new Error("saturated log results must never be ingested");
+    },
+  };
+  const rpc = {
+    async request({ method, params }) {
+      if (method === "eth_chainId") return quantity(4663);
+      if (method === "eth_getBlockByNumber") {
+        assert.equal(params[0], quantity(100));
+        return block100;
+      }
+      if (method === "eth_getLogs") {
+        const filter = params[0];
+        if (
+          filter.address === factory &&
+          filter.topics[0] === events.TOKEN_LAUNCHED_TOPIC
+        ) {
+          return Array.from({ length: 100 }, () => ({}));
+        }
+        return [];
+      }
+      throw new Error(`unexpected RPC method ${method}`);
+    },
+  };
+
+  await assert.rejects(
+    ingestion.syncCanonicalIndexerOnce({
+      rpc,
+      manifest: manifest(),
+      safeHead: 100n,
+      config: {
+        finalityBlocks: 1,
+        batchSize: 10,
+        maxLogs: 100,
+        maxNewLaunches: 10,
+        filterChunkSize: 10,
+        maxFilterChunks: 10,
+        reorgLookback: 16,
+        runTimeoutMs: 30_000,
+      },
+      repository,
+      verifyIdentity: async () => undefined,
+    }),
+    /reached its configured bound and may be truncated/,
+  );
+  assert.equal(ingestCalls, 0);
+  assert.equal(cursorNextBlock, "100");
+});
+
+test("a cursor ahead of the observed safe head fails before reorg or ingest work", async () => {
+  let reorgCalls = 0;
+  let ingestCalls = 0;
+  const repository = {
+    async initializeCursor() {
+      throw new Error("cursor is already initialized");
+    },
+    async readHealth() {
+      return {
+        start_block: "100",
+        next_block: "102",
+        last_processed_block: "101",
+        last_processed_hash: hash("a"),
+      };
+    },
+    async loadLaunches() {
+      return [];
+    },
+    async loadRecentBlocks() {
+      reorgCalls += 1;
+      return [];
+    },
+    async rollback() {
+      reorgCalls += 1;
+      return 0n;
+    },
+    async ingest() {
+      ingestCalls += 1;
+      throw new Error("ingest must not run");
+    },
+  };
+  const rpc = {
+    async request({ method }) {
+      if (method === "eth_chainId") return quantity(4663);
+      throw new Error(`unexpected RPC method ${method}`);
+    },
+  };
+
+  await assert.rejects(
+    ingestion.syncCanonicalIndexerOnce({
+      rpc,
+      manifest: manifest(),
+      safeHead: 100n,
+      config: {
+        finalityBlocks: 1,
+        batchSize: 10,
+        maxLogs: 100,
+        maxNewLaunches: 10,
+        filterChunkSize: 10,
+        maxFilterChunks: 10,
+        reorgLookback: 16,
+        runTimeoutMs: 30_000,
+      },
+      repository,
+      verifyIdentity: async () => undefined,
+    }),
+    /cursor is ahead of the observed safe head/,
+  );
+  assert.equal(reorgCalls, 0);
+  assert.equal(ingestCalls, 0);
+});
+
+test("operational event signatures stay pinned to the committed contract ABI bundle", () => {
+  const normalizedEvent = (event) => ({
+    type: event.type,
+    name: event.name,
+    anonymous: event.anonymous ?? false,
+    inputs: event.inputs.map((input) => ({
+      name: input.name,
+      type: input.type,
+      indexed: input.indexed ?? false,
+      ...(input.components
+        ? {
+            components: input.components.map((component) => ({
+              name: component.name,
+              type: component.type,
+              indexed: component.indexed ?? false,
+            })),
+          }
+        : {}),
+    })),
+  });
+  const contracts = {
+    factory: "LaypipeFactory",
+    hook: "PipedogHook",
+    selfBurner: "LaypipeSelfBurner",
+    revenueRouter: "PipedogRevenueRouter",
+  };
+  const topicGroups = {
+    factory: events.FACTORY_OPERATIONAL_TOPICS,
+    hook: events.HOOK_OPERATIONAL_TOPICS,
+    selfBurner: events.SELF_BURN_OPERATIONAL_TOPICS,
+    revenueRouter: events.REVENUE_OPERATIONAL_TOPICS,
+  };
+  for (const [key, contractName] of Object.entries(contracts)) {
+    const abi = JSON.parse(
+      readFileSync(resolve(root, `contracts/abi/${contractName}.json`), "utf8"),
+    );
+    const byName = new Map(
+      abi.filter((entry) => entry.type === "event").map((entry) => [entry.name, entry]),
+    );
+    const names = events.INDEXED_OPERATIONAL_EVENT_NAMES[key];
+    const committedEvents = names.map((name) => {
+      const event = byName.get(name);
+      assert.ok(event, `${contractName}.${name} is missing from the committed ABI`);
+      return event;
+    });
+    const expectedTopics = committedEvents.map(toEventSelector);
+    assert.deepEqual([...topicGroups[key]].sort(), expectedTopics.sort());
+    assert.deepEqual(
+      events.INDEXED_OPERATIONAL_EVENT_ABIS[key].map(normalizedEvent),
+      committedEvents.map(normalizedEvent),
+      `${contractName} indexed fields or decoded parameter shapes drifted`,
+    );
+  }
+});
+
+test("fee, burn, and revenue decoders preserve exact base units and reconcile their lanes", () => {
+  const knownByPool = new Map([
+    [poolId, { tokenAddress: token, poolId, feeMode: "self-burn" }],
+  ]);
+  const caller = address("6");
+  const treasury = address("5");
+  const sink = "0x000000000000000000000000000000000000dead";
+  const feeLogs = [
+    operationalLog({
+      contractAddress: hook,
+      signature: "FeeAccrued(bytes32,uint256)",
+      indexed: [poolId],
+      inputs: [{ type: "uint256" }],
+      values: [1_001n],
+      logIndex: 1,
+    }),
+    operationalLog({
+      contractAddress: hook,
+      signature: "FeesSwept(bytes32,address,uint256,uint256)",
+      indexed: [poolId, topicAddress(caller)],
+      inputs: [{ type: "uint256" }, { type: "uint256" }],
+      values: [700n, 300n],
+      logIndex: 2,
+    }),
+    operationalLog({
+      contractAddress: hook,
+      signature: "CreatorFeesClaimed(bytes32,address,uint256)",
+      indexed: [poolId, topicAddress(burner)],
+      inputs: [{ type: "uint256" }],
+      values: [700n],
+      logIndex: 3,
+    }),
+    operationalLog({
+      contractAddress: hook,
+      signature: "PlatformPayoutDeferred(uint256)",
+      inputs: [{ type: "uint256" }],
+      values: [300n],
+      logIndex: 4,
+    }),
+    operationalLog({
+      contractAddress: hook,
+      signature: "PlatformPayoutCollected(address,uint256)",
+      indexed: [topicAddress(treasury)],
+      inputs: [{ type: "uint256" }],
+      values: [300n],
+      logIndex: 5,
+    }),
+  ];
+  const fees = feeLogs.map(
+    (log) => events.decodeHookOperationalEvent(log, knownByPool).projection,
+  );
+  assert.deepEqual(fees.map((event) => event.feeKind), [
+    "accrued",
+    "swept",
+    "creator-claimed",
+    "platform-deferred",
+    "platform-collected",
+  ]);
+  assert.equal(fees[2].recipientAddress, burner);
+  assert.equal(fees[4].recipientAddress, treasury);
+  const accrued = fees.filter((event) => event.feeKind === "accrued")
+    .reduce((sum, event) => sum + event.amount, 0n);
+  const swept = fees.find((event) => event.feeKind === "swept");
+  const creatorClaimed = fees.find((event) => event.feeKind === "creator-claimed").amount;
+  const platformDeferred = fees.find((event) => event.feeKind === "platform-deferred").amount;
+  const platformCollected = fees.find((event) => event.feeKind === "platform-collected").amount;
+  assert.equal(accrued - swept.creatorAmount - swept.platformAmount, 1n);
+  assert.equal(swept.creatorAmount - creatorClaimed, 0n);
+  assert.equal(platformDeferred - platformCollected, 0n);
+
+  const launchFee = events.decodeFactoryOperationalEvent(
+    operationalLog({
+      contractAddress: factory,
+      signature: "LaunchFeeRouted(address,uint256)",
+      indexed: [topicAddress(treasury)],
+      inputs: [{ type: "uint256" }],
+      values: [(1n << 255n) + 123n],
+      logIndex: 6,
+    }),
+  ).projection;
+  assert.equal(launchFee.feeKind, "launch-fee");
+  assert.equal(launchFee.amount, (1n << 255n) + 123n);
+  assert.equal(launchFee.recipientAddress, treasury);
+
+  const revenueLogs = [
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "RevenueAllocated(uint256,uint256,uint256)",
+      inputs: [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+      values: [250n, 250n, 500n],
+      logIndex: 7,
+    }),
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "PipedogSequestered(address,uint256,uint256,address)",
+      indexed: [topicAddress(caller), topicAddress(sink)],
+      inputs: [{ type: "uint256" }, { type: "uint256" }],
+      values: [240n, 10n],
+      logIndex: 8,
+    }),
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "TreasuryPipedogRouted(address,address,uint256,uint256)",
+      indexed: [topicAddress(caller), topicAddress(treasury)],
+      inputs: [{ type: "uint256" }, { type: "uint256" }],
+      values: [245n, 5n],
+      logIndex: 9,
+    }),
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "OperationsPipedogCollected(address,uint256)",
+      indexed: [topicAddress(recipient)],
+      inputs: [{ type: "uint256" }],
+      values: [500n],
+      logIndex: 10,
+    }),
+  ];
+  const revenue = revenueLogs.map(
+    (log) => events.decodeRevenueOperationalEvent(log).projection,
+  );
+  const allocated = revenue.find((event) => event.routeKind === "allocated");
+  const sequestered = revenue.find((event) => event.routeKind === "sequestered");
+  const treasuryRouted = revenue.find((event) => event.routeKind === "treasury");
+  const operations = revenue.find((event) => event.routeKind === "operations");
+  assert.equal(allocated.amount, 1_000n);
+  assert.equal(
+    allocated.sequesterAmount - sequestered.amount - sequestered.bounty,
+    0n,
+  );
+  assert.equal(
+    allocated.treasuryAmount - treasuryRouted.amount - treasuryRouted.bounty,
+    0n,
+  );
+  assert.equal(allocated.operationsAmount - operations.amount, 0n);
+
+  const burnLog = operationalLog({
+    contractAddress: burner,
+    signature: "Burned(bytes32,address,uint256,uint256,uint256)",
+    indexed: [poolId, topicAddress(token)],
+    inputs: [{ type: "uint256" }, { type: "uint256" }, { type: "uint256" }],
+    values: [900n, (1n << 200n) + 7n, 100n],
+    logIndex: 11,
+  });
+  const burned = events.decodeSelfBurnOperationalEvent(
+    burnLog,
+    knownByPool,
+  ).projection;
+  assert.equal(burned.pipedogIn, 900n);
+  assert.equal(burned.tokensBurned, (1n << 200n) + 7n);
+  assert.equal(burned.pipedogBounty, 100n);
+  assert.throws(
+    () => events.decodeSelfBurnOperationalEvent(
+      {
+        ...burnLog,
+        topics: [
+          events.SELF_BURN_OPERATIONAL_TOPICS[0],
+          poolId,
+          topicAddress(address("b")),
+        ],
+      },
+      knownByPool,
+    ),
+    /does not match/,
+  );
+});
+
+test("admin decoders retain exact address, boolean, signed tick, cap, and migration evidence", () => {
+  const oldAddress = address("2");
+  const newAddress = address("3");
+  const configLog = operationalLog({
+    contractAddress: factory,
+    signature: "LaunchConfigAdded(uint256,(uint256,int24,int24,uint16,uint24,uint24,uint32,bool,bool))",
+    indexed: [topicUint(4n)],
+    inputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "supply", type: "uint256" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "startTick", type: "int24" },
+          { name: "creatorFeeBps", type: "uint16" },
+          { name: "baseFeeRate", type: "uint24" },
+          { name: "launchFeeRate", type: "uint24" },
+          { name: "launchFeeDecay", type: "uint32" },
+          { name: "enabled", type: "bool" },
+          { name: "selfBurn", type: "bool" },
+        ],
+      },
+    ],
+    values: [{
+      supply: (1n << 255n) + 5n,
+      tickSpacing: 60,
+      startTick: -120,
+      creatorFeeBps: 7_000,
+      baseFeeRate: 7_000,
+      launchFeeRate: 7_000,
+      launchFeeDecay: 0,
+      enabled: false,
+      selfBurn: true,
+    }],
+    logIndex: 12,
+  });
+  const config = events.decodeFactoryOperationalEvent(configLog).projection;
+  assert.equal(config.eventName, "LaunchConfigAdded");
+  assert.deepEqual(config.details, {
+    configId: "4",
+    config: {
+      supply: ((1n << 255n) + 5n).toString(),
+      tickSpacing: "60",
+      startTick: "-120",
+      creatorFeeBps: "7000",
+      baseFeeRate: "7000",
+      launchFeeRate: "7000",
+      launchFeeDecay: "0",
+      enabled: false,
+      selfBurn: true,
+    },
+  });
+
+  const upgraded = events.decodeFactoryOperationalEvent(
+    operationalLog({
+      contractAddress: factory,
+      signature: "Upgraded(address)",
+      indexed: [topicAddress(newAddress)],
+      logIndex: 13,
+    }),
+  ).projection;
+  assert.equal(upgraded.subjectAddress, newAddress);
+
+  const creatorUpdate = events.decodeHookOperationalEvent(
+    operationalLog({
+      contractAddress: hook,
+      signature: "CreatorUpdated(bytes32,address,address)",
+      indexed: [poolId, topicAddress(oldAddress), topicAddress(newAddress)],
+      logIndex: 14,
+    }),
+    new Map([[poolId, { tokenAddress: token, poolId, feeMode: "creator" }]]),
+  ).projection;
+  assert.deepEqual(creatorUpdate.details, { poolId, oldCreator: oldAddress, newCreator: newAddress });
+
+  const capUpdate = events.decodeRevenueOperationalEvent(
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "MaxSequesterPerCallUpdated(uint256,uint256)",
+      inputs: [{ type: "uint256" }, { type: "uint256" }],
+      values: [10n, (1n << 255n) + 1n],
+      logIndex: 15,
+    }),
+  ).projection;
+  assert.deepEqual(capUpdate.details, {
+    oldCap: "10",
+    newCap: ((1n << 255n) + 1n).toString(),
+  });
+
+  const migrated = events.decodeRevenueOperationalEvent(
+    operationalLog({
+      contractAddress: address("5"),
+      signature: "Migrated(address,uint256)",
+      indexed: [topicAddress(newAddress)],
+      inputs: [{ type: "uint256" }],
+      values: [999n],
+      logIndex: 16,
+    }),
+  ).projection;
+  assert.equal(migrated.subjectAddress, newAddress);
+  assert.deepEqual(migrated.details, { successor: newAddress, amount: "999" });
 });
 
 test("PoolManager swap decoder follows executable v4 caller-delta signs", () => {
@@ -402,6 +964,7 @@ test("runtime configuration is disabled by default and uses a ten-block free-tie
 
 test("catch-up runner advances multiple ten-block batches and stops when caught up", async () => {
   const calls = [];
+  const observations = [];
   const results = [
     { status: "ingested", safeHead: "129", nextBlock: "110", rolledBackBlocks: "0", blockCount: 10, eventCount: 2, projectionCount: 2 },
     { status: "ingested", safeHead: "129", nextBlock: "120", rolledBackBlocks: "0", blockCount: 10, eventCount: 1, projectionCount: 1 },
@@ -421,6 +984,7 @@ test("catch-up runner advances multiple ten-block batches and stops when caught 
     },
     manifest: manifest(),
     safeHead: 129n,
+    recordObservation: async (value) => observations.push(value),
   });
   assert.equal(result.status, "caught-up");
   assert.equal(result.batches, 3);
@@ -431,6 +995,41 @@ test("catch-up runner advances multiple ten-block batches and stops when caught 
   assert.equal(calls[0].config.batchSize, 10);
   assert.strictEqual(calls[0].verifyIdentity, calls[1].verifyIdentity);
   assert.ok(calls.every((call) => call.safeHead === 129n));
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].status, "caught-up");
+  assert.equal(observations[0].safeHead, 129n);
+});
+
+test("indexer observations persist the pinned safe head and terminal status", async () => {
+  const calls = [];
+  await repository.recordIndexerObservation(
+    {
+      chainId: 4663,
+      stream: "laypipe",
+      safeHead: 129n,
+      status: "caught-up",
+      observedAt: new Date("2026-08-11T12:00:00.000Z"),
+    },
+    {
+      async query(sql, params, options) {
+        calls.push({ sql, params, options });
+        return [{ updated: true }];
+      },
+    },
+  );
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /observed_safe_head = \$3::bigint/);
+  assert.match(calls[0].sql, /last_processed_block <= \$3::bigint/);
+  assert.match(calls[0].sql, /observed_safe_head <= \$3::bigint/);
+  assert.match(calls[0].sql, /observed_at <= \$4::timestamptz/);
+  assert.deepEqual(calls[0].params, [
+    4663,
+    "laypipe",
+    "129",
+    "2026-08-11T12:00:00.000Z",
+    "caught-up",
+  ]);
+  assert.ok(calls[0].options.fetchOptions.signal instanceof AbortSignal);
 });
 
 test("catch-up runner stops at max batches, idle, and deadline without an unbounded loop", async () => {
@@ -449,6 +1048,7 @@ test("catch-up runner stops at max batches, idle, and deadline without an unboun
     },
     manifest: manifest(),
     safeHead: 999n,
+    recordObservation: async () => undefined,
   });
   assert.equal(bounded.status, "bounded");
   assert.equal(maxCalls, 2);
@@ -467,6 +1067,7 @@ test("catch-up runner stops at max batches, idle, and deadline without an unboun
     },
     manifest: manifest(),
     safeHead: 99n,
+    recordObservation: async () => undefined,
   });
   assert.equal(idle.status, "caught-up");
   assert.equal(idleCalls, 1);
@@ -488,6 +1089,7 @@ test("catch-up runner stops at max batches, idle, and deadline without an unboun
     },
     manifest: manifest(),
     safeHead: 999n,
+    recordObservation: async () => undefined,
   });
   assert.equal(deadline.status, "deadline");
   assert.equal(deadlineCalls, 1);
@@ -786,6 +1388,46 @@ test("both indexer routes acquire the lease and acknowledge a busy worker with 2
     assert.match(source, /status: "busy"/);
     assert.match(source, /finally \{[\s\S]*await lease\.release\(\)/);
   }
+});
+
+test("operational logging skips routine success and emits bounded domain summaries", async () => {
+  const originalLog = console.log;
+  const lines = [];
+  console.log = (value) => lines.push(value);
+  try {
+    const response = await observability.observeOperationalRequest(
+      new Request("https://laypipe.fun/api/indexer/sync", {
+        headers: {
+          "x-vercel-id": "iad1::request-test",
+          authorization: "Bearer must-never-be-logged",
+        },
+      }),
+      "/api/indexer/sync",
+      async () => Response.json({ status: "caught-up" }),
+    );
+    assert.equal(response.status, 200);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(lines.length, 0);
+  console.log = (value) => lines.push(value);
+  try {
+    observability.emitOperationalSummary("laypipe.indexer.completed", {
+      runStatus: "caught-up",
+      safeHead: "129",
+      nextBlock: "130",
+      detail: "x".repeat(256),
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(lines.length, 1);
+  const completed = JSON.parse(lines[0]);
+  assert.equal(completed.event, "laypipe.indexer.completed");
+  assert.equal(completed.runStatus, "caught-up");
+  assert.equal(completed.safeHead, "129");
+  assert.equal(completed.detail.length, 128);
+  assert.doesNotMatch(lines.join("\n"), /must-never-be-logged/);
 });
 
 test("chunked webhook body stops at the byte ceiling without Content-Length", async () => {

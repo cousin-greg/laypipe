@@ -47,6 +47,7 @@ export interface LiveMarketToken {
   symbol: string | null;
   description: string | null;
   logoUri: string | null;
+  logoGatewayUrl: string | null;
   metadataUri: string | null;
   socials: Record<string, string> | null;
   blockNumber: string;
@@ -61,6 +62,9 @@ export interface IndexerWatermark {
   lastProcessedBlock: string | null;
   lastProcessedHash: `0x${string}` | null;
   updatedAt: string;
+  observedSafeHead: string | null;
+  observedAt: string | null;
+  lastRunStatus: "caught-up" | "bounded" | "deadline" | null;
 }
 
 export interface LiveTokenListResponse {

@@ -13,6 +13,7 @@ import {Currency} from "v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams} from "v4-core/src/types/PoolOperation.sol";
 import {CurrencySettler} from "./lib/CurrencySettler.sol";
+import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 import {PipedogHook} from "./PipedogHook.sol";
 
 /// @title LaypipeSwapRouter
@@ -20,7 +21,8 @@ import {PipedogHook} from "./PipedogHook.sol";
 /// @dev PIPEDOG is always currency0 and launched tokens are mined above its
 ///      address. The router pulls only the exact requested input, refunds an
 ///      unspent partial fill, applies caller-provided minimum output, and never
-///      accepts native value. Users should approve exact amounts, not unlimited
+///      accepts native value. Every intent expires against the canonical chain
+///      block clock. Users should approve exact amounts, not unlimited
 ///      allowances, because this router is the ERC20 spender.
 contract LaypipeSwapRouter is IUnlockCallback, ReentrancyGuard {
     using CurrencySettler for Currency;
@@ -48,6 +50,7 @@ contract LaypipeSwapRouter is IUnlockCallback, ReentrancyGuard {
     error AllowanceMismatch(uint256 expected, uint256 actual);
     error TransferMismatch(uint256 expected, uint256 actual);
     error ResidualBalance();
+    error TradeExpired(uint256 deadlineBlock, uint256 currentBlock);
 
     event Bought(
         PoolId indexed poolId,
@@ -91,8 +94,10 @@ contract LaypipeSwapRouter is IUnlockCallback, ReentrancyGuard {
         PoolKey calldata key,
         uint256 pipedogIn,
         uint256 minTokensOut,
-        address recipient
+        address recipient,
+        uint256 deadlineBlock
     ) external nonReentrant returns (uint256 tokensOut) {
+        _checkDeadline(deadlineBlock);
         if (pipedogIn == 0) revert ZeroAmount();
         if (recipient == address(0)) revert ZeroAddress();
         _validatePool(key);
@@ -134,8 +139,10 @@ contract LaypipeSwapRouter is IUnlockCallback, ReentrancyGuard {
         PoolKey calldata key,
         uint256 tokensIn,
         uint256 minPipedogOut,
-        address recipient
+        address recipient,
+        uint256 deadlineBlock
     ) external nonReentrant returns (uint256 pipedogOut) {
+        _checkDeadline(deadlineBlock);
         if (tokensIn == 0) revert ZeroAmount();
         if (recipient == address(0)) revert ZeroAddress();
         _validatePool(key);
@@ -234,6 +241,13 @@ contract LaypipeSwapRouter is IUnlockCallback, ReentrancyGuard {
                 || address(key.hooks) != address(hook) || key.fee != 0
                 || !hook.isRegistered(key.toId())
         ) revert InvalidPool();
+    }
+
+    function _checkDeadline(uint256 deadlineBlock) private view {
+        uint256 currentBlock = ChainBlockNumber.current();
+        if (currentBlock > deadlineBlock) {
+            revert TradeExpired(deadlineBlock, currentBlock);
+        }
     }
 
     function _pullExact(IERC20 token, address from, uint256 amount)

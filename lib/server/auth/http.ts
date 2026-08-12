@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import { isAddress, type Address } from "@/lib/web3/types";
 
 export class HttpError extends Error {
@@ -33,18 +34,56 @@ export function jsonError(error: unknown) {
 
 export async function readJsonObject(request: Request, maxBytes = 16_384) {
   const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().startsWith("application/json")) {
+  const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType !== "application/json") {
     throw new HttpError(415, "CONTENT_TYPE", "Send an application/json request.");
   }
 
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+  const rawDeclaredLength = request.headers.get("content-length");
+  const declaredLength = rawDeclaredLength === null ? 0 : Number(rawDeclaredLength);
+  if (
+    rawDeclaredLength !== null &&
+    (!Number.isSafeInteger(declaredLength) || declaredLength < 0)
+  ) {
+    throw new HttpError(400, "CONTENT_LENGTH", "The request length is invalid.");
+  }
+  if (declaredLength > maxBytes) {
     throw new HttpError(413, "BODY_TOO_LARGE", "The request body is too large.");
   }
 
-  const text = await request.text();
-  if (Buffer.byteLength(text, "utf8") > maxBytes) {
-    throw new HttpError(413, "BODY_TOO_LARGE", "The request body is too large.");
+  const reader = request.body?.getReader();
+  if (!reader) {
+    throw new HttpError(400, "INVALID_JSON", "The request JSON is invalid.");
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new HttpError(413, "BODY_TOO_LARGE", "The request body is too large.");
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, "INVALID_JSON", "The request JSON is invalid.");
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new HttpError(400, "INVALID_JSON", "The request JSON is invalid.");
   }
   try {
     const value = JSON.parse(text) as unknown;
@@ -77,10 +116,14 @@ export function requireAddress(value: unknown, label = "Wallet"): Address {
 }
 
 export function getRequestIp(request: Request) {
+  const vercelForwarded = request.headers
+    .get("x-vercel-forwarded-for")
+    ?.split(",")[0]
+    ?.trim();
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   const realIp = request.headers.get("x-real-ip")?.trim();
-  const ip = forwarded || realIp;
-  if (!ip) {
+  const ip = vercelForwarded || forwarded || realIp;
+  if (!ip || isIP(ip) === 0) {
     if (process.env.NODE_ENV === "production") {
       throw new HttpError(503, "MISSING_IP", "Request identity is unavailable.");
     }

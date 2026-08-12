@@ -85,6 +85,13 @@ export async function sanitizeArtwork(options: {
       .rotate()
       .webp({ quality: 90, alphaQuality: 100, effort: 6, smartSubsample: true })
       .toBuffer();
+    if (bytes.byteLength > MAX_ARTWORK_BYTES) {
+      throw new HttpError(
+        413,
+        "IMAGE_OUTPUT_SIZE",
+        "Sanitized artwork must be 5 MB or smaller.",
+      );
+    }
     return {
       bytes,
       mimeType: "image/webp",

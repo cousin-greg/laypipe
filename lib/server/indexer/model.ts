@@ -89,10 +89,17 @@ export interface SwapProjection extends ProjectionBase {
 
 export interface FeeProjection extends ProjectionBase {
   kind: "fee";
-  feeKind: "accrued" | "swept" | "creator-claimed" | "launch-fee";
+  feeKind:
+    | "accrued"
+    | "swept"
+    | "creator-claimed"
+    | "launch-fee"
+    | "platform-deferred"
+    | "platform-collected";
   poolId?: string;
   actorAddress?: string;
   creatorAddress?: string;
+  recipientAddress?: string;
   amount?: DecimalInput;
   creatorAmount?: DecimalInput;
   platformAmount?: DecimalInput;

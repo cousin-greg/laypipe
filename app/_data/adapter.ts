@@ -11,6 +11,7 @@ import {
   MARKET_PAGE_LIMIT,
 } from "@/lib/market/pagination";
 import { LaunchMode, LaunchToken, marketSource } from "./market";
+import { trustedIpfsGatewayUrl } from "@/lib/ipfs/gateway";
 
 export type ProtocolConfig = {
   chainId: number;
@@ -54,8 +55,7 @@ export const laypipeApiRoutes = {
   holders: (slug: string) => `/api/tokens/${slug}/holders`,
   position: (slug: string, wallet: string) =>
     `/api/tokens/${slug}/position?wallet=${encodeURIComponent(wallet)}`,
-  holdings: (wallet: string) =>
-    `/api/holdings?wallet=${encodeURIComponent(wallet)}`,
+  holdings: "/api/holdings",
   tokenomics: "/api/tokenomics",
   protocolDistributions: "/api/protocol-distributions",
 } as const;
@@ -67,6 +67,7 @@ export type BoardToken = {
   name: string;
   symbol: string;
   description: string | null;
+  artworkUrl: string | null;
   accent: string;
   price: number | null;
   priceUnit: "USD" | "PIPEDOG";
@@ -108,6 +109,7 @@ function fixtureToken(token: LaunchToken): BoardToken {
     ...token,
     source: "fixture",
     tokenAddress: null,
+    artworkUrl: null,
     priceUnit: "USD",
     volumeUnit: "USD",
   };
@@ -211,6 +213,9 @@ export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
     name: token.name?.trim() || fallback,
     symbol: token.symbol?.trim() || token.tokenAddress.slice(2, 8).toUpperCase(),
     description: token.description,
+    artworkUrl: token.logoGatewayUrl
+      ? trustedIpfsGatewayUrl(token.logoGatewayUrl)
+      : null,
     accent: addressAccent(token.tokenAddress),
     price,
     priceUnit: "PIPEDOG",
@@ -280,7 +285,7 @@ export function createApiMarketAdapter(baseUrl = ""): MarketDataAdapter {
         mode: "live",
         label: "Indexed Robinhood Chain markets",
         tokens: payload.tokens.map(mapLiveTokenToBoardToken),
-        updatedAt: payload.indexer?.updatedAt ?? null,
+        updatedAt: payload.indexer?.observedAt ?? payload.indexer?.updatedAt ?? null,
         nextCursor: payload.page.nextCursor,
       };
     },

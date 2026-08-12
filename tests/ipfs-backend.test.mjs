@@ -19,6 +19,14 @@ const pinataModule = await tsImport(
   "../lib/server/ipfs/pinata.ts",
   import.meta.url,
 );
+const promotionModule = await tsImport(
+  "../lib/server/ipfs/promotion.ts",
+  import.meta.url,
+);
+const registryModule = await tsImport(
+  "../lib/server/ipfs/registry.ts",
+  import.meta.url,
+);
 const imageModule = await tsImport("../lib/server/ipfs/image.ts", import.meta.url);
 const metadataModule = await tsImport(
   "../lib/server/ipfs/metadata.ts",
@@ -26,6 +34,10 @@ const metadataModule = await tsImport(
 );
 const clientMetadata = await tsImport("../lib/ipfs/metadata.ts", import.meta.url);
 const pinClient = await tsImport("../lib/ipfs/pin-client.ts", import.meta.url);
+const challengeRoute = await tsImport(
+  "../app/api/auth/challenge/route.ts",
+  import.meta.url,
+);
 const stageRoute = await tsImport("../app/api/ipfs/stage/route.ts", import.meta.url);
 const pinRoute = await tsImport("../app/api/ipfs/pin/route.ts", import.meta.url);
 const cleanupRoute = await tsImport(
@@ -53,6 +65,78 @@ function configureEnvironment() {
   process.env.UPSTASH_REDIS_REST_KV_REST_API_URL = "https://laypipe-test.upstash.io";
   process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN = "test-upstash-token";
   process.env.CRON_SECRET = "test-cron-secret-that-is-at-least-32-bytes";
+  process.env.DATABASE_URL =
+    "postgresql://test:test@ep-test.us-east-2.aws.neon.tech/laypipe_test";
+}
+
+function promotionRegistryResponse(init) {
+  const body = JSON.parse(init.body);
+  if (body.query === registryModule.PROMOTION_REGISTRY_READY_SQL) {
+    assert.deepEqual(body.params, []);
+    return Response.json({
+      fields: [{ name: "ready", dataTypeID: 23 }],
+      rows: [],
+      rowCount: 0,
+      command: "SELECT",
+    });
+  }
+  assert.equal(body.query, registryModule.RECORD_COMPLETED_PROMOTION_SQL);
+  const promotionId = body.params[0];
+  return Response.json({
+    fields: [{ name: "promotion_id", dataTypeID: 25 }],
+    rows: [[promotionId]],
+    rowCount: 1,
+    command: "INSERT",
+  });
+}
+
+function createRedisMock() {
+  const values = new Map();
+  const commands = [];
+  const fetcher = async (_url, init) => {
+    const command = JSON.parse(init.body);
+    commands.push(command);
+    if (command[0] === "GET") {
+      return Response.json({ result: values.get(command[1]) ?? null });
+    }
+    if (command[0] === "DEL") {
+      const deleted = values.delete(command[1]);
+      return Response.json({ result: deleted ? 1 : 0 });
+    }
+    if (command[0] === "SET") {
+      const [, key, value, ...options] = command;
+      if (options.includes("NX") && values.has(key)) {
+        return Response.json({ result: null });
+      }
+      values.set(key, value);
+      return Response.json({ result: "OK" });
+    }
+    if (command[0] === "EVAL") {
+      const script = command[1];
+      if (script.includes("INCR")) return Response.json({ result: [1, 1] });
+      const keyCount = Number(command[2]);
+      const keys = command.slice(3, 3 + keyCount);
+      const args = command.slice(3 + keyCount);
+      if (script.includes("laypipe:ipfs-promotion:release")) {
+        if (values.get(keys[0]) !== args[0]) return Response.json({ result: 0 });
+        values.delete(keys[0]);
+        return Response.json({ result: 1 });
+      }
+      if (
+        script.includes("laypipe:ipfs-promotion:save") ||
+        script.includes("laypipe:ipfs-promotion:complete")
+      ) {
+        if (values.get(keys[0]) !== args[0]) return Response.json({ result: 0 });
+        if (values.get(keys[2]) !== args[1]) return Response.json({ result: -1 });
+        values.set(keys[1], args[2]);
+        if (script.includes("laypipe:ipfs-promotion:complete")) values.delete(keys[0]);
+        return Response.json({ result: 1 });
+      }
+      throw new Error(`Unexpected Redis script: ${script}`);
+    }
+    throw new Error(`Unexpected Redis command: ${command[0]}`);
+  };
+  return { values, commands, fetcher };
 }
 
 test("origin guard accepts the active Vercel Preview and canonical site only", () => {
@@ -79,6 +163,113 @@ test("origin guard accepts the active Vercel Preview and canonical site only", (
         }),
       ),
     /Cross-origin/,
+  );
+  assert.equal(
+    httpModule.getRequestIp(
+      new Request("https://laypipe.fun/api/auth/challenge", {
+        headers: {
+          "X-Vercel-Forwarded-For": "203.0.113.20",
+          "X-Forwarded-For": "203.0.113.21",
+        },
+      }),
+    ),
+    "203.0.113.20",
+  );
+});
+
+test("completed promotion registry writes are exact, bounded, and fail closed on identity drift", async () => {
+  const record = {
+    promotionId: "1".repeat(64),
+    stageFileId: "11111111-1111-4111-8111-111111111111",
+    pinDigest: "2".repeat(64),
+    wallet: account.address,
+    fileSha256: "3".repeat(64),
+    image: {
+      id: "22222222-2222-4222-8222-222222222222",
+      cid: imageCid,
+      size: 2048,
+      mimeType: "image/webp",
+    },
+    metadata: {
+      id: "33333333-3333-4333-8333-333333333333",
+      cid: metadataCid,
+      size: 512,
+      mimeType: "application/json",
+    },
+    completedAt: Date.now(),
+  };
+  const calls = [];
+  const database = {
+    async query(sql, params, options) {
+      calls.push({ sql, params, options });
+      return [{ promotion_id: record.promotionId }];
+    },
+  };
+  await registryModule.recordCompletedPromotion(database, record);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].sql, registryModule.RECORD_COMPLETED_PROMOTION_SQL);
+  assert.equal(calls[0].params[3], account.address.toLowerCase());
+  assert.ok(calls[0].options.fetchOptions.signal instanceof AbortSignal);
+  assert.equal(calls[0].options.fetchOptions.signal.aborted, false);
+
+  await registryModule.assertPromotionRegistryReady({
+    query: async (sql, params, options) => {
+      assert.equal(sql, registryModule.PROMOTION_REGISTRY_READY_SQL);
+      assert.deepEqual(params, []);
+      assert.ok(options.fetchOptions.signal instanceof AbortSignal);
+      return [];
+    },
+  });
+
+  await assert.rejects(
+    registryModule.recordCompletedPromotion(
+      { query: async () => [] },
+      record,
+    ),
+    (error) => error?.code === "PROMOTION_REGISTRY_UNAVAILABLE",
+  );
+});
+
+test("JSON request parsing enforces its byte cap while streaming and rejects invalid UTF-8", async () => {
+  await assert.rejects(
+    httpModule.readJsonObject(
+      new Request("https://laypipe.fun/api/ipfs/stage", {
+        method: "POST",
+        headers: { "Content-Type": "application/jsonp" },
+        body: "{}",
+      }),
+    ),
+    (error) => error?.code === "CONTENT_TYPE",
+  );
+  let cancelled = false;
+  const oversized = new Request("https://laypipe.fun/api/ipfs/pin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"a":"'));
+        controller.enqueue(new TextEncoder().encode("1234567890"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+    duplex: "half",
+  });
+  await assert.rejects(
+    httpModule.readJsonObject(oversized, 8),
+    (error) => error?.code === "BODY_TOO_LARGE",
+  );
+  assert.equal(cancelled, true);
+
+  const invalidUtf8 = new Request("https://laypipe.fun/api/ipfs/stage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: new Uint8Array([0x7b, 0xff, 0x7d]),
+  });
+  await assert.rejects(
+    httpModule.readJsonObject(invalidUtf8),
+    (error) => error?.code === "INVALID_JSON",
   );
 });
 
@@ -149,8 +340,19 @@ test("HMAC challenge is EIP-191 verifiable, bound, expiring, and tamper-evident"
     }),
     /does not match/,
   );
+  await assert.rejects(
+    challengeModule.verifyWalletAuthorization({
+      challenge: issued.challenge,
+      signature: `0x${"00".repeat(65)}`,
+      wallet: account.address,
+      action: "stage",
+      contentDigest: digest,
+      now: 1_800_000_001,
+    }),
+    (error) => error?.code === "INVALID_SIGNATURE",
+  );
   assert.throws(
-    () => challengeModule.decodeWalletChallenge(issued.challenge, 1_800_000_301),
+    () => challengeModule.decodeWalletChallenge(issued.challenge, 1_800_000_300),
     /expired/,
   );
 });
@@ -195,6 +397,111 @@ test("Upstash adapter uses provisioned names and consumes a nonce only once", as
       (call) => call.init.headers.Authorization === "Bearer test-upstash-token",
     ),
   );
+  assert.ok(calls.every((call) => call.init.redirect === "error"));
+  assert.ok(calls.every((call) => call.init.signal instanceof AbortSignal));
+});
+
+test("Upstash rejects malformed success bodies and promotion leases are owner-safe", async () => {
+  configureEnvironment();
+  for (const response of [Response.json({}), new Response("not-json")]) {
+    await assert.rejects(
+      redisModule.enforceRateLimit({
+        namespace: "malformed",
+        identity: account.address,
+        limit: 1,
+        windowSeconds: 60,
+        fetcher: async () => response,
+      }),
+      (error) => error?.code === "RATE_LIMIT_UNAVAILABLE",
+    );
+  }
+
+  const redis = createRedisMock();
+  const nonce = {
+    nonce: "nonce-idempotent",
+    expiresAt: Math.floor(Date.now() / 1000) + 60,
+    fetcher: redis.fetcher,
+  };
+  await redisModule.consumeNonce({ ...nonce, idempotencyKey: "promotion-a" });
+  await redisModule.consumeNonce({ ...nonce, idempotencyKey: "promotion-a" });
+  await assert.rejects(
+    redisModule.consumeNonce({ ...nonce, idempotencyKey: "promotion-b" }),
+    (error) => error?.code === "REPLAY",
+  );
+
+  const identity = promotionModule.createPromotionIdentity({
+    stageFileId: stagedFileId,
+    pinDigest: "12".repeat(32),
+  });
+  const acquired = await promotionModule.acquirePromotionLease(identity, {
+    fetcher: redis.fetcher,
+  });
+  assert.equal(acquired.kind, "acquired");
+  const wrongLease = { ...acquired.lease, token: "wrong-owner" };
+  assert.equal(
+    await promotionModule.releasePromotionLease(wrongLease, { fetcher: redis.fetcher }),
+    false,
+  );
+  await assert.rejects(
+    promotionModule.acquirePromotionLease(identity, { fetcher: redis.fetcher }),
+    (error) => error?.code === "PROMOTION_IN_PROGRESS",
+  );
+  assert.equal(
+    await promotionModule.releasePromotionLease(acquired.lease, {
+      fetcher: redis.fetcher,
+    }),
+    true,
+  );
+  const reacquired = await promotionModule.acquirePromotionLease(identity, {
+    fetcher: redis.fetcher,
+  });
+  assert.equal(reacquired.kind, "acquired");
+  assert.equal(
+    redis.commands.some(
+      (command) =>
+        command[0] === "EVAL" &&
+        String(command[1]).includes("laypipe:ipfs-promotion:release"),
+    ),
+    true,
+  );
+});
+
+test("challenge wallet throttling is scoped by requester IP to prevent targeted wallet denial", async () => {
+  configureEnvironment();
+  const originalFetch = globalThis.fetch;
+  const commands = [];
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://laypipe-test.upstash.io");
+    commands.push(JSON.parse(init.body));
+    return Response.json({ result: [1, 1] });
+  };
+  try {
+    for (const ip of ["203.0.113.10", "203.0.113.11"]) {
+      const response = await challengeRoute.POST(
+        new Request("https://laypipe.fun/api/auth/challenge", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://laypipe.fun",
+            "X-Forwarded-For": ip,
+          },
+          body: JSON.stringify({
+            wallet: account.address,
+            action: "stage",
+            contentDigest: "12".repeat(32),
+          }),
+        }),
+      );
+      assert.equal(response.status, 201);
+    }
+    const pairKeys = commands
+      .map((command) => command[3])
+      .filter((key) => key.startsWith("laypipe:challenge-ip-wallet:"));
+    assert.equal(pairKeys.length, 2);
+    assert.notEqual(pairKeys[0], pairKeys[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Upstash protection fails closed in production when configuration is missing", async () => {
@@ -291,6 +598,101 @@ test("browser and server authorization digests are byte-for-byte identical", asy
     await pinClient.pinAuthorizationDigest(pin),
     digestModule.pinAuthorizationDigest(pin),
   );
+});
+
+test("browser bounds requests and retries the exact final pin without another signature", async () => {
+  configureEnvironment();
+  const png = await sharp({
+    create: { width: 256, height: 256, channels: 4, background: "#72d34d" },
+  })
+    .png()
+    .toBuffer();
+  const file = new File([png], "client.png", { type: "image/png" });
+  const draft = clientMetadata.normalizeMetadataDraft({
+    name: "Retry Pipe",
+    symbol: "RETRY",
+    description: "Exact request retry.",
+    feeMode: "creator",
+  });
+  let signatures = 0;
+  let pinAttempts = 0;
+  const pinBodies = [];
+  const provider = {
+    async request({ method, params }) {
+      if (method === "eth_accounts") return [account.address];
+      if (method === "personal_sign") {
+        signatures += 1;
+        const message = Buffer.from(String(params[0]).slice(2), "hex").toString("utf8");
+        return account.signMessage({ message });
+      }
+      throw new Error(`Unexpected wallet method: ${method}`);
+    },
+  };
+  const fetcher = async (url, init = {}) => {
+    assert.ok(init.signal instanceof AbortSignal);
+    const parsed = new URL(String(url));
+    if (parsed.pathname === "/api/auth/challenge") {
+      const body = JSON.parse(init.body);
+      const issued = challengeModule.issueWalletChallenge({
+        wallet: body.wallet,
+        action: body.action,
+        contentDigest: body.contentDigest,
+      });
+      return Response.json(issued, { status: 201 });
+    }
+    if (parsed.pathname === "/api/ipfs/stage") {
+      return Response.json({
+        uploadUrl: "https://uploads.pinata.cloud/v3/files/signed-client-test",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+    }
+    if (parsed.hostname === "uploads.pinata.cloud") {
+      return Response.json({ data: { id: stagedFileId, cid: stagedCid } });
+    }
+    if (parsed.pathname === "/api/ipfs/pin") {
+      pinAttempts += 1;
+      pinBodies.push(String(init.body));
+      if (pinAttempts === 1) {
+        return Response.json(
+          { error: "Temporary provider failure.", code: "IPFS_UPLOAD" },
+          { status: 502 },
+        );
+      }
+      return Response.json(
+        {
+          image: {
+            cid: imageCid,
+            uri: `ipfs://${imageCid}`,
+            gatewayUrl: `https://laypipe-test.mypinata.cloud/ipfs/${imageCid}`,
+          },
+          metadata: {
+            cid: metadataCid,
+            uri: `ipfs://${metadataCid}`,
+            gatewayUrl: `https://laypipe-test.mypinata.cloud/ipfs/${metadataCid}`,
+          },
+          metadataDocument: clientMetadata.buildTokenMetadata(
+            draft,
+            `ipfs://${imageCid}`,
+          ),
+        },
+        { status: 201 },
+      );
+    }
+    throw new Error(`Unexpected client request: ${url}`);
+  };
+
+  const result = await pinClient.pinLaunchAssets({
+    file,
+    metadata: draft,
+    wallet: account.address,
+    provider,
+    browserOrigin: "https://laypipe.fun",
+    fetcher,
+  });
+  assert.equal(result.metadata.cid, metadataCid);
+  assert.equal(pinAttempts, 2);
+  assert.equal(signatures, 2, "one stage signature and one pin signature");
+  assert.equal(pinBodies[0], pinBodies[1]);
 });
 
 test("Pinata staging request enforces exact 5 MB/MIME restrictions without exposing JWT", async () => {
@@ -455,8 +857,140 @@ test("stage route verifies signature, consumes nonce, and returns only a presign
   }
 });
 
+test("stage route rejects non-canonical filenames before issuing Pinata upload authority", async () => {
+  configureEnvironment();
+  const originalFetch = globalThis.fetch;
+  let pinataCalls = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url) === "https://laypipe-test.upstash.io") {
+      return Response.json({ result: [1, 1] });
+    }
+    pinataCalls += 1;
+    return Response.json({ data: "unexpected" });
+  };
+  try {
+    const response = await stageRoute.POST(
+      apiRequest("/api/ipfs/stage", {
+        wallet: account.address,
+        fileName: "../coin.png",
+        mimeType: "image/png",
+        size: 1234,
+        fileSha256: "13".repeat(32),
+      }),
+    );
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "INVALID_UPLOAD");
+    assert.equal(pinataCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pin route rejects a tagged stage whose provenance digest is not bound to its file", async () => {
+  configureEnvironment();
+  const originalFetch = globalThis.fetch;
+  const fileSha256 = "14".repeat(32);
+  const draft = clientMetadata.normalizeMetadataDraft({
+    name: "Unbound Stage",
+    symbol: "BOUND",
+    description: "A tag alone is not authorization.",
+    feeMode: "creator",
+  });
+  const digest = digestModule.pinAuthorizationDigest({
+    wallet: account.address,
+    stagedCid,
+    stagedFileId,
+    fileSha256,
+    metadata: draft,
+  });
+  const auth = await authorize("pin", digest);
+  const redis = createRedisMock();
+  let downstreamCalls = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const urlString = String(url);
+    if (urlString === "https://laypipe-test.upstash.io") {
+      return redis.fetcher(url, init);
+    }
+    if (urlString === "https://api.us-east-2.aws.neon.tech/sql") {
+      return promotionRegistryResponse(init);
+    }
+    if (urlString.endsWith(`/v3/files/public/${stagedFileId}`) && init.method !== "DELETE") {
+      return Response.json({
+        data: {
+          id: stagedFileId,
+          name: "coin.png",
+          cid: stagedCid,
+          size: 1234,
+          mime_type: "image/png",
+          keyvalues: {
+            laypipe_stage: "true",
+            wallet: account.address.toLowerCase(),
+            digest: "15".repeat(32),
+            file_sha256: fileSha256,
+          },
+        },
+      });
+    }
+    downstreamCalls += 1;
+    return Response.json({ data: null });
+  };
+  try {
+    const response = await pinRoute.POST(
+      apiRequest("/api/ipfs/pin", {
+        wallet: account.address,
+        stagedCid,
+        stagedFileId,
+        fileSha256,
+        metadata: draft,
+        challenge: auth.challenge,
+        signature: auth.signature,
+      }),
+    );
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "STAGE_MISMATCH");
+    assert.equal(downstreamCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pin route rejects self-burn metadata before granting provider authority", async () => {
+  configureEnvironment();
+  const originalFetch = globalThis.fetch;
+  const draft = clientMetadata.normalizeMetadataDraft({
+    name: "Disabled Burn",
+    symbol: "NOBURN",
+    description: "Self-burn is release-blocked.",
+    feeMode: "self-burn",
+  });
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls += 1;
+    return Response.json({ result: [1, 1] });
+  };
+  try {
+    const response = await pinRoute.POST(
+      apiRequest("/api/ipfs/pin", {
+        wallet: account.address,
+        stagedCid,
+        stagedFileId,
+        fileSha256: "16".repeat(32),
+        metadata: draft,
+        challenge: "not-used",
+        signature: `0x${"00".repeat(65)}`,
+      }),
+    );
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "SELF_BURN_DISABLED");
+    assert.equal(upstreamCalls, 1, "only the IP rate-limit check runs before parsing");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("pin route validates staged bytes and returns exactly the dual-CID response", async () => {
   configureEnvironment();
+  assert.ok(pinRoute.IPFS_PIN_UPSTREAM_DEADLINE_MS <= 50_000);
   const originalFetch = globalThis.fetch;
   const png = await sharp({
     create: { width: 256, height: 256, channels: 4, background: "#f5c542" },
@@ -464,11 +998,18 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     .png()
     .toBuffer();
   const fileSha256 = createHash("sha256").update(png).digest("hex");
+  const stageDigest = digestModule.stageAuthorizationDigest({
+    wallet: account.address,
+    fileName: "coin.png",
+    mimeType: "image/png",
+    size: png.length,
+    fileSha256,
+  });
   const draft = clientMetadata.normalizeMetadataDraft({
     name: "Backend Pipe",
     symbol: "BACK",
     description: "Server verified artwork.",
-    feeMode: "self-burn",
+    feeMode: "creator",
     website: "https://laypipe.fun/",
   });
   const pinDigest = digestModule.pinAuthorizationDigest({
@@ -478,24 +1019,24 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     fileSha256,
     metadata: draft,
   });
-  const stageDigest = digestModule.stageAuthorizationDigest({
-    wallet: account.address,
-    fileName: "coin.png",
-    mimeType: "image/png",
-    size: png.length,
-    fileSha256,
-  });
   const auth = await authorize("pin", pinDigest);
   const uploads = [];
   const deletes = [];
   const warnings = [];
+  let registryWrites = 0;
+  const redis = createRedisMock();
   const originalWarn = console.warn;
   console.warn = (...values) => warnings.push(values);
   globalThis.fetch = async (url, init = {}) => {
     const urlString = String(url);
     if (urlString === "https://laypipe-test.upstash.io") {
-      const command = JSON.parse(init.body);
-      return Response.json({ result: command[0] === "SET" ? "OK" : [1, 1] });
+      return redis.fetcher(url, init);
+    }
+    if (urlString === "https://api.us-east-2.aws.neon.tech/sql") {
+      if (JSON.parse(init.body).query === registryModule.RECORD_COMPLETED_PROMOTION_SQL) {
+        registryWrites += 1;
+      }
+      return promotionRegistryResponse(init);
     }
     if (urlString.endsWith(`/v3/files/public/${stagedFileId}`) && init.method !== "DELETE") {
       return Response.json({
@@ -521,7 +1062,12 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     }
     if (urlString === "https://uploads.pinata.cloud/v3/files") {
       const file = init.body.get("file");
-      uploads.push({ name: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) });
+      uploads.push({
+        name: file.name,
+        type: file.type,
+        bytes: Buffer.from(await file.arrayBuffer()),
+        keyvalues: JSON.parse(init.body.get("keyvalues")),
+      });
       const isMetadata = file.type === "application/json";
       return Response.json({
         data: {
@@ -565,16 +1111,43 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     assert.equal(uploads.length, 2);
     assert.equal(uploads[0].type, "image/webp");
     assert.equal(uploads[1].type, "application/json");
+    assert.equal(uploads[0].keyvalues.laypipe_promotion_part, "image");
+    assert.equal(uploads[1].keyvalues.laypipe_promotion_part, "metadata");
+    assert.equal(
+      uploads[0].keyvalues.laypipe_promotion,
+      uploads[1].keyvalues.laypipe_promotion,
+    );
+    assert.equal(uploads[0].keyvalues.laypipe_pin_digest, pinDigest);
+    assert.equal(uploads[1].keyvalues.laypipe_stage_file, stagedFileId);
     assert.equal(deletes.some((url) => url.endsWith(stagedFileId)), true);
     assert.equal(warnings.length, 1);
     assert.equal(JSON.stringify(payload).includes(process.env.PINATA_JWT), false);
+    assert.equal(registryWrites, 1);
+
+    const providerCallsAfterFirstPromotion = uploads.length + deletes.length;
+    const replay = await pinRoute.POST(
+      apiRequest("/api/ipfs/pin", {
+        wallet: account.address,
+        stagedCid,
+        stagedFileId,
+        fileSha256,
+        metadata: draft,
+        challenge: auth.challenge,
+        signature: auth.signature,
+      }),
+    );
+    assert.equal(replay.status, 201);
+    assert.equal(await replay.text(), JSON.stringify(payload));
+    assert.equal(uploads.length, 2);
+    assert.equal(uploads.length + deletes.length, providerCallsAfterFirstPromotion);
+    assert.equal(registryWrites, 2, "exact replay must repair or confirm the durable registry");
   } finally {
     console.warn = originalWarn;
     globalThis.fetch = originalFetch;
   }
 });
 
-test("metadata upload failure deletes sanitized image and staged file", async () => {
+test("metadata provider failure keeps the raw stage and resumes without deleting permanent pins", async () => {
   configureEnvironment();
   const originalFetch = globalThis.fetch;
   const png = await sharp({
@@ -583,6 +1156,13 @@ test("metadata upload failure deletes sanitized image and staged file", async ()
     .png()
     .toBuffer();
   const fileSha256 = createHash("sha256").update(png).digest("hex");
+  const stageDigest = digestModule.stageAuthorizationDigest({
+    wallet: account.address,
+    fileName: "coin.png",
+    mimeType: "image/png",
+    size: png.length,
+    fileSha256,
+  });
   const draft = clientMetadata.normalizeMetadataDraft({
     name: "Cleanup Pipe",
     symbol: "CLEAN",
@@ -597,15 +1177,34 @@ test("metadata upload failure deletes sanitized image and staged file", async ()
     metadata: draft,
   });
   const auth = await authorize("pin", digest);
+  const redis = createRedisMock();
   let uploadCount = 0;
+  let stageGetCount = 0;
   const deletes = [];
+  let failMetadataOnce = true;
+  let failCompletionOnce = true;
   globalThis.fetch = async (url, init = {}) => {
     const urlString = String(url);
     if (urlString === "https://laypipe-test.upstash.io") {
       const command = JSON.parse(init.body);
-      return Response.json({ result: command[0] === "SET" ? "OK" : [1, 1] });
+      if (
+        command[0] === "EVAL" &&
+        String(command[1]).includes("laypipe:ipfs-promotion:complete") &&
+        failCompletionOnce
+      ) {
+        failCompletionOnce = false;
+        return Response.json({ error: "forced completion timeout" }, { status: 500 });
+      }
+      return redis.fetcher(url, init);
+    }
+    if (urlString === "https://api.us-east-2.aws.neon.tech/sql") {
+      return promotionRegistryResponse(init);
     }
     if (urlString.endsWith(`/v3/files/public/${stagedFileId}`) && init.method !== "DELETE") {
+      stageGetCount += 1;
+      if (stageGetCount > 1) {
+        return Response.json({ error: "stage expired" }, { status: 404 });
+      }
       return Response.json({
         data: {
           id: stagedFileId,
@@ -616,7 +1215,7 @@ test("metadata upload failure deletes sanitized image and staged file", async ()
           keyvalues: {
             laypipe_stage: "true",
             wallet: account.address.toLowerCase(),
-            digest: "66".repeat(32),
+            digest: stageDigest,
             file_sha256: fileSha256,
           },
         },
@@ -627,13 +1226,20 @@ test("metadata upload failure deletes sanitized image and staged file", async ()
     }
     if (urlString === "https://uploads.pinata.cloud/v3/files") {
       uploadCount += 1;
-      if (uploadCount === 2) return Response.json({ error: "forced" }, { status: 500 });
+      const file = init.body.get("file");
+      if (file.type === "application/json" && failMetadataOnce) {
+        failMetadataOnce = false;
+        return Response.json({ error: "forced" }, { status: 500 });
+      }
       return Response.json({
         data: {
-          id: "88888888-8888-4888-8888-888888888888",
-          cid: imageCid,
-          size: 100,
-          mime_type: "image/webp",
+          id:
+            file.type === "application/json"
+              ? "99999999-9999-4999-8999-999999999999"
+              : "88888888-8888-4888-8888-888888888888",
+          cid: file.type === "application/json" ? metadataCid : imageCid,
+          size: file.size,
+          mime_type: file.type,
         },
       });
     }
@@ -656,11 +1262,43 @@ test("metadata upload failure deletes sanitized image and staged file", async ()
       }),
     );
     assert.equal(response.status, 502);
+    assert.deepEqual(deletes, []);
+
+    const metadataPinnedRetry = await pinRoute.POST(
+      apiRequest("/api/ipfs/pin", {
+        wallet: account.address,
+        stagedCid,
+        stagedFileId,
+        fileSha256,
+        metadata: draft,
+        challenge: auth.challenge,
+        signature: auth.signature,
+      }),
+    );
+    assert.equal(metadataPinnedRetry.status, 503);
+    assert.equal(uploadCount, 3);
+    assert.equal(stageGetCount, 1, "saved image progress must resume after raw-stage cleanup");
+
+    const completionRetry = await pinRoute.POST(
+      apiRequest("/api/ipfs/pin", {
+        wallet: account.address,
+        stagedCid,
+        stagedFileId,
+        fileSha256,
+        metadata: draft,
+        challenge: auth.challenge,
+        signature: auth.signature,
+      }),
+    );
+    assert.equal(completionRetry.status, 201);
+    assert.equal((await completionRetry.json()).metadata.cid, metadataCid);
+    assert.equal(uploadCount, 3, "saved metadata progress must not repin either file");
+    assert.equal(stageGetCount, 1);
+    assert.deepEqual(deletes, []);
     assert.equal(
       deletes.some((url) => url.endsWith("88888888-8888-4888-8888-888888888888")),
-      true,
+      false,
     );
-    assert.equal(deletes.some((url) => url.endsWith(stagedFileId)), true);
   } finally {
     globalThis.fetch = originalFetch;
   }

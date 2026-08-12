@@ -125,6 +125,34 @@ test("migration encodes idempotency, reorg cascades, numeric safety, and cursor 
   assert.match(sql, /laypipe_advance_cursor/);
   assert.match(sql, /laypipe_rollback_chain/);
   assert.match(sql, /CREATE VIEW token_balances/);
+  assert.match(sql, /CREATE TABLE token_holder_balance_state/);
+  assert.match(sql, /PRIMARY KEY \(chain_id, holder_address, token_address\)/);
+  assert.match(sql, /REFERENCING NEW TABLE AS new_token_transfers/);
+  assert.match(sql, /REFERENCING OLD TABLE AS old_token_transfers/);
+  assert.match(sql, /CREATE INDEX admin_events_creator_pool_idx/);
+  assert.match(sql, /CREATE INDEX admin_events_creator_subject_idx/);
+  assert.match(
+    sql,
+    /CREATE INDEX launches_market_page_idx[\s\S]*token_address DESC/,
+  );
+  assert.match(
+    sql,
+    /CREATE INDEX swaps_pool_market_metrics_idx[\s\S]*block_timestamp DESC[\s\S]*WHERE token_amount > 0/,
+  );
+  assert.match(sql, /observed_safe_head bigint/);
+  assert.match(sql, /last_run_status text/);
+  assert.match(sql, /CREATE TRIGGER indexer_cursor_observation_guard/);
+  assert.match(sql, /observed safe head is behind the indexer cursor/);
+  assert.match(
+    sql,
+    /laypipe_rollback_chain[\s\S]*observed_safe_head = NULL[\s\S]*last_run_status = NULL/,
+  );
+  assert.match(sql, /CREATE TABLE pool_market_totals/);
+  assert.match(sql, /CREATE TRIGGER swaps_market_totals_delete/);
+  assert.match(
+    sql,
+    /fee_kind = 'creator-claimed'[\s\S]*recipient_address = creator_address/,
+  );
 });
 
 test("migration chunks are single statements and discovery is rechecked behind the lock", () => {

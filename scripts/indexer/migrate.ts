@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { getDatabase } from "../../lib/server/db/neon";
+import {
+  DATABASE_WRITE_TIMEOUT_MS,
+  databaseFetchOptions,
+  getDatabase,
+} from "../../lib/server/db/neon";
 import { buildMigrationCommand, migrationStatements } from "./migration-plan";
 
 async function main() {
@@ -16,7 +20,11 @@ async function main() {
     const source = await readFile(resolve(directory, name), "utf8");
     const sha256 = createHash("sha256").update(source).digest("hex");
     const statements = migrationStatements(source);
-    await database.query(buildMigrationCommand({ name, sha256, statements }));
+    await database.query(
+      buildMigrationCommand({ name, sha256, statements }),
+      [],
+      databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS),
+    );
   }
 }
 

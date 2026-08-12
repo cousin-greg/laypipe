@@ -1,8 +1,11 @@
 # LayPipe read model
 
-Robinhood Chain is authoritative. This database can be deleted and rebuilt
-from the deployment block; it never authorizes a wallet action or changes
-protocol state.
+Robinhood Chain is authoritative. Chain-derived tables can be deleted and
+rebuilt from the deployment block; the database never authorizes a wallet
+action or changes protocol state. `ipfs_promotions` is the one operational
+provenance table: losing it fails safely to initials, but restoring artwork
+availability requires its backup or a reviewed reconstruction from the
+permanent Pinata promotion tags.
 
 ## Runtime contract
 
@@ -10,14 +13,33 @@ protocol state.
 - `chain_events` stores raw logs and is uniquely keyed by
   `(chain_id, transaction_hash, log_index)`.
 - Source-derived rows reference their raw event with `ON DELETE CASCADE`.
-- `token_balances` is a view over immutable transfers, so rollback never needs
-  to repair a mutable balance cache.
+- `token_balances` remains the canonical reconciliation view over immutable
+  transfers. Public wallet reads use `token_holder_balance_state`, a
+  statement-trigger-maintained projection keyed by chain, holder, and token;
+  canonical insert, cascade rollback, and replay update it transactionally.
 - EVM unsigned values use `numeric(78,0)` and cross the JavaScript boundary as
   base-10 strings or `bigint`, never `number`.
 - An immutable-row trigger makes identical retries safe and rejects a retry
   whose data differs under the same block or log identity.
 - Cursor advancement is a database compare-and-swap performed in the same
   serializable transaction as blocks, logs, and projections.
+- Each worker completion records its pinned finalized safe head, observation
+  time, and terminal status; market reads require a fresh caught-up observation
+  with at most two blocks of stored lag.
+- `pool_market_totals` is trigger-maintained on canonical swap insert/delete,
+  so total-trade reads are constant per selected pool and reorg rollback repairs
+  the aggregate automatically.
+- `ipfs_promotions` is the immutable allowlist of image/metadata CID pairs
+  completed by LayPipe's normalized, wallet-authorized promotion flow. Public
+  market and portfolio SQL exposes an artwork CID only when both indexed URIs
+  exactly match one completed row; arbitrary on-chain URIs never become public
+  gateway requests.
+
+Back up/export `ipfs_promotions` before opening uploads and include restore
+verification in disaster-recovery rehearsal. The correlated permanent Pinata
+tags are recovery evidence, but this repository does not yet automate that
+reconstruction; do not describe a chain-only replay as a complete artwork
+restore.
 
 ## Dependencies and migration
 
@@ -35,7 +57,45 @@ npx dotenv -e .env.local -- npx tsx scripts/indexer/migrate.ts
 
 `DATABASE_URL` is server-only and required lazily when the data layer is first
 used. A missing or malformed value fails closed without breaking a frontend-only
-`next build`.
+`next build`. Runtime reads use a three-second HTTP deadline; cursor writes,
+canonical batch transactions, rollbacks, and migrations use a ten-second
+deadline. A timeout fails the request and never advances the canonical cursor.
+
+Production must not expose the migration-owner credential to request handlers.
+Use an operator-only connection for `db:migrate`; give the Vercel runtime role
+only the SELECT, canonical ingest/function, cursor, rollback, and reconciliation
+permissions required by deployed routes/workers. Rehearse grants in Preview,
+rotate both credentials independently, and retain the rebuild procedure because
+Postgres is a disposable read model. Until those roles are provisioned, keep
+live market and indexer switches disabled.
+The request role also needs `INSERT` and `SELECT` on `ipfs_promotions`; pinning
+must stay disabled if that grant or `DATABASE_URL` is unavailable.
+
+The migration includes the exact composite ordering index used by launch
+keyset pagination and a partial covering swap index for positive-token market
+metrics. Wallet portfolio reads are same-origin, no-store JSON `POST` requests;
+the address stays out of the URL, and Upstash applies both an IP limit and a
+separate IP-wallet limit before Neon opens. Missing or degraded Upstash fails
+this route closed in production. The wallet SQL rejects a stale watermark
+inside its materialized gate before balance, creator, or accounting work and
+uses `token_holder_balance_state_pkey`, `admin_events_creator_subject_idx`, and
+`admin_events_creator_pool_idx` for its bounded candidate set.
+
+Before live promotion, run `EXPLAIN (ANALYZE, BUFFERS)` on
+`TOKEN_LIST_SQL` and `TOKEN_DETAIL_SQL` against representative Preview volume.
+The selected-launch scan should use `launches_market_page_idx`, and per-pool
+latest/24-hour swap work should use `swaps_pool_market_metrics_idx` rather than
+sequentially scanning all swaps. Capture the plans and table cardinalities in
+the release evidence. Confirm the exact CID-pair lateral join uses
+`ipfs_promotions_completed_cids_idx` and that a one-URI mismatch returns no
+approved artwork. Also run `WALLET_POSITIONS_SQL` for a holder, an original
+creator, and a transferred current creator, plus a stale-watermark case; stale
+plans must not execute the holder or creator index scans. The disposable test
+proves index selection, projection replay, and cascade rollback, but do not
+extrapolate latency from its tiny tables. `0000` has not
+been applied to a shared environment as of this candidate; freeze its digest
+after the first Preview application and use a new numbered migration for every
+later schema change.
 
 ## Disposable PostgreSQL integration test
 
@@ -121,12 +181,63 @@ is capped at
 crossing it stops before cursor advancement and requires an intentionally
 designed sharded stream or provider-specific filter plan.
 
-This first operational decoder covers launches, canonical PoolManager swaps,
-and holder transfers. Hook fee events, self-burn events, revenue routing, and
-admin events still need deterministic decoders and reconciliation tests before
-those corresponding database tables can be described as live-indexed. No
-Vercel scheduler or Alchemy webhook is created by the repository; activate one
-only after Preview backfill and retry/concurrency testing succeeds.
+The manifest deployment block must be the earliest mined receipt block among
+the factory implementation/proxy, hook, routers, burner, and every other
+watched deployment transaction. Using the proxy or final configuration receipt
+would permanently skip earlier constructor or governance events.
+
+The canonical decoder covers launches, PoolManager swaps, holder transfers,
+hook fee accrual/sweep/claim/platform-payout events, self-burn execution,
+PIPEDOG revenue allocation/sequester/treasury/operations routes, and the
+governance events emitted by the audited factory, hook, and revenue router.
+Every projected amount stays in exact integer base units, every selector is
+checked against the committed contract ABI bundle, and every row is written in
+the same canonical block transaction so rollback cascades remove it before a
+replay. No Vercel scheduler or Alchemy webhook is created by the repository;
+activate one only after Preview backfill and retry/concurrency testing succeeds.
+
+Events intentionally retained only as raw chain activity or omitted from the
+watched filters:
+
+- `PoolRegistered` duplicates the factory `TokenLaunched` identity and its
+  nested config is already bound by the audited manifest plus token reads.
+- `FirstBuyRefunded` and `LaunchLiquiditySeeded` are launch-execution detail,
+  not fee/revenue-accounting lanes; the launch event, canonical swap, and token
+  transfers remain authoritative.
+- `LaypipeSwapRouter.Bought` / `Sold` duplicate the canonical PoolManager swap
+  and would double-count volume.
+- unrelated-token/native recovery events are stored as admin evidence, not
+  PIPEDOG revenue totals. Factory PIPEDOG recovery is also admin evidence rather
+  than a normal fee lane. Revenue-router `Migrated` is likewise an auditable
+  custody/admin escape, never a normal routing lane.
+- dividend-distributor round events remain unindexed while dividend launches
+  are contractually disabled and that design is under review.
+
+Reconciliation is event-led: accrued fees reconcile to swept creator/platform
+lanes plus current on-chain pending state; creator claims reconcile against the
+swept creator lane; deferred versus collected platform payouts reconcile to
+the hook platform tab; routed amount plus keeper bounty reconciles against its
+allocated revenue tank; and self-burn events report quote actually spent,
+tokens actually burned, and the paid bounty. Operational monitoring should
+periodically compare event totals to the audited contracts' public counter and
+balance views before production alerts are enabled.
+
+Run the executable, read-only gate with an explicit finalized block:
+
+```text
+RECONCILIATION_BLOCK_NUMBER=<decimal block> npm run db:reconcile
+```
+
+It uses the same complete production manifest, HTTPS RPC, database, and
+`INDEXER_FINALITY_BLOCKS` as ingestion. It checks the canonical stored block,
+per-pool hook tabs, router counters/tanks, self-burn fuel and burn transfers,
+and every indexed launch token's total supply at that exact block. It refuses
+unallocated router PIPEDOG, router migration history, more than 100 pools by
+default, or any mismatch. Raise `RECONCILIATION_MAX_POOLS` deliberately (hard
+limit 2,500); RPC concurrency is bounded by
+`RECONCILIATION_RPC_CONCURRENCY`. Destination-wallet balances and the source
+of direct router donations are intentionally not treated as cumulative
+accounting counters.
 
 Choose a webhook/block-notification cadence and RPC tier whose sustained
 capacity exceeds Robinhood's block production rate. The bounded catch-up loop

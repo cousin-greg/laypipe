@@ -1,6 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { HttpError, jsonError } from "@/lib/server/auth/http";
 import { sweepStaleStageFiles } from "@/lib/server/ipfs/pinata";
+import {
+  emitOperationalSummary,
+  observeOperationalRequest,
+} from "@/lib/server/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,10 +30,15 @@ function authorizeCleanup(request: Request) {
   }
 }
 
-async function run(request: Request) {
+async function handle(request: Request) {
   try {
     authorizeCleanup(request);
     const result = await sweepStaleStageFiles();
+    emitOperationalSummary(
+      "laypipe.ipfs-cleanup.completed",
+      { ...result },
+      result.failed > 0 || result.truncated ? "warn" : "info",
+    );
     return Response.json(result, {
       status: result.failed > 0 ? 502 : 200,
       headers: { "Cache-Control": "no-store" },
@@ -37,6 +46,12 @@ async function run(request: Request) {
   } catch (error) {
     return jsonError(error);
   }
+}
+
+async function run(request: Request) {
+  return observeOperationalRequest(request, "/api/ipfs/cleanup", () =>
+    handle(request),
+  );
 }
 
 export const GET = run;

@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   // Preserve the authored pixels in the original PIPEDOG brand artwork.
   images: {
     unoptimized: true,
+    remotePatterns: [
+      { protocol: "https", hostname: "gateway.pinata.cloud", pathname: "/ipfs/**" },
+      { protocol: "https", hostname: "**.mypinata.cloud", pathname: "/ipfs/**" },
+    ],
   },
   async headers() {
     return [

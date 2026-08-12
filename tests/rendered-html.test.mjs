@@ -130,11 +130,11 @@ test("server-renders all product routes", async () => {
     ],
     [
       "/my",
-      [/Connect to inspect your pipes/i, /claimable PIPEDOG/i],
+      [/Live wallet data is disabled/i, /No balances or reward values are being substituted/i],
     ],
     [
       "/rewards",
-      [/No live sweeps/i, /Keeper bounties are PIPEDOG-denominated/i],
+      [/Live wallet data is disabled/i, /Claim creator PIPEDOG from the audited hook/i],
     ],
     [
       "/tokenomics",
@@ -161,7 +161,7 @@ test("server-renders demo and live protocol token detail routes", async () => {
     /interface fixture/i,
     /Pool not deployed/i,
     /Self-burn/i,
-    /exact PIPEDOG approval/i,
+    /Fixture data never activates approval, trade, or router mutations/i,
   ]);
 
   await expectPage("/token/pipedog", [

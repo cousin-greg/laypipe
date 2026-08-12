@@ -1,0 +1,120 @@
+name: Release gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Application and data
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the immutable candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Use Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build and run application tests
+        run: npm test
+
+      - name: Run real PostgreSQL 16 integration
+        env:
+          LAYPIPE_RUN_POSTGRES_INTEGRATION: "1"
+        run: node --test tests/postgres-integration.test.mjs
+
+      - name: Lint and type-check
+        run: |
+          npm run lint
+          npx tsc --noEmit
+
+      - name: Reject high-severity dependency vulnerabilities
+        run: npm audit --audit-level=high
+
+      - name: Reject whitespace drift
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}" HEAD
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            git diff --check "${{ github.event.before }}" HEAD
+          else
+            git diff --check HEAD^ HEAD
+          fi
+
+  protocol-local:
+    name: Protocol local invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - name: Check out the immutable candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Use Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Install Foundry 1.5.1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: v1.5.1
+          cache: false
+
+      - name: Install commit-pinned Solidity dependencies
+        shell: pwsh
+        run: ./scripts/install-deps.ps1
+
+      - name: Build and enforce runtime sizes
+        run: |
+          forge clean
+          forge build
+          forge build --sizes
+
+      - name: Run network-independent protocol tests
+        run: >-
+          forge test -vv
+          --match-contract
+          '^(ChainBlockNumberTest|CurveSimulationMathTest|CurveEconomicsTest|LaypipeFactoryUpgradeTest|LaypipeSwapRouterTest|LaypipeTokenTest|PipedogHookLivenessTest|PipedogRevenueRouterTest|PipedogRevenueRouterInvariantTest)$'
+
+      - name: Verify reference-source provenance
+        run: node scripts/check-source-fidelity.mjs
+
+      - name: Regenerate and compare canonical ABIs
+        run: |
+          node scripts/generate-abis.mjs
+          git diff --exit-code -- abi
+
+      - name: Test deterministic release hashing
+        run: node --test scripts/release-hashes.test.mjs
+
+      - name: Verify pinned release bundle hashes
+        run: >-
+          node scripts/release-hashes.mjs --check
+          --abi-bundle-sha256 0x7eb1deb726a26ebef047ff939613b7c8ac306c14e5ec303b7b01e860fb9b3ff4
+          --artifact-bundle-sha256 0x0b39538613e7c8c939506f03c522a6800905449a68dba71209f296013dec8a8a

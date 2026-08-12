@@ -10,17 +10,26 @@ import type { Eip1193Provider } from "../../web3/types";
 import {
   decodeAddressCall,
   decodeBytes32Call,
+  decodeFactoryOperationalEvent,
+  decodeHookOperationalEvent,
   decodePoolManagerSwap,
+  decodeRevenueOperationalEvent,
+  decodeSelfBurnOperationalEvent,
   decodeSocialsCall,
   decodeStringCall,
   decodeTokenLaunched,
   decodeTokenTransfer,
   ERC20_TRANSFER_TOPIC,
+  FACTORY_OPERATIONAL_TOPICS,
+  HOOK_OPERATIONAL_TOPICS,
   launchProjection,
   POOL_MANAGER_SWAP_TOPIC,
+  REVENUE_OPERATIONAL_TOPICS,
+  SELF_BURN_OPERATIONAL_TOPICS,
   TOKEN_LAUNCHED_TOPIC,
   TOKEN_READ_SELECTORS,
   type DecodedLaunch,
+  type KnownLaunchEventIdentity,
 } from "./events";
 import {
   normalizeAddress,
@@ -36,6 +45,7 @@ import {
   initializeIndexerCursor,
   loadIndexedLaunchIdentities,
   loadRecentStoredBlocks,
+  recordIndexerObservation,
   readIndexerHealth,
   rollbackChainTo,
 } from "./repository";
@@ -58,10 +68,7 @@ export interface IndexerRuntimeConfig {
   runTimeoutMs: number;
 }
 
-export interface IndexedLaunchIdentity {
-  tokenAddress: `0x${string}`;
-  poolId: `0x${string}`;
-}
+export type IndexedLaunchIdentity = KnownLaunchEventIdentity;
 
 export interface IndexerRepository {
   initializeCursor(options: {
@@ -283,8 +290,13 @@ async function queryLogs(
   perQueryLimit: number,
 ) {
   const value = await rpc.request<unknown>({ method: "eth_getLogs", params: [filter] });
-  if (!Array.isArray(value) || value.length > perQueryLimit) {
-    throw new Error("Robinhood RPC log result exceeded its configured bound.");
+  if (!Array.isArray(value)) {
+    throw new Error("Robinhood RPC returned an invalid log result.");
+  }
+  if (value.length >= perQueryLimit) {
+    throw new Error(
+      "Robinhood RPC log result reached its configured bound and may be truncated.",
+    );
   }
   return value;
 }
@@ -606,6 +618,9 @@ export async function syncCanonicalIndexerOnce(options: {
     chainId: manifest.chain.chainId,
     deploymentBlock: manifest.deploymentBlock,
   });
+  if (state.lastBlock !== null && state.lastBlock > safeHead) {
+    throw new Error("Indexer cursor is ahead of the observed safe head.");
+  }
   const repair = await repairReorg({
     rpc,
     repository,
@@ -615,6 +630,9 @@ export async function syncCanonicalIndexerOnce(options: {
     state,
   });
   state = repair.state;
+  if (state.lastBlock !== null && state.lastBlock > safeHead) {
+    throw new Error("Repaired indexer cursor is ahead of the observed safe head.");
+  }
   if (state.next > safeHead) {
     return {
       status: "idle" as const,
@@ -648,16 +666,67 @@ export async function syncCanonicalIndexerOnce(options: {
   const fromBlock = blockTag(state.next);
   const toBlock = blockTag(lastBlock);
   const factoryAddress = manifest.contracts.factoryProxy.address.toLowerCase();
-  const rawFactoryLogs = await queryLogs(
-    rpc,
-    {
-      fromBlock,
-      toBlock,
-      address: factoryAddress,
-      topics: [TOKEN_LAUNCHED_TOPIC],
-    },
-    config.maxLogs,
-  );
+  const hookAddress = manifest.contracts.hook.address.toLowerCase();
+  const selfBurnerAddress = manifest.contracts.selfBurner.address.toLowerCase();
+  const revenueRouterAddress = manifest.contracts.revenueRouter.address.toLowerCase();
+  const [
+    rawFactoryLogs,
+    rawFactoryOperationalLogs,
+    rawHookOperationalLogs,
+    rawSelfBurnOperationalLogs,
+    rawRevenueOperationalLogs,
+  ] = await Promise.all([
+    queryLogs(
+      rpc,
+      {
+        fromBlock,
+        toBlock,
+        address: factoryAddress,
+        topics: [TOKEN_LAUNCHED_TOPIC],
+      },
+      config.maxLogs,
+    ),
+    queryLogs(
+      rpc,
+      {
+        fromBlock,
+        toBlock,
+        address: factoryAddress,
+        topics: [FACTORY_OPERATIONAL_TOPICS],
+      },
+      config.maxLogs,
+    ),
+    queryLogs(
+      rpc,
+      {
+        fromBlock,
+        toBlock,
+        address: hookAddress,
+        topics: [HOOK_OPERATIONAL_TOPICS],
+      },
+      config.maxLogs,
+    ),
+    queryLogs(
+      rpc,
+      {
+        fromBlock,
+        toBlock,
+        address: selfBurnerAddress,
+        topics: [SELF_BURN_OPERATIONAL_TOPICS],
+      },
+      config.maxLogs,
+    ),
+    queryLogs(
+      rpc,
+      {
+        fromBlock,
+        toBlock,
+        address: revenueRouterAddress,
+        topics: [REVENUE_OPERATIONAL_TOPICS],
+      },
+      config.maxLogs,
+    ),
+  ]);
   const factoryLogs = rawFactoryLogs.map((value) =>
     parseRpcLog(value, new Set([factoryAddress]), blockMap),
   );
@@ -674,11 +743,15 @@ export async function syncCanonicalIndexerOnce(options: {
   const identityByPool = new Map(existing.map((value) => [value.poolId, value]));
   const identityByToken = new Map(existing.map((value) => [value.tokenAddress, value]));
   for (const launch of newLaunches) {
-    classifyLaunch(launch, manifest);
+    const feeMode = classifyLaunch(launch, manifest);
     if (identityByPool.has(launch.poolId) || identityByToken.has(launch.tokenAddress)) {
       throw new Error("TokenLaunched conflicts with an already indexed launch identity.");
     }
-    const identity = { tokenAddress: launch.tokenAddress, poolId: launch.poolId };
+    const identity: IndexedLaunchIdentity = {
+      tokenAddress: launch.tokenAddress,
+      poolId: launch.poolId,
+      feeMode,
+    };
     identityByPool.set(launch.poolId, identity);
     identityByToken.set(launch.tokenAddress, identity);
   }
@@ -713,6 +786,10 @@ export async function syncCanonicalIndexerOnce(options: {
   );
   const rawLogCount =
     rawFactoryLogs.length +
+    rawFactoryOperationalLogs.length +
+    rawHookOperationalLogs.length +
+    rawSelfBurnOperationalLogs.length +
+    rawRevenueOperationalLogs.length +
     swapPages.reduce((sum, page) => sum + page.length, 0) +
     transferPages.reduce((sum, page) => sum + page.length, 0);
   if (rawLogCount > config.maxLogs) {
@@ -730,6 +807,18 @@ export async function syncCanonicalIndexerOnce(options: {
     .flat()
     .map((value) => parseRpcLog(value, launchedTokens, blockMap))
     .map((value) => decodeTokenTransfer(value, launchedTokens));
+  const factoryOperational = rawFactoryOperationalLogs
+    .map((value) => parseRpcLog(value, new Set([factoryAddress]), blockMap))
+    .map(decodeFactoryOperationalEvent);
+  const hookOperational = rawHookOperationalLogs
+    .map((value) => parseRpcLog(value, new Set([hookAddress]), blockMap))
+    .map((value) => decodeHookOperationalEvent(value, identityByPool));
+  const selfBurnOperational = rawSelfBurnOperationalLogs
+    .map((value) => parseRpcLog(value, new Set([selfBurnerAddress]), blockMap))
+    .map((value) => decodeSelfBurnOperationalEvent(value, identityByPool));
+  const revenueOperational = rawRevenueOperationalLogs
+    .map((value) => parseRpcLog(value, new Set([revenueRouterAddress]), blockMap))
+    .map(decodeRevenueOperationalEvent);
 
   const launchMetadata = await mapConcurrent(newLaunches, 4, async (launch) => ({
     launch,
@@ -749,11 +838,19 @@ export async function syncCanonicalIndexerOnce(options: {
     ),
     ...swaps.map((value) => value.projection),
     ...transfers.map((value) => value.projection),
+    ...factoryOperational.map((value) => value.projection),
+    ...hookOperational.map((value) => value.projection),
+    ...selfBurnOperational.map((value) => value.projection),
+    ...revenueOperational.map((value) => value.projection),
   ];
   const logs = [
     ...newLaunches.map((value) => value.raw),
     ...swaps.map((value) => value.raw),
     ...transfers.map((value) => value.raw),
+    ...factoryOperational.map((value) => value.raw),
+    ...hookOperational.map((value) => value.raw),
+    ...selfBurnOperational.map((value) => value.raw),
+    ...revenueOperational.map((value) => value.raw),
   ].sort((left, right) => {
     const byBlock = BigInt(left.blockNumber) - BigInt(right.blockNumber);
     if (byBlock !== BigInt(0)) return byBlock < BigInt(0) ? -1 : 1;
@@ -794,6 +891,7 @@ export async function runCanonicalIndexer(options?: {
   syncOnce?: typeof syncCanonicalIndexerOnce;
   manifest?: AuditedDeploymentManifest;
   safeHead?: bigint;
+  recordObservation?: typeof recordIndexerObservation;
 }) {
   const env = options?.env ?? process.env;
   const config = readIndexerRuntimeConfig(env);
@@ -862,6 +960,8 @@ export async function runCanonicalIndexer(options?: {
   if (!lastResult) {
     return {
       status: "deadline" as const,
+      safeHead: invocationSafeHead.toString(),
+      nextBlock: null,
       batches: 0,
       blockCount: 0,
       eventCount: 0,
@@ -870,7 +970,7 @@ export async function runCanonicalIndexer(options?: {
     };
   }
   const caughtUp = BigInt(lastResult.nextBlock) > BigInt(lastResult.safeHead);
-  return {
+  const result = {
     status:
       lastResult.status === "idle" || caughtUp
         ? ("caught-up" as const)
@@ -885,4 +985,12 @@ export async function runCanonicalIndexer(options?: {
     projectionCount,
     rolledBackBlocks: rolledBackBlocks.toString(),
   };
+  await (options?.recordObservation ?? recordIndexerObservation)({
+    chainId: manifest.chain.chainId,
+    stream: STREAM,
+    safeHead: invocationSafeHead,
+    status: result.status,
+    observedAt: new Date(now()),
+  });
+  return result;
 }

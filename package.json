@@ -10,7 +10,9 @@
     "build": "next build",
     "start": "next start",
     "db:migrate": "tsx scripts/indexer/migrate.ts",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "db:reconcile": "tsx scripts/indexer/reconcile.ts",
+    "test": "npm run build && node --test tests/*.test.mjs && npm run verify:runtime",
+    "verify:runtime": "node scripts/verify-runtime.mjs",
     "lint": "eslint . --ignore-pattern outputs --ignore-pattern .next"
   },
   "overrides": {

@@ -17,6 +17,7 @@ import {
   formatMoney,
 } from "./format";
 import { Sparkline } from "./Sparkline";
+import { TokenAvatar } from "./TokenAvatar";
 import { useMarketData } from "./MarketDataProvider";
 
 type FeatureTab = "hot" | "largest" | "newest" | "mover";
@@ -69,24 +70,6 @@ function rankedToken(tab: FeatureTab, sourceTokens: BoardToken[]) {
       a.volume24h * (1 + Math.max(a.change24h ?? 0, 0) / 100)
     );
   })[0];
-}
-
-function TokenAvatar({
-  token,
-  size = "medium",
-}: {
-  token: BoardToken;
-  size?: "small" | "medium" | "large";
-}) {
-  return (
-    <span
-      className={`token-avatar ${size}`}
-      style={{ "--token-accent": token.accent } as React.CSSProperties}
-      aria-hidden="true"
-    >
-      {token.symbol.slice(0, 2)}
-    </span>
-  );
 }
 
 function Change({ value }: { value: number | null }) {

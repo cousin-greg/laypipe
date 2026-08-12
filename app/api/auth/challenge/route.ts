@@ -34,8 +34,8 @@ export async function POST(request: Request) {
         windowSeconds: 60 * 60,
       }),
       enforceRateLimit({
-        namespace: "challenge-wallet",
-        identity: wallet,
+        namespace: "challenge-ip-wallet",
+        identity: `${ip}\n${wallet.toLowerCase()}`,
         limit: 20,
         windowSeconds: 60 * 60,
       }),

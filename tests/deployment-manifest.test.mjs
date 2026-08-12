@@ -252,6 +252,7 @@ function manifestProvider(manifest, options = {}) {
     async request({ method, params = [] }) {
       calls.push(method);
       if (method === "eth_chainId") return manifest.chain.chainIdHex;
+      if (method === "eth_accounts") return [addresses.finalOwner];
       if (method === "eth_blockNumber") return "0x100";
       if (method === "eth_getCode") return codeByAddress.get(params[0].toLowerCase());
       if (method === "eth_getStorageAt") {

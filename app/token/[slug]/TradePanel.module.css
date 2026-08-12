@@ -1,0 +1,144 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel .tabs {
+  margin-bottom: 2px;
+}
+
+.tabs button {
+  cursor: pointer;
+}
+
+.tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.walletRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--faint);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.slippage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel .slippage > span {
+  margin: 0;
+}
+
+.slippage select {
+  min-height: 34px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.quoteDetails {
+  display: grid;
+  gap: 7px;
+  margin: -5px 0 2px;
+  padding: 11px;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--green) 6%, var(--surface));
+}
+
+.quoteDetails > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quoteDetails dt,
+.quoteDetails dd {
+  margin: 0;
+  font-size: 0.57rem;
+}
+
+.quoteDetails dt {
+  color: var(--faint);
+}
+
+.quoteDetails dd {
+  font-weight: 800;
+  text-align: right;
+}
+
+.panel .balance,
+.panel .lifecycle,
+.panel .disabledTitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.59rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.panel .disabledTitle {
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.clearButton {
+  width: 100%;
+}
+
+.panel .lifecycle a,
+.success a {
+  color: var(--green-deep);
+  font-weight: 800;
+}
+
+.success {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--rule));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--green) 9%, var(--surface));
+  font-size: 0.59rem;
+  line-height: 1.4;
+}
+
+.message {
+  display: grid;
+  gap: 6px;
+}
+
+.panel .message p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.59rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.panel .message .error {
+  color: var(--red, #a23928);
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .walletRow {
+    flex-direction: column;
+    gap: 3px;
+  }
+}

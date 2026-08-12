@@ -1,10 +1,10 @@
 import { CID } from "multiformats/cid";
 import { HttpError } from "@/lib/server/auth/http";
 import { parseCid } from "@/lib/server/auth/request-digest";
+import { pinataGatewayBaseUrl } from "@/lib/ipfs/gateway";
 
 const PINATA_API = "https://api.pinata.cloud";
 const PINATA_UPLOADS = "https://uploads.pinata.cloud";
-const LOCAL_GATEWAY_FALLBACK = "https://gateway.pinata.cloud";
 
 interface PinataUploadData {
   id?: unknown;
@@ -66,6 +66,11 @@ const PINATA_FILE_ID_PATTERN =
 const ISO_INSTANT_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
+function boundedPinataSignal(signal?: AbortSignal | null) {
+  const timeout = AbortSignal.timeout(PINATA_REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 async function request(
   fetcher: typeof fetch,
   input: string | URL,
@@ -77,7 +82,7 @@ async function request(
     return await fetcher(input, {
       ...init,
       redirect: "error",
-      signal: init.signal ?? AbortSignal.timeout(PINATA_REQUEST_TIMEOUT_MS),
+      signal: boundedPinataSignal(init.signal),
     });
   } catch {
     throw new HttpError(502, code, message);
@@ -103,46 +108,20 @@ export function requireIpfsPinningEnabled() {
 }
 
 function gatewayBaseUrl() {
-  const configured = process.env.IPFS_GATEWAY_BASE_URL;
-  if (!configured && process.env.NODE_ENV === "production") {
-    throw new HttpError(
-      503,
-      "IPFS_GATEWAY_NOT_CONFIGURED",
-      "Artwork storage is unavailable.",
-    );
-  }
-
-  let url: URL;
   try {
-    url = new URL(configured || LOCAL_GATEWAY_FALLBACK);
+    return pinataGatewayBaseUrl(
+      process.env.IPFS_GATEWAY_BASE_URL,
+      process.env.NODE_ENV === "production",
+    );
   } catch {
     throw new HttpError(
       503,
-      "IPFS_GATEWAY_INVALID",
+      process.env.IPFS_GATEWAY_BASE_URL
+        ? "IPFS_GATEWAY_INVALID"
+        : "IPFS_GATEWAY_NOT_CONFIGURED",
       "Artwork storage is unavailable.",
     );
   }
-  const hostname = url.hostname.toLowerCase();
-  const isPinataGateway =
-    hostname === "gateway.pinata.cloud" || hostname.endsWith(".mypinata.cloud");
-  const path = url.pathname.replace(/\/+$/, "");
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.port ||
-    url.search ||
-    url.hash ||
-    !isPinataGateway ||
-    (path !== "" && path !== "/ipfs")
-  ) {
-    throw new HttpError(
-      503,
-      "IPFS_GATEWAY_INVALID",
-      "Artwork storage is unavailable.",
-    );
-  }
-  return `${url.origin}/ipfs`;
 }
 
 function pinataHeaders(extra?: HeadersInit) {
@@ -409,14 +388,18 @@ export async function createPresignedStageUrl(options: {
   return { uploadUrl: url.toString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
 }
 
-export async function getStagedFile(fileId: string, fetcher: typeof fetch = fetch) {
+export async function getStagedFile(
+  fileId: string,
+  fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
+) {
   if (!PINATA_FILE_ID_PATTERN.test(fileId)) {
     throw new HttpError(400, "INVALID_FILE_ID", "Staged file ID is invalid.");
   }
   const response = await request(
     fetcher,
     `${PINATA_API}/v3/files/public/${encodeURIComponent(fileId)}`,
-    { headers: pinataHeaders(), cache: "no-store" },
+    { headers: pinataHeaders(), cache: "no-store", signal },
     "STAGE_NOT_FOUND",
     "Staged artwork was not found.",
   );
@@ -432,13 +415,13 @@ export async function getStagedFile(fileId: string, fetcher: typeof fetch = fetc
 
 export async function fetchPublicCid(
   cid: string,
-  options: { maxBytes: number; fetcher?: typeof fetch },
+  options: { maxBytes: number; fetcher?: typeof fetch; signal?: AbortSignal },
 ) {
   const normalized = parseCid(cid);
   const response = await request(
     options.fetcher ?? fetch,
     `${gatewayBaseUrl()}/${encodeURIComponent(normalized)}`,
-    { cache: "no-store" },
+    { cache: "no-store", signal: options.signal },
     "STAGE_FETCH",
     "Staged artwork could not be retrieved.",
   );
@@ -485,6 +468,7 @@ export async function uploadPublicFile(options: {
   mimeType: string;
   keyvalues: Record<string, string>;
   fetcher?: typeof fetch;
+  signal?: AbortSignal;
 }) {
   const form = new FormData();
   form.set("network", "public");
@@ -502,6 +486,7 @@ export async function uploadPublicFile(options: {
       headers: pinataHeaders(),
       body: form,
       cache: "no-store",
+      signal: options.signal,
     },
     "IPFS_UPLOAD",
     "Artwork storage failed.",

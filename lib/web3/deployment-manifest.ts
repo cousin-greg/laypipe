@@ -887,3 +887,17 @@ export function assertAuditedIndexerDeployment(
 ) {
   return assertAuditedDeploymentSnapshot(provider, manifest, true);
 }
+
+/**
+ * Wallet maintenance preflight for claims and keeper actions. Maintenance is
+ * intentionally allowed while new launches are paused, but every codehash,
+ * binding, owner, routing, economic, and launch-config identity check remains
+ * identical to the active wallet preflight. Call it again immediately before
+ * sending; never cache a successful result.
+ */
+export function assertAuditedMaintenanceDeployment(
+  provider: Eip1193Provider,
+  manifest: AuditedDeploymentManifest,
+) {
+  return assertAuditedDeploymentSnapshot(provider, manifest, true);
+}

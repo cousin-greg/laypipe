@@ -7,8 +7,15 @@ interface RedisCredentials {
 }
 
 interface RedisCommandResponse {
-  result?: unknown;
-  error?: string;
+  result: unknown;
+  error?: unknown;
+}
+
+const REDIS_REQUEST_TIMEOUT_MS = 3_000;
+
+function boundedRedisSignal(signal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(REDIS_REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 function credentials(): RedisCredentials | null {
@@ -51,6 +58,7 @@ function credentials(): RedisCredentials | null {
 export async function redisCommand(
   command: Array<string | number>,
   fetcher: typeof fetch = fetch,
+  signal?: AbortSignal,
 ) {
   const configured = credentials();
   if (!configured) {
@@ -74,6 +82,8 @@ export async function redisCommand(
       },
       body: JSON.stringify(command),
       cache: "no-store",
+      redirect: "error",
+      signal: boundedRedisSignal(signal),
     });
   } catch {
     throw new HttpError(503, "RATE_LIMIT_UNAVAILABLE", "Request protection is unavailable.");
@@ -81,11 +91,22 @@ export async function redisCommand(
   if (!response.ok) {
     throw new HttpError(503, "RATE_LIMIT_UNAVAILABLE", "Request protection is unavailable.");
   }
-  const payload = (await response.json()) as RedisCommandResponse;
-  if (payload.error) {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
     throw new HttpError(503, "RATE_LIMIT_UNAVAILABLE", "Request protection is unavailable.");
   }
-  return payload.result;
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    Array.isArray(payload) ||
+    !("result" in payload) ||
+    ("error" in payload && (payload as RedisCommandResponse).error != null)
+  ) {
+    throw new HttpError(503, "RATE_LIMIT_UNAVAILABLE", "Request protection is unavailable.");
+  }
+  return (payload as RedisCommandResponse).result;
 }
 
 function safeKey(namespace: string, identity: string) {
@@ -99,11 +120,13 @@ export async function enforceRateLimit(options: {
   limit: number;
   windowSeconds: number;
   fetcher?: typeof fetch;
+  signal?: AbortSignal;
 }) {
   const key = safeKey(options.namespace, options.identity);
   const result = await redisCommand(
     ["EVAL", RATE_LIMIT_SCRIPT, "1", key, options.limit, options.windowSeconds],
     options.fetcher,
+    options.signal,
   );
   if (result === undefined) return;
   if (!Array.isArray(result) || result.length < 2) {
@@ -119,18 +142,27 @@ export async function consumeNonce(options: {
   expiresAt: number;
   now?: number;
   fetcher?: typeof fetch;
+  signal?: AbortSignal;
+  idempotencyKey?: string;
 }) {
   const now = Math.floor(options.now ?? Date.now() / 1000);
   const ttl = Math.max(1, options.expiresAt - now + 60);
   const key = safeKey("nonce", options.nonce);
+  const value = options.idempotencyKey
+    ? `idempotent:${createHash("sha256").update(options.idempotencyKey).digest("hex")}`
+    : "1";
   const result = await redisCommand(
-    ["SET", key, "1", "NX", "EX", ttl],
+    ["SET", key, value, "NX", "EX", ttl],
     options.fetcher,
+    options.signal,
   );
   if (result === undefined) return;
-  if (result !== "OK") {
-    throw new HttpError(409, "REPLAY", "This wallet authorization was already used.");
+  if (result === "OK") return;
+  if (options.idempotencyKey) {
+    const existing = await redisCommand(["GET", key], options.fetcher, options.signal);
+    if (existing === value) return;
   }
+  throw new HttpError(409, "REPLAY", "This wallet authorization was already used.");
 }
 
 const RATE_LIMIT_SCRIPT = [

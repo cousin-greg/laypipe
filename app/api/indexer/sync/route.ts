@@ -2,6 +2,10 @@ import { HttpError, jsonError } from "@/lib/server/auth/http";
 import { authorizeIndexerCron } from "@/lib/server/indexer/auth";
 import { runCanonicalIndexer } from "@/lib/server/indexer/ingestion";
 import { acquireIndexerLease } from "@/lib/server/indexer/lease";
+import {
+  emitOperationalSummary,
+  observeOperationalRequest,
+} from "@/lib/server/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,11 +22,16 @@ function authorize(request: Request) {
   }
 }
 
-async function run(request: Request) {
+async function handle(request: Request) {
   try {
     authorize(request);
     const lease = await acquireIndexerLease();
     if (!lease.acquired) {
+      emitOperationalSummary(
+        "laypipe.indexer.completed",
+        { runStatus: "busy" },
+        "warn",
+      );
       return Response.json(
         { status: "busy", accepted: true },
         { status: 202, headers: { "Cache-Control": "no-store" } },
@@ -30,6 +39,21 @@ async function run(request: Request) {
     }
     try {
       const result = await runCanonicalIndexer();
+      const blockLag = result.nextBlock === null
+        ? null
+        : (BigInt(result.safeHead) - BigInt(result.nextBlock) + BigInt(1)).toString();
+      emitOperationalSummary(
+        "laypipe.indexer.completed",
+        {
+          runStatus: result.status,
+          safeHead: result.safeHead,
+          nextBlock: result.nextBlock,
+          blockLag,
+          batches: result.batches,
+          rolledBackBlocks: result.rolledBackBlocks,
+        },
+        result.status === "caught-up" ? "info" : "warn",
+      );
       return Response.json(result, {
         headers: { "Cache-Control": "no-store" },
       });
@@ -39,6 +63,12 @@ async function run(request: Request) {
   } catch (error) {
     return jsonError(error);
   }
+}
+
+async function run(request: Request) {
+  return observeOperationalRequest(request, "/api/indexer/sync", () =>
+    handle(request),
+  );
 }
 
 export const GET = run;

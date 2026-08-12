@@ -2,6 +2,7 @@ import type { DbClient } from "../db/neon";
 import { getDatabase } from "../db/neon";
 import type { MarketApiError } from "../../market/live";
 import {
+  assessIndexerFreshness,
   MarketInputError,
   getLiveToken,
   getMarketHealth,
@@ -19,6 +20,7 @@ export interface MarketHttpDependencies {
   database?: () => Promise<DbClient>;
   marketMode?: () => MarketDataMode;
   marketCursorSecret?: () => string;
+  now?: () => number;
 }
 
 function json(body: unknown, status: number, cacheControl: string) {
@@ -87,7 +89,12 @@ export async function handleTokenListRequest(
 
   try {
     const database = await (dependencies.database ?? getDatabase)();
-    const payload = await listLiveTokens(database, options, cursorSecret);
+    const payload = await listLiveTokens(
+      database,
+      options,
+      cursorSecret,
+      (dependencies.now ?? Date.now)(),
+    );
     return json(payload, 200, MARKET_CACHE_CONTROL);
   } catch {
     return unavailableResponse();
@@ -114,7 +121,11 @@ export async function handleTokenDetailRequest(
 
   try {
     const database = await (dependencies.database ?? getDatabase)();
-    const payload = await getLiveToken(database, normalizedSlug);
+    const payload = await getLiveToken(
+      database,
+      normalizedSlug,
+      (dependencies.now ?? Date.now)(),
+    );
     if (!payload) {
       return errorResponse("not_found", "No indexed LayPipe token has that address.", 404);
     }
@@ -129,6 +140,7 @@ export async function handleTokenDetailRequest(
 
 export async function handleMarketHealthRequest(
   dependencies: MarketHttpDependencies = {},
+  options: { requireLive?: boolean } = {},
 ) {
   let mode: MarketDataMode;
   try {
@@ -149,6 +161,20 @@ export async function handleMarketHealthRequest(
   }
 
   if (mode === "fixture") {
+    if (options.requireLive) {
+      return json(
+        {
+          status: "not_ready",
+          check: "readiness",
+          marketMode: "fixture",
+          readyForLiveMarkets: false,
+          database: { status: "not_checked" },
+          indexer: { status: "not_checked" },
+        },
+        503,
+        NO_STORE_CACHE_CONTROL,
+      );
+    }
     return json(
       {
         status: "alive",
@@ -181,6 +207,24 @@ export async function handleMarketHealthRequest(
         NO_STORE_CACHE_CONTROL,
       );
     }
+    const freshness = assessIndexerFreshness(
+      indexer,
+      (dependencies.now ?? Date.now)(),
+    );
+    if (freshness.status === "stale") {
+      return json(
+        {
+          status: "not_ready",
+          check: "readiness",
+          marketMode: "live",
+          readyForLiveMarkets: false,
+          database: { status: "reachable" },
+          indexer: { status: "stale", freshness, cursor: indexer },
+        },
+        503,
+        NO_STORE_CACHE_CONTROL,
+      );
+    }
     return json(
       {
         status: "ready",
@@ -190,7 +234,7 @@ export async function handleMarketHealthRequest(
         database: { status: "reachable" },
         indexer: {
           status: "ready",
-          freshness: "not_assessed",
+          freshness,
           cursor: indexer,
         },
       },

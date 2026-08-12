@@ -1,8 +1,12 @@
 # LayPipe production runbook
 
 This file is the release gate for `laypipe.fun`. Chain state is authoritative;
-Postgres is a rebuildable read model. No launch or trading control should be
+Postgres is a rebuildable chain read model plus the fail-safe artwork promotion
+registry described below. No launch or trading control should be
 enabled until every required contract address is configured and verified.
+Use [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md) as the short owner/operator
+sequence and [contracts/AUDIT_HANDOFF.md](./contracts/AUDIT_HANDOFF.md) for the
+immutable external-review package; this runbook remains the detailed authority.
 
 ## Current Vercel resource status
 
@@ -100,6 +104,26 @@ fields, unsupported RPC responses, bytecode replacement, proxy upgrade,
 ownership drift, or configuration drift fail closed. Do not cache a successful
 preflight across wallet mutations.
 
+Approval and launch submission are crash-safe browser workflows. Immediately
+before `eth_sendTransaction`, the client repeats the complete audited deployment
+verification and then re-reads the active account and chain. It saves a
+wallet/action/predicted-token intent in local storage before invoking the send
+method and saves the returned hash before waiting. Only an explicit EIP-1193
+`4001` rejection is retry-safe after the wallet prompt begins; transport,
+provider, malformed-hash, callback, timeout, and unknown errors leave the intent
+locked across reloads and navigation until wallet activity is reconciled.
+
+Receipts are confirmed through an independent Robinhood RPC, not the injected
+wallet provider. Confirmation requires two canonical blocks, exact transaction
+hash/from/to/input, zero native value, matching receipt and block hashes, and
+transaction inclusion in that block. Approval confirmation also re-reads the
+exact allowance at the receipt block. Launch confirmation requires exactly one
+audited-factory `TokenLaunched` event, the mined token and creator, submitted
+config/first-buy values, audited hook and fee recipient, plus the launched
+token's `poolId()` matching the event. A real browser and hardware-wallet
+rehearsal remains a release gate; unit fixtures do not prove wallet UX or public
+RPC behavior.
+
 `lib/web3/chains.ts` contains a Base Sepolia rehearsal descriptor, and
 `createBaseSepoliaTestManifest` requires an explicit test-only acknowledgement.
 The production environment parser has no network switch and can only construct
@@ -117,17 +141,40 @@ Use `numeric(78,0)` for EVM integers and serialize them as decimal strings.
 Never coerce token amounts to JavaScript `number`.
 
 Public read routes use keyset pagination and short CDN caching. Health and
-mutation routes use `no-store`. Keyset cursors are HMAC-authenticated with a
+mutation routes use `no-store`. Every successful worker wake-up stores its
+pinned finalized safe head, terminal status, and observation time. Live health,
+board, and token-detail reads fail closed when the cursor is uninitialized, the
+observation is missing or more than five minutes old, the last run did not
+finish caught up, or the cursor is more than two blocks behind that safe head.
+`/api/health` remains deployment liveness in fixture mode; `/api/ready` is the
+market-read readiness probe and returns 503 unless live mode and its database
+and indexer gates are ready. It does not prove launch mutation readiness:
+manifest/RPC, Redis, Pinata, and wallet flows retain separate release gates.
+Keyset cursors are HMAC-authenticated with a
 domain-separated use of the server-only wallet challenge secret, so arbitrary
 client-generated cursor variants fail before Neon. Indexer work is bounded by
 block batch, guarded by `CRON_SECRET`, idempotent, and safe to retry.
 
-Before switching to `live`, stage Vercel WAF rules in log-only mode for GET
+Before switching market reads to `live`, stage Vercel WAF rules in log-only mode for GET
 traffic to `/api/tokens` and `/token/*`, initially at 120 requests per minute
 per IP. That is deliberately generous versus the board's four polls per minute.
 Review real traffic, verify Preview, and only then publish an enforcing 429
 rule. Application caching and signed cursors reduce spend; they do not replace
 an edge limit for arbitrary token-address probes.
+
+Use two method-scoped WAF rules so traffic is measurable independently:
+
+```text
+GET /api/tokens*  -> 120 requests / 60 seconds / IP, log-only first
+GET /token/*      -> 120 requests / 60 seconds / IP, log-only first
+```
+
+After publishing log-only rules, review the Firewall traffic view for at least
+one representative promotion window. Confirm wallet clients, social unfurlers,
+search crawlers, and uptime probes are not misclassified; then enforce in
+Preview, verify 429 behavior, and only afterward ask the project owner to
+publish production enforcement. Vercel's automatic DDoS mitigation remains the
+baseline and is not a substitute for route-specific spend controls.
 
 The implemented canonical worker is exposed at `/api/indexer/sync` (Vercel
 Cron or another scheduler with `Authorization: Bearer $CRON_SECRET`) and
@@ -156,8 +203,9 @@ free-tier `eth_getLogs` range. A wake-up processes at most
 head and complete audited-manifest preflight, stopping when caught up or when
 the 45-second deadline needs release headroom. Every batch is also bounded by
 total logs, new launch metadata reads, watched pool/token filter chunks, reorg
-lookback, RPC response bytes, and a 45-second internal deadline. Exceeding a
-bound fails before cursor advancement. The default watch set supports 2,500 launches;
+lookback, RPC response bytes, and a 45-second internal deadline. Reaching an
+`eth_getLogs` result ceiling is treated as possible provider truncation and
+fails before cursor advancement. The default watch set supports 2,500 launches;
 larger sets require an explicit sharded-stream/filter design rather than an
 unbounded function invocation.
 
@@ -167,12 +215,36 @@ indexer. Alert on `bounded`/`deadline` responses, cursor lag, lease contention,
 and provider throttling; raise wake-up frequency before widening the free-tier
 10-block RPC ranges.
 
-Launches, canonical PoolManager swaps (including direct v4 swaps that bypass
-LayPipe's router), and launch-token transfers are decoded now. Hook fee,
-self-burn, revenue-router, and admin-event ingestion remains an explicit
-operational gap. Do not claim full indexing or reconciliation readiness until
-those decoders and their chain-vs-database checks are added. The repository
-does not create a Vercel schedule or activate an Alchemy webhook automatically.
+Do not treat Vercel Cron as a reliable retry queue: failed invocations are not
+retried automatically. If a Pro-plan minute cron is chosen as the primary
+wake-up, configure `/api/indexer/sync` explicitly and keep the Alchemy webhook
+as an independent wake-up path; the shared lease and cursor CAS make duplicate
+delivery safe. If the project remains on Hobby, use an authenticated external
+scheduler or webhook because the once-daily cadence cannot maintain the read
+model. The repository intentionally does not activate either schedule yet.
+
+The canonical decoder covers launches; PoolManager swaps (including direct v4
+swaps that bypass LayPipe's router); launch-token transfers; hook fee accrual,
+sweeps, creator claims, deferred platform fees, and platform collections;
+self-burn execution; revenue allocation/routing; and the audited protocol's
+governance/admin events. Before claiming reconciliation readiness, compare
+event-led fee, platform-tab, revenue-tank, burn, and admin totals against the
+audited contracts' public counters and balances over a pinned block range. The
+repository does not create a Vercel schedule or activate an Alchemy webhook
+automatically.
+
+Before enabling live reads or contract controls, run
+`RECONCILIATION_BLOCK_NUMBER=<finalized decimal block> npm run db:reconcile`
+with the production manifest/RPC/database environment. A nonzero exit is a
+release stop; retain the secret-free JSON report with the release evidence.
+
+Intentional exclusions prevent double-counting: hook `PoolRegistered` repeats
+the factory launch identity; swap-router `Bought` / `Sold` repeat canonical
+PoolManager volume; and factory refund/liquidity-seed events are execution
+detail rather than fee lanes. Unrelated-token/native recoveries and router
+migration remain admin evidence rather than revenue. Dividend round events stay
+outside the production stream while dividend launches are contractually
+disabled. See `db/README.md` for the field-level reconciliation model.
 
 `LAYPIPE_MARKET_MODE=fixture` is the safe deployment default. `live` explicitly
 selects the Neon-backed API; an unavailable database or indexer returns an
@@ -193,8 +265,23 @@ re-encodes it as WebP, removes embedded metadata, and rejects SVG.
 Pin the normalized image first. Create deterministic token metadata whose
 `image` field is `ipfs://<image-cid>`, then pin that JSON. The launch transaction
 must pass the image URI as `TokenParams.logo` and the metadata URI as
-`TokenParams.metadataURI`. Persist both CIDs in Postgres. A gateway URL is a
-delivery convenience; `ipfs://` is the durable identity.
+`TokenParams.metadataURI`. The pin route records the exact completed promotion,
+wallet, digest, normalized image CID, and metadata CID in `ipfs_promotions`
+before returning success. That write is immutable and idempotent; a missing or
+malformed `DATABASE_URL` stops publishing before any new permanent upload, and
+a database write failure prevents success after the pins are durable so the
+same request can repair the registry without repinning.
+A gateway URL is a delivery convenience; `ipfs://` is the durable identity.
+
+Board, token-detail, and wallet portfolio reads expose a gateway image only
+when both indexed on-chain URIs exactly match one completed promotion record.
+A direct factory caller can still put arbitrary URIs on-chain, but those tokens
+render as initials. Public reads never query Pinata to validate artwork and
+never translate an unapproved CID into a fetchable URL.
+Back up `ipfs_promotions` before opening uploads. Its loss does not affect token
+ownership or trading and fails safely to initials, but artwork availability is
+not restored by chain replay alone; retain the correlated permanent Pinata tags
+and rehearse restoring the registry export.
 
 The pin route returns `{ image, metadata, metadataDocument }`. Before requesting
 any allowance, the browser rebuilds the expected document from the reviewed
@@ -202,7 +289,33 @@ form and returned image URI and requires an exact deep match with
 `metadataDocument`. Any missing field, URI/CID mismatch, or metadata mismatch
 fails closed before a wallet transaction.
 
-Upstash rate-limits IPs and wallets and consumes every challenge nonce once.
+While the self-burn contract path is release-blocked, `/api/ipfs/pin` accepts
+creator-mode metadata only; this is enforced by the server as well as the form.
+The exact staged-file/pin-digest pair has a 90-day Upstash progress record and
+a separate 50-second owner lease. Image and metadata progress is saved between
+attempts and resumes without the raw stage once a permanent image has been
+recorded. A still-pending promotion must be restaged after raw-stage cleanup.
+Completed response JSON is replayable exactly, and all Redis/Pinata
+work shares a 45-second deadline. The browser makes at most one bounded retry
+within a 65-second budget using the same signed request.
+
+Every permanent upload is tagged with `laypipe_promotion`,
+`laypipe_promotion_part`, `laypipe_pin_digest`, and `laypipe_stage_file`. If a
+provider commits an upload but loses the response, use those tags with the
+Upstash promotion record to identify the incomplete pair. Do not delete or add
+an age-based cleanup rule for `token-artwork` or `token-metadata`: the current
+protocol has no launch expiry, and a returned URI may already be referenced by
+an immutable launch.
+
+Permanent pre-launch pins are an explicit storage-cost risk: signed IP/wallet
+limits are abuse friction, not Sybil resistance. Before opening uploads, set a
+monthly Pinata byte/file budget and alert at 50%, 75%, and 90%; publish the
+accepted orphan-cost ceiling and disable `IPFS_PINNING_ENABLED` when it is
+reached. A deposit or factory-enforced expiry would be a new audited protocol
+boundary, not an operations-only cleanup rule.
+
+Upstash rate-limits IPs and wallets and consumes every challenge nonce once;
+the final nonce permits only an exact idempotent retry of its promotion ID.
 `/api/ipfs/cleanup`, authorized by `CRON_SECRET`, deletes only validated
 `laypipe_stage=true` files older than one hour, with bounded pagination and a
 100-file deletion cap. Choose a recurring scheduler before enabling uploads;
@@ -214,27 +327,97 @@ regex checks are only an early error message. Non-zero first buys remain
 disabled until the application can derive a deterministic on-chain quote and
 apply user-selected slippage instead of asking users to guess a minimum.
 
+## Observability and incident response
+
+Failed operational requests emit bounded route/status summaries; indexer and
+cleanup jobs emit one secret-free terminal domain summary including worker
+status, safe head, next block/lag, rollback count, or cleanup truncation and
+failure totals. They never log authorization headers, RPC URLs, wallet
+signatures, webhook bodies, or environment values. Routine liveness and market
+poll successes rely on Vercel's native request metadata to avoid log spend.
+
+Before promotion:
+
+1. Verify `/api/health` returns liveness and `/api/ready` returns 200 in Preview
+   live mode only while the isolated indexer is caught up. Confirm readiness
+   returns 503 for a bounded run, excess block lag, and a five-minute pause.
+2. In Vercel Runtime Logs, save filters for `/api/ready`,
+   `/api/indexer/sync`, `/api/indexer/webhook`, and `/api/ipfs/cleanup`.
+3. If the plan supports Observability Plus, subscribe the owner to error and
+   usage-anomaly alerts. Otherwise use an external monitor against
+   `/api/ready` and review Runtime Logs after every production promotion.
+4. Alert externally when readiness is non-200 for two consecutive probes,
+   `status` is repeatedly `bounded` or `deadline`, or an indexer request is 5xx.
+   A single 202 `busy` is normal coalescing; sustained busy responses indicate
+   lease contention or runs longer than the wake-up interval.
+5. After a deployment reaches READY, exercise liveness, readiness, board,
+   token-detail, authenticated indexer, and pin-cleanup paths, then scan the first hour of
+   runtime errors before considering the release stable.
+
+Incident actions:
+
+- **Indexer stale or RPC-throttled:** keep launches disabled and market mode out
+  of `live`; inspect cursor/RPC errors, restore provider capacity, then replay
+  from the stored cursor. Never advance the cursor manually.
+- **Reorg beyond the configured lookback:** stop ingestion, increase the audit
+  window deliberately, locate an RPC-confirmed stored ancestor, run the exact
+  rollback helper, and replay. Never guess an ancestor.
+- **Neon degraded:** keep chain mutations disabled, leave the API fail-closed,
+  and rebuild the disposable read model from the deployment block if recovery
+  is not trustworthy.
+- **Redis degraded:** mutation, cleanup, and indexer lease acquisition fail
+  closed in production. Restore Redis rather than bypassing rate limits,
+  nonces, or leases.
+- **IPFS/Pinata degraded:** set `IPFS_PINNING_ENABLED=false`; already-pinned
+  `ipfs://` metadata remains valid while new uploads stop.
+- **Active abuse:** first tighten the already-observed route-specific WAF rule;
+  the project owner may enable Vercel Attack Mode interactively if necessary.
+
 ## Release sequence
 
-1. Complete Vercel two-factor verification and apply the reviewed database
-   migration to the production Neon branch.
-2. Apply the same migration to an isolated Preview branch, then backfill from
-   a pinned deployment block.
-3. Exercise image and metadata pinning with abuse protection enabled.
-4. Complete contract tests, source-fidelity checks, ABI generation, live
+1. Complete Vercel two-factor verification, apply the reviewed migration to an
+   isolated Preview Neon branch, and record its migration-ledger digest.
+2. Exercise repository ingest/rollback/replay, retry/concurrency, pagination,
+   query plans, indexer staleness, and market-read readiness with isolated
+   Preview fixtures. Include holder-balance projection insert/replay/rollback,
+   original/current-creator wallet portfolios, stale-watermark short circuit,
+   and both IP and IP-wallet Upstash limits on `POST /api/holdings`. Capture
+   `EXPLAIN (ANALYZE, BUFFERS)` at representative volume; the disposable
+   PostgreSQL test proves correctness and index eligibility, not production
+   latency. Canonical backfill cannot begin before contracts exist.
+3. Exercise image and metadata pinning in Preview with separate abuse
+   protection enabled. Prove the completed `ipfs_promotions` row is replay-safe,
+   both exact on-chain URIs render, and a mismatched/direct-factory CID falls
+   back to initials without a Pinata request; then return the pinning kill
+   switch to `false`.
+4. Apply the exact reviewed migration digest to Production only after Preview
+   rehearsal passes. Keep `INDEXER_ENABLED=false` and
+   `LAYPIPE_MARKET_MODE=fixture` in Production.
+5. Complete the immutable pre-deployment candidate: contract tests,
+   source-fidelity checks, deterministic ABI/artifact hashes, live
    preflights, the EIP-1153 runtime gate, and a no-broadcast deployment
    simulation.
-5. Complete an independent audit and resolve every finding.
-6. Fund the deployment address with testnet gas, broadcast Base Sepolia, and
-   test launch, exact approval, buy, sell, fee sweep, self-burn, and revenue
-   routing end to end.
-7. Re-run the release suite, deploy Robinhood contracts with launch disabled,
-   verify source, record and pin the proxy plus implementation identity used by
-   the browser preflight, and transfer ownership to the Safe.
-8. Start the production indexer from the deployment block and compare indexed
-   totals against direct RPC reads.
-9. Deploy the Vercel application with addresses configured, run browser and
-   mobile verification, then enable launches in a separate Safe transaction.
+6. Complete an independent audit and resolve every finding.
+7. Fund the deployment address with testnet gas, broadcast Base Sepolia, and
+   test creator-mode launch, exact approval, buy, sell, fee sweep, and revenue
+   routing end to end. Verify the self-burn launch config remains disabled;
+   do not exercise or enable the release-blocked self-burn execution path.
+8. Re-run the release suite, deploy Robinhood contracts with launches disabled,
+   verify source, record the complete post-deployment manifest including the
+   earliest watched-contract receipt block, and transfer ownership to the Safe.
+9. Backfill isolated Preview from that block, run finalized reconciliation,
+   and verify live market reads. Then start the Production indexer and repeat
+   reconciliation before any launch enablement.
+10. Stage log-only WAF rules, deploy the Vercel application with addresses
+    configured, run browser/mobile/API verification and the first-hour runtime
+    error scan. Enable launches in a separate Safe transaction only after the
+    market-read, mutation-flow, and reconciliation gates remain green. The
+    exact-approval buy/sell and creator positions/claims paths are internally
+    implemented, but still require the independent contract review, real
+    browser/hardware-wallet rehearsal, and deployed-manifest E2E evidence.
+    Keeper/reward eligibility and operator automation remain incomplete. Until
+    every required mutation and keeper gate is proven, the public release must
+    remain a disabled launcher plus read-only Board.
 
 Rollback means disabling launch configuration and frontend mutation controls;
 existing permanent pools cannot be removed or migrated by the current design.

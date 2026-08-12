@@ -28,6 +28,8 @@ export type LaunchMachineEvent =
   | { type: "APPROVAL_CONFIRMED"; needsAnotherApproval: boolean }
   | { type: "LAUNCH_SUBMITTED" }
   | { type: "LAUNCH_CONFIRMED" }
+  | { type: "RESTORE_PENDING"; action: "approval" | "launch" }
+  | { type: "RESTORE_LAUNCH_CONFIRMED" }
   | { type: "FAIL"; message: string; recoverTo: Exclude<LaunchPhase, "failed"> }
   | { type: "RECOVER" };
 
@@ -64,6 +66,12 @@ export function reduceLaunchMachine(
     case "LAUNCH_SUBMITTED":
       return { phase: "launch-pending", recoverTo: "ready-to-launch" };
     case "LAUNCH_CONFIRMED":
+      return { phase: "succeeded", recoverTo: "succeeded" };
+    case "RESTORE_PENDING":
+      return event.action === "approval"
+        ? { phase: "approval-pending", recoverTo: "wallet-ready" }
+        : { phase: "launch-pending", recoverTo: "wallet-ready" };
+    case "RESTORE_LAUNCH_CONFIRMED":
       return { phase: "succeeded", recoverTo: "succeeded" };
     case "FAIL":
       return { phase: "failed", recoverTo: event.recoverTo, message: event.message };

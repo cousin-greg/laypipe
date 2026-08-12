@@ -10,6 +10,13 @@ import {
   type LaunchTokenMetadata,
 } from "./metadata";
 import {
+  buildChallengeMessage,
+  WALLET_CHALLENGE_TTL_SECONDS,
+  WALLET_CHALLENGE_VERSION,
+  type WalletAction,
+  type WalletChallengePayload,
+} from "./challenge-message";
+import {
   isAddress,
   sameAddress,
   type Address,
@@ -36,6 +43,7 @@ export interface PinnedLaunchAssets {
 
 interface JsonErrorResponse {
   error?: unknown;
+  code?: unknown;
 }
 
 interface ChallengeResponse extends JsonErrorResponse {
@@ -60,13 +68,30 @@ interface PinResponse extends JsonErrorResponse {
   metadataDocument?: unknown;
 }
 
+const CHALLENGE_TOKEN_PATTERN = /^([A-Za-z0-9_-]{1,1536})\.([A-Za-z0-9_-]{43})$/;
+const CHALLENGE_PAYLOAD_KEYS = [
+  "action",
+  "digest",
+  "expiresAt",
+  "issuedAt",
+  "nonce",
+  "v",
+  "wallet",
+];
+const API_REQUEST_TIMEOUT_MS = 12_000;
+const STAGE_UPLOAD_TIMEOUT_MS = 30_000;
+const PIN_REQUEST_TIMEOUT_MS = 50_000;
+const PIN_RETRY_BUDGET_MS = 65_000;
+const PIN_RETRY_DELAY_MS = 1_000;
+const PIN_MAX_ATTEMPTS = 2;
+
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
   }
   if (value && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`);
     return `{${entries.join(",")}}`;
   }
@@ -121,12 +146,19 @@ export async function pinAuthorizationDigest(options: {
 
 export class IpfsPinError extends Error {
   readonly status?: number;
+  readonly code?: string;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string) {
     super(message);
     this.name = "IpfsPinError";
     this.status = status;
+    this.code = code;
   }
+}
+
+function boundedSignal(signal: AbortSignal | undefined, timeoutMs: number) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 function endpoint(path: string, browserOrigin: string) {
@@ -158,6 +190,7 @@ async function readPayload<T extends JsonErrorResponse>(response: Response) {
     throw new IpfsPinError(
       "The artwork service returned an unreadable response.",
       response.status,
+      "UNREADABLE_RESPONSE",
     );
   }
 }
@@ -168,10 +201,11 @@ async function postJson<T extends JsonErrorResponse>(options: {
   browserOrigin: string;
   signal?: AbortSignal;
   fetcher: typeof fetch;
+  timeoutMs?: number;
 }) {
-  const response = await options.fetcher(
-    endpoint(options.path, options.browserOrigin),
-    {
+  let response: Response;
+  try {
+    response = await options.fetcher(endpoint(options.path, options.browserOrigin), {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -179,9 +213,18 @@ async function postJson<T extends JsonErrorResponse>(options: {
       },
       body: JSON.stringify(options.body),
       credentials: "same-origin",
-      signal: options.signal,
-    },
-  );
+      signal: boundedSignal(options.signal, options.timeoutMs ?? API_REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    if (options.signal?.aborted) {
+      throw new IpfsPinError("Artwork publishing was cancelled.", undefined, "CANCELLED");
+    }
+    throw new IpfsPinError(
+      "The artwork service did not respond in time. Nothing was sent on-chain.",
+      undefined,
+      "NETWORK",
+    );
+  }
   const payload = await readPayload<T>(response);
   if (!response.ok) {
     throw new IpfsPinError(
@@ -189,9 +232,72 @@ async function postJson<T extends JsonErrorResponse>(options: {
         ? payload.error
         : "Artwork pinning failed. Nothing was sent on-chain.",
       response.status,
+      typeof payload.code === "string" ? payload.code : undefined,
     );
   }
   return { payload, status: response.status };
+}
+
+function decodeChallengePayload(challenge: string): WalletChallengePayload {
+  const match = CHALLENGE_TOKEN_PATTERN.exec(challenge);
+  if (!match) {
+    throw new IpfsPinError("The artwork service returned an invalid challenge.");
+  }
+  const encoded = match[1] ?? "";
+  try {
+    const standard = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(`${standard}${"=".repeat((4 - (standard.length % 4)) % 4)}`);
+    const canonical = btoa(binary)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+    if (canonical !== encoded) throw new Error("Non-canonical base64url");
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const value = JSON.parse(decoded) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Expected an object");
+    }
+    const keys = Object.keys(value).sort();
+    if (
+      keys.length !== CHALLENGE_PAYLOAD_KEYS.length ||
+      keys.some((key, index) => key !== CHALLENGE_PAYLOAD_KEYS[index])
+    ) {
+      throw new Error("Unexpected challenge fields");
+    }
+    return value as WalletChallengePayload;
+  } catch {
+    throw new IpfsPinError("The artwork service returned an invalid challenge.");
+  }
+}
+
+function validateChallengeResponse(options: {
+  challenge: string;
+  message: string;
+  expiresAt: string;
+  action: WalletAction;
+  digest: string;
+  wallet: Address;
+}) {
+  const challenge = decodeChallengePayload(options.challenge);
+  const now = Math.floor(Date.now() / 1000);
+  if (
+    challenge.v !== WALLET_CHALLENGE_VERSION ||
+    challenge.wallet !== options.wallet.toLowerCase() ||
+    challenge.action !== options.action ||
+    challenge.digest !== options.digest ||
+    !/^[0-9a-f]{64}$/.test(challenge.digest) ||
+    !/^[A-Za-z0-9_-]{20,64}$/.test(challenge.nonce) ||
+    !Number.isInteger(challenge.issuedAt) ||
+    !Number.isInteger(challenge.expiresAt) ||
+    challenge.expiresAt - challenge.issuedAt !== WALLET_CHALLENGE_TTL_SECONDS ||
+    challenge.issuedAt > now + 30 ||
+    challenge.expiresAt <= now ||
+    options.expiresAt !== new Date(challenge.expiresAt * 1000).toISOString() ||
+    options.message !== buildChallengeMessage(challenge)
+  ) {
+    throw new IpfsPinError("The artwork service returned an invalid challenge.");
+  }
 }
 
 function parseCid(value: unknown, label: string) {
@@ -227,12 +333,21 @@ function parsePinnedObject(
       throw new IpfsPinError(`${label} gateway URL is invalid.`);
     }
     const expectedPath = `/ipfs/${cid}`;
+    const hostname = parsed.hostname.toLowerCase();
+    const isPinataGateway =
+      hostname === "gateway.pinata.cloud" || hostname.endsWith(".mypinata.cloud");
     if (
       parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      parsed.search ||
+      parsed.hash ||
+      !isPinataGateway ||
       !(parsed.pathname === expectedPath || parsed.pathname.startsWith(`${expectedPath}/`))
     ) {
       throw new IpfsPinError(
-        `${label} gateway URL must use HTTPS and match its CID path.`,
+        `${label} gateway URL must use the configured Pinata HTTPS CID path.`,
       );
     }
     gatewayUrl = parsed.toString();
@@ -281,7 +396,7 @@ async function signChallenge(options: {
 }
 
 async function requestChallenge(options: {
-  action: "stage" | "pin";
+  action: WalletAction;
   digest: string;
   wallet: Address;
   browserOrigin: string;
@@ -301,8 +416,10 @@ async function requestChallenge(options: {
   });
   if (
     typeof payload.challenge !== "string" ||
+    payload.challenge.length === 0 ||
     payload.challenge.length > 2048 ||
     typeof payload.message !== "string" ||
+    payload.message.length === 0 ||
     payload.message.length > 4096 ||
     typeof payload.expiresAt !== "string" ||
     !Number.isFinite(Date.parse(payload.expiresAt)) ||
@@ -310,6 +427,14 @@ async function requestChallenge(options: {
   ) {
     throw new IpfsPinError("The artwork service returned an invalid challenge.");
   }
+  validateChallengeResponse({
+    challenge: payload.challenge,
+    message: payload.message,
+    expiresAt: payload.expiresAt,
+    action: options.action,
+    digest: options.digest,
+    wallet: options.wallet,
+  });
   return {
     challenge: payload.challenge,
     message: payload.message,
@@ -349,13 +474,25 @@ async function stageFile(options: {
   const body = new FormData();
   body.set("network", "public");
   body.set("file", options.artwork.file, options.artwork.safeName);
-  const response = await options.fetcher(options.uploadUrl, {
-    method: "POST",
-    headers: { Accept: "application/json" },
-    body,
-    redirect: "error",
-    signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await options.fetcher(options.uploadUrl, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body,
+      redirect: "error",
+      signal: boundedSignal(options.signal, STAGE_UPLOAD_TIMEOUT_MS),
+    });
+  } catch {
+    if (options.signal?.aborted) {
+      throw new IpfsPinError("Artwork publishing was cancelled.", undefined, "CANCELLED");
+    }
+    throw new IpfsPinError(
+      "Artwork staging timed out. Nothing was sent on-chain.",
+      undefined,
+      "NETWORK",
+    );
+  }
   const payload = await readPayload<PinataStageResponse>(response);
   if (!response.ok) {
     throw new IpfsPinError("Artwork staging failed. Nothing was sent on-chain.");
@@ -370,6 +507,87 @@ async function stageFile(options: {
   return { id, cid: parseCid(payload.data?.cid, "Artwork staging") };
 }
 
+function creatorModeOnly(metadata: LaunchMetadataDraft) {
+  const feeMode = metadata.attributes.find(
+    (attribute) => attribute.trait_type === "fee_mode",
+  )?.value;
+  if (feeMode !== "creator") {
+    throw new IpfsPinError(
+      "Self-burn launches are not available in this release.",
+      400,
+      "SELF_BURN_DISABLED",
+    );
+  }
+}
+
+function retryablePinError(error: unknown) {
+  if (!(error instanceof IpfsPinError) || error.code === "CANCELLED") return false;
+  return (
+    error.status === undefined ||
+    error.status === 502 ||
+    error.status === 503 ||
+    error.status === 504 ||
+    (error.status === 409 &&
+      (error.code === "PROMOTION_IN_PROGRESS" ||
+        error.code === "PROMOTION_LEASE_LOST")) ||
+    error.code === "UNREADABLE_RESPONSE"
+  );
+}
+
+async function retryDelay(signal?: AbortSignal) {
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new IpfsPinError("Artwork publishing was cancelled.", undefined, "CANCELLED"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, PIN_RETRY_DELAY_MS);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new IpfsPinError("Artwork publishing was cancelled.", undefined, "CANCELLED"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function postPinWithRetry(options: {
+  body: unknown;
+  browserOrigin: string;
+  signal?: AbortSignal;
+  fetcher: typeof fetch;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < PIN_MAX_ATTEMPTS; attempt += 1) {
+    const remaining = PIN_RETRY_BUDGET_MS - (Date.now() - startedAt);
+    if (remaining <= 0) break;
+    try {
+      return await postJson<PinResponse>({
+        path: IPFS_PIN_ENDPOINT,
+        body: options.body,
+        browserOrigin: options.browserOrigin,
+        signal: options.signal,
+        fetcher: options.fetcher,
+        timeoutMs: Math.min(PIN_REQUEST_TIMEOUT_MS, remaining),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= PIN_MAX_ATTEMPTS || !retryablePinError(error)) throw error;
+      await retryDelay(options.signal);
+    }
+  }
+  throw (
+    lastError ??
+    new IpfsPinError(
+      "Artwork publishing timed out. Retry the launch; nothing was sent on-chain.",
+      undefined,
+      "NETWORK",
+    )
+  );
+}
+
 export async function pinLaunchAssets(options: {
   file: File;
   metadata: LaunchMetadataDraft;
@@ -380,6 +598,7 @@ export async function pinLaunchAssets(options: {
   fetcher?: typeof fetch;
 }): Promise<PinnedLaunchAssets> {
   const fetcher = options.fetcher ?? fetch;
+  creatorModeOnly(options.metadata);
   const artwork = await validateArtworkFile(options.file);
   const fileSha256 = await artworkContentHash(artwork.file);
   const stageDetails = {
@@ -438,8 +657,7 @@ export async function pinLaunchAssets(options: {
     message: pinChallenge.message,
   });
   await assertWalletAccount(options.provider, options.wallet);
-  const { payload, status } = await postJson<PinResponse>({
-    path: IPFS_PIN_ENDPOINT,
+  const { payload, status } = await postPinWithRetry({
     body: {
       wallet: options.wallet,
       stagedCid: staged.cid,

@@ -78,7 +78,7 @@ export default function TokenomicsPage() {
       <section className="tokenomics-notes">
         <article>
           <span>Fixed at launch</span>
-          <h2>One billion tokens.</h2>
+          <h2>One fixed supply.</h2>
           <p>
             The intended factory issues the full fixed supply once and deposits
             it into the launch pool. No admin mint path.

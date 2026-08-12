@@ -3,10 +3,14 @@ import Link from "next/link";
 const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
 
 const readiness = [
-  { system: "Product interface", status: "Preview ready", tone: "ready" },
+  {
+    system: "Product interface",
+    status: "Internal build/runtime checks passed; live E2E pending",
+    tone: "pending",
+  },
   {
     system: "Factory + v4 hook",
-    status: "Release suite pending",
+    status: "Local suite passed; archive fork + audit pending",
     tone: "pending",
   },
   {
@@ -14,7 +18,11 @@ const readiness = [
     status: "Not production-calibrated",
     tone: "pending",
   },
-  { system: "Direct fee router", status: "Release suite pending", tone: "pending" },
+  {
+    system: "Direct fee router",
+    status: "Local suite passed; archive fork + audit pending",
+    tone: "pending",
+  },
   {
     system: "Dividend launches",
     status: "Contract-disabled",
@@ -22,7 +30,11 @@ const readiness = [
   },
   { system: "External audit", status: "Not started", tone: "pending" },
   { system: "Robinhood deployment", status: "Not deployed", tone: "pending" },
-  { system: "Event indexer", status: "Not connected", tone: "pending" },
+  {
+    system: "Event indexer",
+    status: "Implemented; Preview backfill pending",
+    tone: "pending",
+  },
 ];
 
 export default function DocsPage() {
@@ -73,13 +85,17 @@ export default function DocsPage() {
             <span className="docs-number">02</span>
             <h2>Launches</h2>
             <p>
-              The intended factory creates a token with a fixed one-billion
+              The intended factory creates a token with a fixed, config-selected
               supply and deposits the whole supply into its PIPEDOG-quoted v4
               pool. The hook prevents liquidity removal; there is no separate
               graduation or migration step.
             </p>
             <ol>
-              <li>Choose the token identity and optional PIPEDOG first buy.</li>
+              <li>
+                Choose the token identity. Non-zero PIPEDOG first buys remain
+                disabled until the app has a trusted quote and explicit
+                slippage control.
+              </li>
               <li>
                 Use creator-fee mode. Self-burn is implemented but remains
                 disabled pending audited price protection.

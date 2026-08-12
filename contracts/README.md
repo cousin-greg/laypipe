@@ -57,7 +57,10 @@ for the ERC-20 approval.
 Launches accept `firstBuyMinOut`; router buys and sells accept
 `minTokensOut` and `minPipedogOut`. Unspent exact-input amounts are refunded.
 The contracts verify balance deltas and reject fee-on-transfer or rebasing
-behavior.
+behavior. Every public router buy/sell also binds a caller-supplied
+`deadlineBlock` and rejects when the canonical chain block has advanced past
+it. Robinhood deadlines use the same fail-closed ArbSys L2 clock described
+below; non-Robinhood rehearsal networks use native `block.number`.
 
 ## Platform revenue policy
 
@@ -230,7 +233,7 @@ path.
 Robinhood Chain is an Arbitrum Orbit chain. Solidity `block.number` reports a
 periodically updated Ethereum L1 estimate there, so it is not a valid L2
 per-block counter. Active LayPipe checkpoints, `launchBlock`, revenue-lane
-guards, and self-burn guards use ArbSys precompile `0x64` and
+guards, self-burn guards, and public swap deadlines use ArbSys precompile `0x64` and
 `arbBlockNumber()` on chain ID 4663. The call fails closed if ArbSys is
 unavailable. Non-Robinhood rehearsal networks use their ordinary EVM
 `block.number` and remain isolated by chain-specific deployment preflights.
@@ -297,6 +300,8 @@ forge test -vv
 node scripts\check-source-fidelity.mjs
 node scripts\generate-abis.mjs
 git diff --exit-code -- abi
+node --test scripts\release-hashes.test.mjs
+node scripts\release-hashes.mjs
 ```
 
 For a production candidate, the exact approved economics artifact is an
@@ -309,8 +314,55 @@ node scripts\simulate-curve.mjs --review <approved-curve-review.json>
 The automated curve fixtures test the model; they do not substitute for this
 release-specific review.
 
+The external reviewer handoff, canonical source boundary, known-risk list, and
+minimum independent reproduction gates are in
+[AUDIT_HANDOFF.md](./AUDIT_HANDOFF.md). Complete that handoff against an
+immutable release candidate; internal tests and adversarial reviews are not an
+independent audit.
+
 Committed frontend/indexer ABIs live in `abi/`. The generator exports only the
 canonical protocol surface and removes any stale dividend ABI.
+
+### Deterministic release hashes
+
+`scripts/release-hashes.mjs` is a read-only identity gate for the six
+canonical contracts and their six committed ABIs. It prints stable JSON to
+stdout and never creates or updates a release-evidence file. ABI hashes use the
+recursively key-sorted ABI arrays, so indentation and line endings do not
+matter. The compiled-artifact projection includes only the contract name,
+Solidity compiler/versioned release settings, creation bytecode, runtime
+bytecode, and sorted immutable-patch ranges. Absolute paths, mtimes, Foundry
+artifact IDs, source maps, ASTs, and raw metadata text are excluded. External
+library link placeholders fail closed instead of introducing path-keyed hash
+input.
+
+Per-contract hashes are aggregated in contract-name order with domain-separated
+bundle schemas. Repo-relative filenames are printed as audit labels but are not
+aggregate-hash input. The artifact hash identifies the compiled bytecode templates;
+constructor arguments and immutable values are deployment inputs, and the
+factory proxy plus every deployed runtime remain separately pinned by the
+audited deployment manifest. Storage layout, build-info, and deployment scripts
+remain commit-bound audit inputs rather than members of this bytecode bundle.
+
+After `forge build` and `generate-abis.mjs`, print the candidate values with:
+
+```powershell
+node scripts\release-hashes.mjs
+```
+
+Strict check mode accepts explicit audited pins, or falls back to the matching
+`NEXT_PUBLIC_LAYPIPE_*_BUNDLE_SHA256` variables:
+
+```powershell
+node scripts\release-hashes.mjs --check `
+  --abi-bundle-sha256 <0x-prefixed SHA-256> `
+  --artifact-bundle-sha256 <0x-prefixed SHA-256>
+```
+
+CI pins both bundle values. Updating either pin is a deliberate candidate
+identity change and must follow review of the per-contract hashes printed by
+the command; a green hash gate is reproducibility evidence, not an audit or
+deployment authorization.
 
 The source-fidelity report is provenance evidence, not a complete source or
 release-version lock: reviewed derivatives are expected to differ from their

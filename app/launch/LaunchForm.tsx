@@ -6,8 +6,10 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from "react";
+import { useWallet } from "@/app/_components/WalletProvider";
 import {
   artworkContentHash,
   validateArtworkFile,
@@ -24,14 +26,24 @@ import {
 } from "@/lib/ipfs/pin-client";
 import type { FactoryTokenParams } from "@/lib/web3/abi";
 import {
+  deserializeLaunchInput,
+  readPendingLaunchForWallet,
+  removePendingLaunch,
+  savePendingLaunch,
+  savePendingLaunchHash,
+  serializeLaunchInput,
+  type PendingLaunchIntent,
+} from "@/lib/wallet/pending-launches";
+import {
+  approvalCalldata,
   assertLaunchPreflight,
   assertFirstBuyAmounts,
-  connectInjectedWallet,
   describeWalletError,
   ensureRobinhoodChain,
-  getInjectedProvider,
+  isCanonicalTransactionReverted,
+  isLaunchSubmissionIndeterminate,
+  launchCalldata,
   LaypipeLaunchClient,
-  subscribeToWalletContext,
   type ExactApprovalPlan,
   type FactoryPreflight,
   type LaunchCallInput,
@@ -43,9 +55,9 @@ import {
 import {
   explorerTokenUrl,
   explorerTransactionUrl,
-  readPublicLaunchDeployment,
 } from "@/lib/web3/robinhood";
-import type { Address, Eip1193Provider, Hex } from "@/lib/web3/types";
+import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
+import type { Address, Hex } from "@/lib/web3/types";
 import { formatUnits, parseUnits } from "@/lib/web3/units";
 import styles from "./launch.module.css";
 
@@ -92,79 +104,15 @@ function formatWholeTokens(value: bigint) {
 
 export default function LaunchForm() {
   const deploymentResult = useMemo(
-    () =>
-      readPublicLaunchDeployment({
-        NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS:
-          process.env.NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_DEPLOYMENT_BLOCK:
-          process.env.NEXT_PUBLIC_LAYPIPE_DEPLOYMENT_BLOCK,
-        NEXT_PUBLIC_LAYPIPE_FACTORY_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_FACTORY_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_FACTORY_IMPLEMENTATION_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_TOKEN_IMPLEMENTATION_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_HOOK_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_HOOK_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_HOOK_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_HOOK_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_SWAP_ROUTER_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_SELF_BURNER_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURNER_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_SELF_BURNER_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURNER_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_RUNTIME_CODEHASH:
-          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_ROUTER_RUNTIME_CODEHASH,
-        NEXT_PUBLIC_LAYPIPE_FINAL_OWNER_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_FINAL_OWNER_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_TREASURY_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_TREASURY_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_OPERATIONS_ADDRESS:
-          process.env.NEXT_PUBLIC_LAYPIPE_OPERATIONS_ADDRESS,
-        NEXT_PUBLIC_LAYPIPE_CREATOR_CONFIG_ID:
-          process.env.NEXT_PUBLIC_LAYPIPE_CREATOR_CONFIG_ID,
-        NEXT_PUBLIC_LAYPIPE_SELF_BURN_CONFIG_ID:
-          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_CONFIG_ID,
-        NEXT_PUBLIC_LAYPIPE_LAUNCH_FEE_WEI:
-          process.env.NEXT_PUBLIC_LAYPIPE_LAUNCH_FEE_WEI,
-        NEXT_PUBLIC_LAYPIPE_LAUNCH_SUPPLY_WEI:
-          process.env.NEXT_PUBLIC_LAYPIPE_LAUNCH_SUPPLY_WEI,
-        NEXT_PUBLIC_LAYPIPE_TICK_SPACING:
-          process.env.NEXT_PUBLIC_LAYPIPE_TICK_SPACING,
-        NEXT_PUBLIC_LAYPIPE_START_TICK:
-          process.env.NEXT_PUBLIC_LAYPIPE_START_TICK,
-        NEXT_PUBLIC_LAYPIPE_SELF_BURN_MAX_PER_CALL_WEI:
-          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_MAX_PER_CALL_WEI,
-        NEXT_PUBLIC_LAYPIPE_SELF_BURN_BOUNTY_BPS:
-          process.env.NEXT_PUBLIC_LAYPIPE_SELF_BURN_BOUNTY_BPS,
-        NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_SEQUESTER_PER_CALL_WEI:
-          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_SEQUESTER_PER_CALL_WEI,
-        NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_TREASURY_ROUTE_PER_CALL_WEI:
-          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_MAX_TREASURY_ROUTE_PER_CALL_WEI,
-        NEXT_PUBLIC_LAYPIPE_REVENUE_BOUNTY_BPS:
-          process.env.NEXT_PUBLIC_LAYPIPE_REVENUE_BOUNTY_BPS,
-        NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT:
-          process.env.NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT,
-        NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION:
-          process.env.NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION,
-        NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256:
-          process.env.NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256,
-        NEXT_PUBLIC_LAYPIPE_ARTIFACT_BUNDLE_SHA256:
-          process.env.NEXT_PUBLIC_LAYPIPE_ARTIFACT_BUNDLE_SHA256,
-      }),
+    () => readBrowserPublicLaunchDeployment(),
     [],
   );
+  const {
+    provider,
+    account,
+    revision: walletRevision,
+    connect: connectSharedWallet,
+  } = useWallet();
   const [machine, dispatch] = useReducer(
     reduceLaunchMachine,
     INITIAL_LAUNCH_STATE,
@@ -181,30 +129,59 @@ export default function LaunchForm() {
   const [discord, setDiscord] = useState("");
   const [artwork, setArtwork] = useState<ValidatedArtwork | null>(null);
   const [artworkError, setArtworkError] = useState("");
-  const [provider, setProvider] = useState<Eip1193Provider | null>(null);
-  const [account, setAccount] = useState<Address | null>(null);
   const [prepared, setPrepared] = useState<PreparedLaunch | null>(null);
   const [pinnedCache, setPinnedCache] = useState<PinnedCache | null>(null);
   const [pendingHash, setPendingHash] = useState<Hex | null>(null);
+  const [pendingIntent, setPendingIntent] =
+    useState<PendingLaunchIntent | null>(null);
+  const [pendingIntentWallet, setPendingIntentWallet] =
+    useState<Address | null>(null);
+  const [pendingStorageError, setPendingStorageError] = useState("");
   const [completed, setCompleted] = useState<CompletedLaunch | null>(null);
   const [postLaunchWarning, setPostLaunchWarning] = useState("");
   const [revoking, setRevoking] = useState(false);
   const [walletNotice, setWalletNotice] = useState("");
+  const handledWalletRevisionRef = useRef(walletRevision);
+  const ignoreNextWalletRevisionRef = useRef(false);
+  const pendingOperationRef = useRef(0);
 
-  const locked = [
+  const pendingIntentReady =
+    account === null ||
+    (pendingIntentWallet !== null &&
+      pendingIntentWallet.toLowerCase() === account.toLowerCase());
+  const locked = !pendingIntentReady || [
     "preparing",
     "approval-required",
     "approval-pending",
     "ready-to-launch",
     "launch-pending",
     "succeeded",
-  ].includes(machine.phase);
+  ].includes(machine.phase) || pendingIntent !== null;
   const tokenLabel = `${name || "Your coin"} ${symbol ? `$${symbol}` : ""}`;
   const firstBuyLooksZero = /^0*(?:\.0*)?$/.test(firstBuy.trim());
 
   useEffect(() => {
-    if (!provider) return;
-    const invalidateWalletState = () => {
+    if (handledWalletRevisionRef.current === walletRevision) return;
+    handledWalletRevisionRef.current = walletRevision;
+    if (ignoreNextWalletRevisionRef.current) {
+      ignoreNextWalletRevisionRef.current = false;
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const launchIsWalletBound =
+        prepared !== null ||
+        completed !== null ||
+        [
+          "wallet-ready",
+          "preparing",
+          "approval-required",
+          "approval-pending",
+          "ready-to-launch",
+          "launch-pending",
+          "succeeded",
+        ].includes(machine.phase);
+      if (!launchIsWalletBound) return;
       if (
         pendingHash ||
         machine.phase === "approval-pending" ||
@@ -215,17 +192,46 @@ export default function LaunchForm() {
         );
         return;
       }
-      setProvider(null);
-      setAccount(null);
+
       setPrepared(null);
       setPendingHash(null);
       setCompleted(null);
       setPostLaunchWarning("");
       setWalletNotice("");
       dispatch({ type: "REVIEW" });
-    };
-    return subscribeToWalletContext(provider, invalidateWalletState);
-  }, [machine.phase, pendingHash, provider]);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [completed, machine.phase, pendingHash, prepared, walletRevision]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      if (!account) {
+        setPendingIntent(null);
+        setPendingIntentWallet(null);
+        setPendingStorageError("");
+        return;
+      }
+      try {
+        const restored = readPendingLaunchForWallet(window.localStorage, account);
+        setPendingIntent(restored);
+        setPendingIntentWallet(account);
+        setPendingStorageError("");
+        setPendingHash(restored?.hash ?? null);
+        if (restored) {
+          dispatch({ type: "RESTORE_PENDING", action: restored.action });
+          setPostLaunchWarning(
+            restored.hash
+              ? "A submitted wallet action was restored. Reconcile its canonical receipt before retrying."
+              : "The wallet may have broadcast this action without returning a hash. Check wallet activity before retrying.",
+          );
+        }
+      } catch (error) {
+        setPendingIntentWallet(null);
+        setPendingStorageError(describeWalletError(error));
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [account]);
 
   function edit<T>(setter: (value: T) => void, value: T) {
     if (locked) return;
@@ -306,17 +312,13 @@ export default function LaunchForm() {
 
   async function connectWallet() {
     dispatch({ type: "CONNECT" });
+    ignoreNextWalletRevisionRef.current = true;
     try {
-      const injected = getInjectedProvider();
-      if (!injected) {
-        throw new Error("No EVM browser wallet was detected.");
-      }
-      const connected = await connectInjectedWallet(injected);
-      await ensureRobinhoodChain(injected);
-      setProvider(injected);
-      setAccount(connected);
+      const connected = await connectSharedWallet();
+      if (!connected) throw new Error("The wallet connection was not completed.");
       dispatch({ type: "CONNECTED" });
     } catch (error) {
+      ignoreNextWalletRevisionRef.current = false;
       dispatch({
         type: "FAIL",
         message: describeWalletError(error),
@@ -437,18 +439,61 @@ export default function LaunchForm() {
       return;
     }
 
+    if (pendingIntent) return;
     const nextStep = prepared.approvalPlan.steps[0];
+    const predictedToken = prepared.predictedToken;
+    const approvalIntent: PendingLaunchIntent = {
+      chainId: 4663,
+      wallet: account,
+      action: "approval",
+      predictedToken,
+      target: deploymentResult.deployment.contracts.pipedog.address,
+      calldata: approvalCalldata(
+        deploymentResult.deployment.contracts.factoryProxy.address,
+        nextStep.amount,
+      ),
+      amount: nextStep.amount.toString(),
+      hash: null,
+      invokedAt: Date.now(),
+    };
     dispatch({ type: "APPROVAL_SUBMITTED" });
     setPendingHash(null);
+    let submissionInvoked = false;
+    let submittedHash: Hex | null = null;
     try {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
         provider,
         deploymentResult.deployment,
       );
-      const hash = await client.sendApproval(account, nextStep.amount);
+      const hash = await client.sendApproval(account, nextStep.amount, {
+        onSubmissionInvoked: () => {
+          savePendingLaunch(window.localStorage, approvalIntent);
+          submissionInvoked = true;
+          setPendingIntent(approvalIntent);
+        },
+        onSubmitted: (hash) => {
+          submittedHash = hash;
+          savePendingLaunchHash(
+            window.localStorage,
+            account,
+            "approval",
+            predictedToken,
+            hash,
+          );
+          setPendingIntent({ ...approvalIntent, hash });
+          setPendingHash(hash);
+        },
+      });
       setPendingHash(hash);
-      await client.confirmApproval(hash, account);
+      await client.confirmApproval(hash, account, nextStep.amount);
+      removePendingLaunch(
+        window.localStorage,
+        account,
+        "approval",
+        predictedToken,
+      );
+      setPendingIntent(null);
       setPendingHash(null);
       const preflight = await client.readPreflight(
         account,
@@ -470,10 +515,31 @@ export default function LaunchForm() {
         needsAnotherApproval: safety.approvalPlan.steps.length > 0,
       });
     } catch (error) {
+      const canonicalRevert = isCanonicalTransactionReverted(error);
+      const keepLocked =
+        !canonicalRevert &&
+        (isLaunchSubmissionIndeterminate(error) || submittedHash !== null);
+      if ((canonicalRevert || !keepLocked) && submissionInvoked) {
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          "approval",
+          predictedToken,
+        );
+        setPendingIntent(null);
+        setPendingHash(null);
+      }
+      if (canonicalRevert) {
+        setPrepared(null);
+      }
       dispatch({
         type: "FAIL",
-        message: describeWalletError(error),
-        recoverTo: "approval-required",
+        message: canonicalRevert
+          ? "The exact approval was canonically confirmed as reverted. Prepare again from a fresh manifest snapshot."
+          : keepLocked
+          ? `${describeWalletError(error)} Do not retry this approval until it is reconciled.`
+          : describeWalletError(error),
+        recoverTo: canonicalRevert ? "wallet-ready" : "approval-required",
       });
     }
   }
@@ -483,8 +549,23 @@ export default function LaunchForm() {
       return;
     }
 
+    if (pendingIntent) return;
     setPendingHash(null);
     setPostLaunchWarning("");
+    const predictedToken = prepared.predictedToken;
+    const launchIntent: PendingLaunchIntent = {
+      chainId: 4663,
+      wallet: account,
+      action: "launch",
+      predictedToken,
+      target: deploymentResult.deployment.contracts.factoryProxy.address,
+      calldata: launchCalldata(prepared.input),
+      input: serializeLaunchInput(prepared.input),
+      hash: null,
+      invokedAt: Date.now(),
+    };
+    let submissionInvoked = false;
+    let submittedHash: Hex | null = null;
     try {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
@@ -507,12 +588,38 @@ export default function LaunchForm() {
       }
 
       dispatch({ type: "LAUNCH_SUBMITTED" });
-      const hash = await client.sendLaunch(account, prepared.input);
+      const hash = await client.sendLaunch(account, prepared.input, {
+        onSubmissionInvoked: () => {
+          savePendingLaunch(window.localStorage, launchIntent);
+          submissionInvoked = true;
+          setPendingIntent(launchIntent);
+        },
+        onSubmitted: (hash) => {
+          submittedHash = hash;
+          savePendingLaunchHash(
+            window.localStorage,
+            account,
+            "launch",
+            predictedToken,
+            hash,
+          );
+          setPendingIntent({ ...launchIntent, hash });
+          setPendingHash(hash);
+        },
+      });
       setPendingHash(hash);
       const confirmed = await client.confirmLaunch(hash, {
         creator: account,
         predictedToken: prepared.predictedToken,
+        input: prepared.input,
       });
+      removePendingLaunch(
+        window.localStorage,
+        account,
+        "launch",
+        predictedToken,
+      );
+      setPendingIntent(null);
       let allowanceCleared: boolean | null = null;
       try {
         const after = await client.readPreflight(account, prepared.input.configId);
@@ -536,10 +643,31 @@ export default function LaunchForm() {
       setPendingHash(null);
       dispatch({ type: "LAUNCH_CONFIRMED" });
     } catch (error) {
+      const canonicalRevert = isCanonicalTransactionReverted(error);
+      const keepLocked =
+        !canonicalRevert &&
+        (isLaunchSubmissionIndeterminate(error) || submittedHash !== null);
+      if ((canonicalRevert || !keepLocked) && submissionInvoked) {
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          "launch",
+          predictedToken,
+        );
+        setPendingIntent(null);
+        setPendingHash(null);
+      }
+      if (canonicalRevert) {
+        setPrepared(null);
+      }
       dispatch({
         type: "FAIL",
-        message: describeWalletError(error),
-        recoverTo: "ready-to-launch",
+        message: canonicalRevert
+          ? "The launch was canonically confirmed as reverted. Prepare again from a fresh manifest snapshot."
+          : keepLocked
+          ? `${describeWalletError(error)} Do not retry this launch until it is reconciled.`
+          : describeWalletError(error),
+        recoverTo: canonicalRevert ? "wallet-ready" : "ready-to-launch",
       });
     }
   }
@@ -547,6 +675,7 @@ export default function LaunchForm() {
   async function revokeFactoryAllowance() {
     if (
       pendingHash ||
+      pendingIntent ||
       !provider ||
       !account ||
       !deploymentResult.configured
@@ -555,6 +684,9 @@ export default function LaunchForm() {
     }
 
     setRevoking(true);
+    let revocationIntent: PendingLaunchIntent | null = null;
+    let submissionInvoked = false;
+    let submittedHash: Hex | null = null;
     try {
       await ensureRobinhoodChain(provider);
       const client = new LaypipeLaunchClient(
@@ -563,9 +695,52 @@ export default function LaunchForm() {
       );
       const before = await client.readCanonicalPipedogAllowance(account);
       if (before !== BigInt(0)) {
-        const hash = await client.sendApproval(account, BigInt(0));
+        const predictedToken =
+          prepared?.predictedToken ??
+          deploymentResult.deployment.contracts.factoryProxy.address;
+        const intent: PendingLaunchIntent = {
+          chainId: 4663,
+          wallet: account,
+          action: "approval",
+          predictedToken,
+          target: deploymentResult.deployment.contracts.pipedog.address,
+          calldata: approvalCalldata(
+            deploymentResult.deployment.contracts.factoryProxy.address,
+            BigInt(0),
+          ),
+          amount: "0",
+          hash: null,
+          invokedAt: Date.now(),
+        };
+        revocationIntent = intent;
+        const hash = await client.sendApproval(account, BigInt(0), {
+          onSubmissionInvoked: () => {
+            savePendingLaunch(window.localStorage, intent);
+            submissionInvoked = true;
+            setPendingIntent(intent);
+          },
+          onSubmitted: (hash) => {
+            submittedHash = hash;
+            savePendingLaunchHash(
+              window.localStorage,
+              account,
+              "approval",
+              predictedToken,
+              hash,
+            );
+            setPendingIntent({ ...intent, hash });
+            setPendingHash(hash);
+          },
+        });
         setPendingHash(hash);
-        await client.confirmApproval(hash, account);
+        await client.confirmApproval(hash, account, BigInt(0));
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          "approval",
+          predictedToken,
+        );
+        setPendingIntent(null);
         setPendingHash(null);
       }
       const after = await client.readCanonicalPipedogAllowance(account);
@@ -577,14 +752,164 @@ export default function LaunchForm() {
       setWalletNotice("Factory allowance confirmed at zero.");
       dispatch({ type: "CONNECTED" });
     } catch (error) {
+      const canonicalRevert = isCanonicalTransactionReverted(error);
+      const keepLocked =
+        revocationIntent !== null &&
+        !canonicalRevert &&
+        (isLaunchSubmissionIndeterminate(error) || submittedHash !== null);
+      if (
+        revocationIntent &&
+        submissionInvoked &&
+        (canonicalRevert || !keepLocked)
+      ) {
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          "approval",
+          revocationIntent.predictedToken,
+        );
+        setPendingIntent(null);
+        setPendingHash(null);
+      }
       dispatch({
         type: "FAIL",
-        message: describeWalletError(error),
-        recoverTo: machine.recoverTo,
+        message: canonicalRevert
+          ? "The allowance reset was canonically confirmed as reverted. Run a fresh allowance check before retrying."
+          : keepLocked
+            ? `${describeWalletError(error)} Do not retry the reset until it is reconciled.`
+            : describeWalletError(error),
+        recoverTo: canonicalRevert ? "wallet-ready" : machine.recoverTo,
       });
     } finally {
       setRevoking(false);
     }
+  }
+
+  async function reconcilePendingLaunch() {
+    if (
+      !provider ||
+      !account ||
+      !pendingIntent?.hash ||
+      !deploymentResult.configured
+    ) {
+      return;
+    }
+    const operation = ++pendingOperationRef.current;
+    setPostLaunchWarning("");
+    try {
+      const client = new LaypipeLaunchClient(
+        provider,
+        deploymentResult.deployment,
+      );
+      if (pendingIntent.action === "approval") {
+        const amount = BigInt(pendingIntent.amount);
+        const expectedCalldata = approvalCalldata(
+          deploymentResult.deployment.contracts.factoryProxy.address,
+          amount,
+        );
+        if (
+          pendingIntent.target.toLowerCase() !==
+            deploymentResult.deployment.contracts.pipedog.address.toLowerCase() ||
+          pendingIntent.calldata.toLowerCase() !== expectedCalldata.toLowerCase()
+        ) {
+          throw new Error(
+            "Saved approval intent does not match the audited deployment and cannot be reconciled automatically.",
+          );
+        }
+        await client.confirmApproval(
+          pendingIntent.hash,
+          account,
+          amount,
+        );
+        if (operation !== pendingOperationRef.current) return;
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          "approval",
+          pendingIntent.predictedToken,
+        );
+        setPendingIntent(null);
+        setPendingHash(null);
+        setPrepared(null);
+        setWalletNotice(
+          "The approval was canonically confirmed. Prepare the launch again from a fresh manifest snapshot.",
+        );
+        dispatch({ type: "CONNECTED" });
+        return;
+      }
+
+      const input = deserializeLaunchInput(pendingIntent.input);
+      const expectedCalldata = launchCalldata(input);
+      if (
+        pendingIntent.target.toLowerCase() !==
+          deploymentResult.deployment.contracts.factoryProxy.address.toLowerCase() ||
+        pendingIntent.calldata.toLowerCase() !== expectedCalldata.toLowerCase() ||
+        input.params.creator.toLowerCase() !== account.toLowerCase()
+      ) {
+        throw new Error(
+          "Saved launch intent does not match the audited deployment and cannot be reconciled automatically.",
+        );
+      }
+      const confirmed = await client.confirmLaunch(pendingIntent.hash, {
+        creator: account,
+        predictedToken: pendingIntent.predictedToken,
+        input,
+      });
+      if (operation !== pendingOperationRef.current) return;
+      removePendingLaunch(
+        window.localStorage,
+        account,
+        "launch",
+        pendingIntent.predictedToken,
+      );
+      setCompleted({
+        token: confirmed.token,
+        poolId: confirmed.poolId,
+        transactionHash: pendingIntent.hash,
+        allowanceCleared: null,
+      });
+      setPendingIntent(null);
+      setPendingHash(null);
+      dispatch({ type: "RESTORE_LAUNCH_CONFIRMED" });
+    } catch (error) {
+      if (operation !== pendingOperationRef.current) return;
+      if (isCanonicalTransactionReverted(error)) {
+        removePendingLaunch(
+          window.localStorage,
+          account,
+          pendingIntent.action,
+          pendingIntent.predictedToken,
+        );
+        setPendingIntent(null);
+        setPendingHash(null);
+        setPrepared(null);
+        setWalletNotice(
+          "The saved transaction was canonically confirmed as reverted. Prepare again before retrying.",
+        );
+        dispatch({ type: "CONNECTED" });
+        return;
+      }
+      setPostLaunchWarning(describeWalletError(error));
+    }
+  }
+
+  function clearReconciledLaunchLock() {
+    if (!account || !pendingIntent) return;
+    removePendingLaunch(
+      window.localStorage,
+      account,
+      pendingIntent.action,
+      pendingIntent.predictedToken,
+    );
+    pendingOperationRef.current += 1;
+    setPendingIntent(null);
+    setPendingHash(null);
+    setPrepared(null);
+    setPostLaunchWarning("");
+    setWalletNotice(
+      "Pending action lock cleared after wallet-activity review. Prepare again before any mutation.",
+    );
+    dispatch({ type: "CONNECTED" });
   }
 
   const nextApproval = prepared?.approvalPlan.steps[0];
@@ -607,6 +932,16 @@ export default function LaunchForm() {
           </p>
         </div>
       </aside>
+
+      {pendingStorageError && (
+        <aside className="readiness-banner" role="alert">
+          <span>Wallet lock</span>
+          <div>
+            <strong>Launch mutations are blocked.</strong>
+            <p>{pendingStorageError}</p>
+          </div>
+        </aside>
+      )}
 
       <div className="launch-workspace">
         <form className="product-form" onSubmit={review}>
@@ -900,6 +1235,42 @@ export default function LaunchForm() {
           </div>
 
           <div className="review-complete">
+            {pendingIntent && (
+              <div className={styles.warning} role="status">
+                <strong>Wallet action locked for reconciliation.</strong>
+                <p>
+                  {pendingIntent.hash
+                    ? `A ${pendingIntent.action} transaction was submitted. Canonically reconcile it before any retry.`
+                    : `The wallet may have broadcast this ${pendingIntent.action} without returning a hash. Check wallet activity before any retry.`}
+                </p>
+                {pendingIntent.hash && (
+                  <>
+                    <a
+                      className={styles.receiptLink}
+                      href={explorerTransactionUrl(pendingIntent.hash)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      View transaction ↗
+                    </a>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => void reconcilePendingLaunch()}
+                    >
+                      Recheck canonical receipt
+                    </button>
+                  </>
+                )}
+                <button
+                  className="button"
+                  type="button"
+                  onClick={clearReconciledLaunchLock}
+                >
+                  I checked wallet activity; clear lock
+                </button>
+              </div>
+            )}
             {machine.phase === "draft" && (
               <>
                 <strong>Complete the launch details.</strong>

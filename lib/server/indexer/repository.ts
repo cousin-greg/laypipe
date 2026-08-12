@@ -1,5 +1,9 @@
 import {
+  DATABASE_READ_TIMEOUT_MS,
+  DATABASE_WRITE_TIMEOUT_MS,
+  databaseFetchOptions,
   getDatabase,
+  type DbClient,
   type DbParameter,
   type DbQueryPromise,
   type DbRow,
@@ -144,17 +148,17 @@ const FEES_UPSERT = `
 WITH incoming AS (
   SELECT * FROM jsonb_to_recordset($1::jsonb) AS row(
     transaction_hash text, log_index integer, fee_kind text, pool_id text,
-    actor_address text, creator_address text, amount text,
+    actor_address text, creator_address text, recipient_address text, amount text,
     creator_amount text, platform_amount text
   )
 )
 INSERT INTO fee_events (
-  chain_id, fee_kind, pool_id, actor_address, creator_address, amount,
-  creator_amount, platform_amount, block_number, block_timestamp,
+  chain_id, fee_kind, pool_id, actor_address, creator_address,
+  recipient_address, amount, creator_amount, platform_amount, block_number, block_timestamp,
   transaction_hash, log_index
 )
 SELECT $2::bigint, i.fee_kind, i.pool_id, i.actor_address, i.creator_address,
-       i.amount::numeric, i.creator_amount::numeric, i.platform_amount::numeric,
+       i.recipient_address, i.amount::numeric, i.creator_amount::numeric, i.platform_amount::numeric,
        e.block_number, b.block_timestamp, i.transaction_hash, i.log_index
 FROM incoming i
 JOIN chain_events e ON e.chain_id = $2::bigint
@@ -163,7 +167,8 @@ JOIN chain_blocks b ON b.chain_id = e.chain_id AND b.block_number = e.block_numb
 ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE SET
   fee_kind = EXCLUDED.fee_kind, pool_id = EXCLUDED.pool_id,
   actor_address = EXCLUDED.actor_address, creator_address = EXCLUDED.creator_address,
-  amount = EXCLUDED.amount, creator_amount = EXCLUDED.creator_amount,
+  recipient_address = EXCLUDED.recipient_address, amount = EXCLUDED.amount,
+  creator_amount = EXCLUDED.creator_amount,
   platform_amount = EXCLUDED.platform_amount, block_number = EXCLUDED.block_number,
   block_timestamp = EXCLUDED.block_timestamp`;
 
@@ -358,6 +363,7 @@ function projectionStatements(
       pool_id: value.poolId ? normalizeBytes32(value.poolId, "Fee pool") : null,
       actor_address: optionalAddress(value.actorAddress, "Fee actor"),
       creator_address: optionalAddress(value.creatorAddress, "Fee creator"),
+      recipient_address: optionalAddress(value.recipientAddress, "Fee recipient"),
       amount: optionalUint(value.amount, "Fee amount"),
       creator_amount: optionalUint(value.creatorAmount, "Creator fee amount"),
       platform_amount: optionalUint(value.platformAmount, "Platform fee amount"),
@@ -422,12 +428,15 @@ export async function initializeIndexerCursor(options: {
     options.chainId,
     options.stream,
     normalizeUint256(options.startBlock, "Cursor start block"),
-  ]);
+  ], databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS));
 }
 
-export async function ingestCanonicalBatch(input: CanonicalBatchInput) {
+export async function ingestCanonicalBatch(
+  input: CanonicalBatchInput,
+  databaseOverride?: DbClient,
+) {
   const batch = normalizeCanonicalBatch(input);
-  const database = await getDatabase();
+  const database = databaseOverride ?? await getDatabase();
   const blockRows = batch.blocks.map((block) => ({
     block_number: block.number,
     block_hash: block.hash,
@@ -460,7 +469,10 @@ export async function ingestCanonicalBatch(input: CanonicalBatchInput) {
         [batch.chainId, batch.stream, batch.expectedNextBlock, last.number, last.hash],
       ),
     ] as const,
-    { isolationLevel: "Serializable" },
+    {
+      isolationLevel: "Serializable",
+      ...databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS),
+    },
   );
 
   return {
@@ -481,6 +493,7 @@ export interface StoredBlockRow extends DbRow {
 export interface IndexedLaunchIdentityRow extends DbRow {
   token_address: string;
   pool_id: string;
+  fee_mode: string;
 }
 
 /**
@@ -501,22 +514,30 @@ export async function loadIndexedLaunchIdentities(options: {
   }
   const database = await getDatabase();
   const rows = await database.query<IndexedLaunchIdentityRow>(
-    `SELECT token_address, pool_id
+    `SELECT token_address, pool_id, fee_mode
      FROM launches
      WHERE chain_id = $1::bigint
      ORDER BY block_number ASC, log_index ASC
      LIMIT $2::integer`,
     [options.chainId, options.limit + 1],
+    databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
   );
   if (rows.length > options.limit) {
     throw new Error(
       "Indexed launch watch set exceeds the configured RPC filter bound.",
     );
   }
-  return rows.map((row) => ({
-    tokenAddress: normalizeAddress(row.token_address, "Indexed launch token"),
-    poolId: normalizeBytes32(row.pool_id, "Indexed launch pool"),
-  }));
+  return rows.map((row) => {
+    if (row.fee_mode !== "creator" && row.fee_mode !== "self-burn") {
+      throw new Error("Indexed launch fee mode is invalid.");
+    }
+    const feeMode: "creator" | "self-burn" = row.fee_mode;
+    return {
+      tokenAddress: normalizeAddress(row.token_address, "Indexed launch token"),
+      poolId: normalizeBytes32(row.pool_id, "Indexed launch pool"),
+      feeMode,
+    };
+  });
 }
 
 export async function loadRecentStoredBlocks(options: {
@@ -536,6 +557,7 @@ export async function loadRecentStoredBlocks(options: {
      ORDER BY block_number DESC
      LIMIT $3::integer`,
     [options.chainId, normalizeUint256(options.atOrBelow), limit],
+    databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
   );
   return rows.map((row) => ({
     number: String(row.block_number),
@@ -556,6 +578,7 @@ export async function rollbackChainTo(options: {
       normalizeUint256(options.ancestorBlock, "Rollback ancestor"),
       normalizeBytes32(options.ancestorHash, "Rollback ancestor hash"),
     ],
+    databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS),
   );
   return BigInt(String(rows[0]?.deleted_blocks ?? "0"));
 }
@@ -564,12 +587,51 @@ export async function readIndexerHealth(chainId: number, stream: string) {
   const database = await getDatabase();
   const rows = await database.query<DbRow>(
     `SELECT chain_id::text, stream, start_block::text, next_block::text,
-            last_processed_block::text, last_processed_hash, updated_at::text
+            last_processed_block::text, last_processed_hash,
+            observed_safe_head::text, observed_at::text, last_run_status,
+            updated_at::text
      FROM indexer_cursors
      WHERE chain_id = $1::bigint AND stream = $2::text`,
     [chainId, stream],
+    databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
   );
   return rows[0] ?? null;
+}
+
+export async function recordIndexerObservation(options: {
+  chainId: number;
+  stream: string;
+  safeHead: bigint | string;
+  status: "caught-up" | "bounded" | "deadline";
+  observedAt?: Date;
+}, databaseOverride?: DbClient) {
+  const database = databaseOverride ?? await getDatabase();
+  const observedAt = options.observedAt ?? new Date();
+  if (!Number.isFinite(observedAt.getTime())) {
+    throw new Error("Indexer observation time is invalid.");
+  }
+  const rows = await database.query<{ updated: boolean }>(
+    `UPDATE indexer_cursors
+     SET observed_safe_head = $3::bigint,
+         observed_at = $4::timestamptz,
+         last_run_status = $5::text
+     WHERE chain_id = $1::bigint AND stream = $2::text
+       AND (last_processed_block IS NULL OR last_processed_block <= $3::bigint)
+       AND (observed_safe_head IS NULL OR observed_safe_head <= $3::bigint)
+       AND (observed_at IS NULL OR observed_at <= $4::timestamptz)
+     RETURNING true AS updated`,
+    [
+      options.chainId,
+      options.stream,
+      normalizeUint256(options.safeHead, "Observed safe head"),
+      observedAt.toISOString(),
+      options.status,
+    ],
+    databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS),
+  );
+  if (rows.length !== 1) {
+    throw new Error("Indexer observation was rejected as missing or non-monotonic.");
+  }
 }
 
 export type { DbParameter };

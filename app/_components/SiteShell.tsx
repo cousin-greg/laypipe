@@ -5,29 +5,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useMarketData } from "./MarketDataProvider";
+import { useWallet } from "./WalletProvider";
 import { compactMoney } from "./format";
 
-const CHAIN_ID = 4663;
-const CHAIN_HEX = `0x${CHAIN_ID.toString(16)}`;
 type Theme = "light" | "dark";
-
-type EthereumProvider = {
-  request: (args: {
-    method: string;
-    params?: Array<Record<string, unknown> | string>;
-  }) => Promise<unknown>;
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  removeListener?: (
-    event: string,
-    listener: (...args: unknown[]) => void,
-  ) => void;
-};
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
 
 const navigation = [
   { href: "/", label: "Board" },
@@ -48,8 +29,19 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const feedState = refreshState === "error" ? "error" : "ready";
   const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [walletLabel, setWalletLabel] = useState("Connect wallet");
-  const [walletBusy, setWalletBusy] = useState(false);
+  const { account, status: walletStatus, connect: connectWallet } = useWallet();
+  const walletBusy = walletStatus === "connecting";
+  const walletLabel = walletStatus === "wrong-chain"
+    ? "Switch chain"
+    : account
+      ? shortAddress(account)
+      : walletStatus === "connecting"
+      ? "Connecting..."
+      : walletStatus === "missing"
+        ? "Wallet needed"
+        : walletStatus === "error"
+            ? "Try again"
+            : "Connect wallet";
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -61,70 +53,10 @@ export function SiteShell({ children }: { children: ReactNode }) {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  useEffect(() => {
-    const provider = window.ethereum;
-    if (!provider?.on) return;
-
-    const handleAccounts = (...args: unknown[]) => {
-      const accounts = Array.isArray(args[0]) ? (args[0] as string[]) : [];
-      setWalletLabel(accounts[0] ? shortAddress(accounts[0]) : "Connect wallet");
-    };
-
-    provider.on("accountsChanged", handleAccounts);
-    return () => provider.removeListener?.("accountsChanged", handleAccounts);
-  }, []);
-
   function applyTheme(nextTheme: Theme) {
     document.documentElement.dataset.theme = nextTheme;
     localStorage.setItem("laypipe-theme", nextTheme);
     setTheme(nextTheme);
-  }
-
-  async function connectWallet() {
-    const provider = window.ethereum;
-    if (!provider) {
-      setWalletLabel("Wallet needed");
-      return;
-    }
-
-    setWalletBusy(true);
-    setWalletLabel("Connecting…");
-
-    try {
-      const accounts = (await provider.request({
-        method: "eth_requestAccounts",
-      })) as string[];
-
-      try {
-        await provider.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: CHAIN_HEX }],
-        });
-      } catch (error) {
-        if ((error as { code?: number }).code !== 4902) throw error;
-
-        await provider.request({
-          method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: CHAIN_HEX,
-              chainName: "Robinhood Chain",
-              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: ["https://rpc.mainnet.chain.robinhood.com"],
-              blockExplorerUrls: ["https://robinhoodchain.blockscout.com"],
-            },
-          ],
-        });
-      }
-
-      setWalletLabel(
-        accounts[0] ? shortAddress(accounts[0]) : "Connect wallet",
-      );
-    } catch {
-      setWalletLabel("Try again");
-    } finally {
-      setWalletBusy(false);
-    }
   }
 
   return (
@@ -185,7 +117,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
             <button
               className="button button-quiet button-small"
               type="button"
-              onClick={connectWallet}
+              onClick={() => void connectWallet()}
               disabled={walletBusy}
             >
               {walletLabel}
@@ -196,7 +128,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
             <button
               className="button button-quiet button-small"
               type="button"
-              onClick={connectWallet}
+              onClick={() => void connectWallet()}
               disabled={walletBusy}
             >
               {walletLabel}
