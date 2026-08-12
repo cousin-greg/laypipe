@@ -142,6 +142,8 @@ function output(result) {
 test("deployment prebuild defaults absent switches and profile to safe fixture", () => {
   const result = run("safe-fixture", {
     PRIVATE_KEY: "ambient-operator-key-must-not-break-a-safe-local-build",
+    NEXT_PUBLIC_VERCEL_GIT_COMMIT_AUTHOR_NAME: "cousin-greg",
+    NEXT_PUBLIC_VERCEL_GIT_COMMIT_AUTHOR_LOGIN: "cousin-greg",
   }, { deployment: true, omitProfile: true });
   assert.equal(result.status, 0, output(result));
   assert.match(output(result), /safe-fixture; safe build gate/);
