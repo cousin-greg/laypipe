@@ -238,6 +238,9 @@ function manifestProvider(manifest, options = {}) {
       if (selector === selectors.hook) return addressWord(c.hook.address);
     }
     if (target === revenue) {
+      if (selector === selectors.factory) {
+        return addressWord(options.revenueFactory ?? c.factoryProxy.address);
+      }
       if (selector === selectors.pipedog) return addressWord(c.pipedog.address);
       if (selector === selectors.treasury) return addressWord(manifest.governance.treasury);
       if (selector === selectors.operationsWallet) return addressWord(manifest.governance.operations);
@@ -392,6 +395,11 @@ test("implementation, component, and config drift fail closed before a mutation"
       label: "component",
       options: { factoryHook: "0x3000000000000000000000000000000000000002" },
       message: /Factory hook does not match/,
+    },
+    {
+      label: "revenue router factory",
+      options: { revenueFactory: "0x3000000000000000000000000000000000000003" },
+      message: /Revenue router factory does not match/,
     },
     {
       label: "config",

@@ -16,11 +16,16 @@ const pendingTrades = await tsImport(
   "../lib/wallet/pending-trades.ts",
   import.meta.url,
 );
+const mutationLock = await tsImport(
+  "../lib/wallet/mutation-lock.ts",
+  import.meta.url,
+);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const OWNER = "0x1111111111111111111111111111111111111111";
 const PIPEDOG = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
 const TOKEN = "0xf1111111111111111111111111111111111111fe";
+const OTHER_TOKEN = "0xe1111111111111111111111111111111111111fe";
 const FACTORY = "0x2222222222222222222222222222222222222222";
 const IMPLEMENTATION = "0x3333333333333333333333333333333333333333";
 const HOOK = "0x4444444444444444444444444444444444444444";
@@ -41,7 +46,109 @@ function memoryStorage() {
   };
 }
 
-test("pending trade intent survives reload and is bound to wallet and pool", () => {
+function memoryLockManager() {
+  const held = new Set();
+  const calls = [];
+  return {
+    calls,
+    async request(name, options, callback) {
+      calls.push({ name, options });
+      if (held.has(name)) return callback(null);
+      held.add(name);
+      try {
+        return await callback({ name, mode: "exclusive" });
+      } finally {
+        held.delete(name);
+      }
+    },
+  };
+}
+
+test("wallet mutation lock is exclusive per normalized wallet and releases after completion", async () => {
+  const locks = memoryLockManager();
+  let releaseFirst;
+  let markFirstEntered;
+  const firstEntered = new Promise((resolve) => {
+    markFirstEntered = resolve;
+  });
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const first = mutationLock.withWalletMutationLock(locks, OWNER, async () => {
+    markFirstEntered();
+    await firstGate;
+    return "first-complete";
+  });
+  await firstEntered;
+
+  let contenderEntered = false;
+  await assert.rejects(
+    mutationLock.withWalletMutationLock(locks, OWNER, () => {
+      contenderEntered = true;
+    }),
+    /another tab is already submitting/i,
+  );
+  assert.equal(contenderEntered, false);
+
+  const otherWallet = await mutationLock.withWalletMutationLock(
+    locks,
+    OTHER,
+    () => "other-wallet-complete",
+  );
+  assert.equal(otherWallet, "other-wallet-complete");
+  assert.notEqual(
+    mutationLock.walletMutationLockName(OWNER),
+    mutationLock.walletMutationLockName(OTHER),
+  );
+  assert.equal(
+    mutationLock.walletMutationLockName(PIPEDOG),
+    mutationLock.walletMutationLockName(PIPEDOG.toLowerCase()),
+  );
+  assert.match(mutationLock.walletMutationLockName(OWNER), /:4663:/);
+
+  releaseFirst();
+  assert.equal(await first, "first-complete");
+  assert.equal(
+    await mutationLock.withWalletMutationLock(locks, OWNER, () => "released"),
+    "released",
+  );
+  assert.equal(
+    locks.calls.every(
+      ({ options }) =>
+        options.mode === "exclusive" && options.ifAvailable === true,
+    ),
+    true,
+  );
+});
+
+test("wallet mutation lock fails closed without a usable Web Locks API", async () => {
+  let entered = false;
+  await assert.rejects(
+    mutationLock.withWalletMutationLock(undefined, OWNER, () => {
+      entered = true;
+    }),
+    /cannot provide the required cross-tab wallet lock/i,
+  );
+  assert.equal(entered, false);
+
+  await assert.rejects(
+    mutationLock.withWalletMutationLock(
+      { request: async () => { throw new Error("lock service failed"); } },
+      OWNER,
+      () => {
+        entered = true;
+      },
+    ),
+    /wallet lock could not be acquired/i,
+  );
+  assert.equal(entered, false);
+  assert.throws(
+    () => mutationLock.walletMutationLockName("0x0000000000000000000000000000000000000000"),
+    /valid nonzero wallet/i,
+  );
+});
+
+test("pending trade intent survives reload and creates a wallet-wide mutation lock", () => {
   const storage = memoryStorage();
   const poolId = poolIdFor();
   const intent = {
@@ -67,9 +174,40 @@ test("pending trade intent survives reload and is bound to wallet and pool", () 
     pendingTrades.readPendingTrade(storage, OWNER, TOKEN, poolId),
     intent,
   );
+  assert.deepEqual(
+    pendingTrades.readPendingTradeForWallet(storage, OWNER),
+    intent,
+  );
   assert.equal(
     pendingTrades.readPendingTrade(storage, OTHER, TOKEN, poolId),
     null,
+  );
+  assert.equal(
+    pendingTrades.readPendingTrade(
+      storage,
+      OWNER,
+      OTHER_TOKEN,
+      poolIdFor(OTHER_TOKEN),
+    ),
+    null,
+  );
+  assert.throws(
+    () => pendingTrades.savePendingTrade(storage, {
+      ...intent,
+      tokenAddress: OTHER_TOKEN,
+      poolId: poolIdFor(OTHER_TOKEN),
+    }),
+    /wallet already has a pending trade action/i,
+  );
+  pendingTrades.savePendingTrade(storage, {
+    ...intent,
+    wallet: OTHER,
+    tokenAddress: OTHER_TOKEN,
+    poolId: poolIdFor(OTHER_TOKEN),
+  });
+  assert.equal(
+    pendingTrades.readPendingTradeForWallet(storage, OTHER)?.tokenAddress,
+    OTHER_TOKEN,
   );
   pendingTrades.savePendingTradeHash(storage, intent, TX_HASH);
   assert.equal(
@@ -132,7 +270,20 @@ test("pending trade storage fails closed on unreadable, malformed, invalid, dupl
   pendingTrades.savePendingTrade(storage, intent);
   assert.throws(
     () => pendingTrades.savePendingTrade(storage, intent),
-    /already have a pending action/i,
+    /wallet already has a pending trade action/i,
+  );
+  const duplicateWallet = memoryStorage();
+  duplicateWallet.setItem(key, JSON.stringify([
+    intent,
+    {
+      ...intent,
+      tokenAddress: OTHER_TOKEN,
+      poolId: poolIdFor(OTHER_TOKEN),
+    },
+  ]));
+  assert.throws(
+    () => pendingTrades.readPendingTradeForWallet(duplicateWallet, OWNER),
+    /more than one saved trade action exists for this wallet/i,
   );
   assert.throws(
     () =>
@@ -1068,9 +1219,23 @@ test("token detail preserves fixture fail-closed gating and shared TokenAvatar",
   assert.match(panel, /retrying is blocked/);
   assert.match(panel, /I checked wallet activity; clear lock/);
   assert.match(panel, /Recheck canonical receipt/);
-  assert.match(panel, /if \(restored\.hash\) reconcileRestoredTrade\(restored\)/);
+  assert.match(panel, /readPendingTradeForWallet\(window\.localStorage, account\)/);
+  assert.match(panel, /if \(restored\.hash && !differentPool\) reconcileRestoredTrade\(restored\)/);
+  assert.match(panel, /pendingForDifferentPool/);
+  assert.match(panel, /Open pending coin/);
+  assert.match(panel, /pendingStoreBinding\?\.wallet === account\.toLowerCase\(\)/);
+  assert.match(panel, /pendingStoreBinding\.revision === wallet\.revision/);
+  assert.match(panel, /setPendingStoreBinding\(\{\s*wallet: account\.toLowerCase\(\),\s*revision: wallet\.revision/);
+  assert.match(panel, /\[account, liveConfigured, token, wallet\.revision\]/);
+  assert.match(panel, /crossTabLockSupported !== true/);
+  assert.match(panel, /withWalletMutationLock\(navigator\.locks, account/);
+  assert.equal(
+    panel.match(/withWalletSubmissionLock\(\(\) =>/g)?.length,
+    3,
+    "approval, allowance clear, and trade sends must all hold the wallet lock",
+  );
   assert.match(panel, /isCanonicalTradeReverted/);
-  assert.match(panel, /if \(restoredIntent\?\.hash \|\| !pendingStoreReady\) return/);
+  assert.match(panel, /if \(!restoredIntent \|\| restoredIntent\.hash \|\| !pendingStoreReady \|\| !account\) return/);
   assert.match(panel, /inFlightRef\.current/);
   assert.match(panel, /result\?\.allowanceCleared === false/);
   assert.match(panel, /disabled=\{controlsLocked\}/);

@@ -88,13 +88,17 @@ Sending PIPEDOG to `0xdead` removes it from practical circulation but does not
 change ERC-20 `totalSupply`. Code, events, and product copy should call this
 `sequester`, not a supply burn.
 
-The router owner can pause the two policy lanes, rotate destinations, change
-per-call caps, and, while paused, migrate all router-held PIPEDOG to a
-successor contract that reports the same canonical token. This compatibility
-check prevents an accidental EOA or wrong-token destination; it is not a
-timelock and cannot constrain a malicious owner. The 25/25/50 split is
-therefore an administrator-trusted operating policy, not an irrevocable
-custody guarantee.
+The router immutably binds the factory and verifies its PIPEDOG quote token at
+construction. The router owner can pause the two policy lanes, rotate
+destinations, change per-call caps, and, while paused, migrate all router-held
+PIPEDOG to a successor contract that reports the same canonical token, but
+every routing-policy, pause, migration, and ownership mutation requires the
+factory launch gate to be closed first. Unrelated-token and forced-native
+recovery remain available while launches are live because neither path can move
+PIPEDOG or alter routing policy. The compatibility and pause checks prevent
+common operational mistakes; they are not a timelock and cannot constrain a
+malicious owner. The 25/25/50 split is therefore an administrator-trusted
+operating policy, not an irrevocable custody guarantee.
 
 At the active 1% trading fee and 70/30 creator/platform split, the effective
 gross trade flow is:
@@ -407,11 +411,11 @@ EIP-1967 slot identity, proxy/runtime codehash separation, invalid
 implementations, initializer closure, and storage preservation across an
 appended-state mock.
 
-The boolean launch gate is an operational interlock, not a timelock: a Safe can
-batch pause, mutation, and re-enable calls in one transaction. Production still
-requires the separately reviewed external timelock/guardian policy, and wallet
-clients must re-check the full configured release snapshot immediately before
-approval and launch.
+The boolean launch gate is an operational interlock across the factory, hook,
+and revenue-router policy, not a timelock: a Safe can batch pause, mutation, and
+re-enable calls in one transaction. Production still requires the separately
+reviewed external timelock/guardian policy, and wallet clients must re-check the
+full configured release snapshot immediately before approval and launch.
 
 ## Approved deployment inputs and no-broadcast rehearsal
 
@@ -487,8 +491,9 @@ node --env-file=.env scripts/rehearse-deployment.mjs `
   --rpc-alias robinhood
 ```
 
-The script deploys and wires the PIPEDOG revenue router, UUPS factory proxy,
-token implementation, mined-address hook, self-burner, and swap router. It adds
+The script deploys the UUPS factory proxy with launches disabled, binds a
+PIPEDOG revenue router to that factory, then wires the token implementation,
+mined-address hook, self-burner, and swap router. It adds
 an enabled standard config and a disabled self-burn config, transfers ownership
 in two steps, prints the implied PIPEDOG FDV, and leaves global launch disabled.
 The wrapper has no broadcast option and fails on unknown flags. The clean

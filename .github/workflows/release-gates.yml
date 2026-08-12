@@ -116,5 +116,5 @@ jobs:
       - name: Verify pinned release bundle hashes
         run: >-
           node scripts/release-hashes.mjs --check
-          --abi-bundle-sha256 0xc3a5533308b05f166d6dafac62dd176124489bd12487cb21a430926e36453c78
-          --artifact-bundle-sha256 0x1626fc85450151a732324e21171630f68abb98acc8b6dd99048aeeb3bf5808ab
+          --abi-bundle-sha256 0xcc0c896ea0fd906b1c221aba34cbb10731b799f69a68a28ad9b4b6c831d96b31
+          --artifact-bundle-sha256 0x5cd3048620b6114002787f6afd9fdbddfadca57bbb17463c9e513f27b6185928

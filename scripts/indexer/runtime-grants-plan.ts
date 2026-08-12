@@ -180,6 +180,11 @@ TO ${service};
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   market_leader_snapshots, market_leader_entries
 TO ${service};
+GRANT EXECUTE ON FUNCTION laypipe_enforce_cursor_observation() TO ${service};
+GRANT EXECUTE ON FUNCTION laypipe_adjust_pool_market_totals() TO ${service};
+GRANT EXECUTE ON FUNCTION laypipe_apply_inserted_token_transfers() TO ${service};
+GRANT EXECUTE ON FUNCTION laypipe_apply_deleted_token_transfers() TO ${service};
+GRANT EXECUTE ON FUNCTION laypipe_refresh_market_leaders() TO ${service};
 GRANT EXECUTE ON FUNCTION laypipe_initialize_cursor(bigint, text, bigint) TO ${service};
 GRANT EXECUTE ON FUNCTION laypipe_advance_cursor(bigint, text, bigint, bigint, evm_bytes32) TO ${service};
 GRANT EXECUTE ON FUNCTION laypipe_rollback_chain(bigint, bigint, evm_bytes32) TO ${service};

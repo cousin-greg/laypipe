@@ -8,6 +8,11 @@
         "internalType": "contract IERC20"
       },
       {
+        "name": "factory_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "treasury_",
         "type": "address",
         "internalType": "address"
@@ -170,6 +175,19 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ILaypipeFactoryRevenueGate"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -892,7 +910,17 @@
   },
   {
     "type": "error",
+    "name": "FactoryLaunchActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidBounty",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidFactory",
     "inputs": []
   },
   {

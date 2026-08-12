@@ -236,6 +236,18 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   assert.match(tokenCall.sql, /promotion\.wallet_address = p\.creator_address/);
   assert.match(tokenCall.sql, /s\.block_number <= w\.last_processed_block/);
   assert.match(tokenCall.sql, /w\.last_processed_at - interval '24 hours'/);
+  assert.match(
+    tokenCall.sql,
+    /cutoff_swap[\s\S]*s\.block_timestamp <= w\.last_processed_at - interval '24 hours'/,
+  );
+  assert.match(
+    tokenCall.sql,
+    /first_window_swap[\s\S]*s\.block_timestamp > w\.last_processed_at - interval '24 hours'/,
+  );
+  assert.match(
+    tokenCall.sql,
+    /baseline_swap[\s\S]*FROM cutoff_swap c[\s\S]*NOT EXISTS[\s\S]*FROM cutoff_swap c/,
+  );
   assert.doesNotMatch(tokenCall.sql, /now\(\) - interval '24 hours'/);
   assert.match(tokenCall.sql, /pool_market_totals/);
   assert.doesNotMatch(tokenCall.sql, /total_swap_stats/);

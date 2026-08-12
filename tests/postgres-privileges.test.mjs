@@ -118,6 +118,19 @@ test("runtime grant identifiers reject injection and reserved PostgreSQL roles",
     writeRole: "laypipe_runtime",
     serviceRole: "laypipe_runtime_service",
   }));
+  const sql = plan.buildRuntimeGrantsSql({
+    readRole: "laypipe_runtime_read",
+    writeRole: "laypipe_runtime_write",
+    serviceRole: "laypipe_runtime_service",
+  });
+  assert.match(
+    sql,
+    /GRANT EXECUTE ON FUNCTION laypipe_refresh_market_leaders\(\) TO "laypipe_runtime_service"/,
+  );
+  assert.match(
+    sql,
+    /REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, "laypipe_runtime_read", "laypipe_runtime_write"/,
+  );
 });
 
 test("separate runtime roles enforce exact LayPipe database privileges", {
@@ -151,6 +164,7 @@ ALTER SCHEMA public OWNER TO laypipe_migration_owner;
       "0000_production_read_model.sql",
       "0001_runtime_security.sql",
       "0002_market_leader_snapshot.sql",
+      "0003_market_baseline_semantics.sql",
     ]) {
       const migration = readFileSync(resolve(root, "db/migrations", name), "utf8")
         .split(/^\s*--> statement-breakpoint\s*$/gm).map((value) => value.trim()).filter(Boolean)
@@ -171,9 +185,14 @@ SELECT
     'laypipe_untrusted_login',
     'laypipe_runtime_rollback_chain(bigint,bigint,evm_bytes32)',
     'EXECUTE'
+  ),
+  has_function_privilege(
+    'laypipe_untrusted_login',
+    'laypipe_refresh_market_leaders()',
+    'EXECUTE'
   );
 `);
-    assert.equal(migrationOnlyExecute.stdout, "f|f");
+    assert.equal(migrationOnlyExecute.stdout, "f|f|f");
     const migrationOnlyCall = await psql(
       container,
       "SELECT laypipe_runtime_initialize_cursor(4663, 'public-exec-probe', 42);",
@@ -196,7 +215,8 @@ CREATE TABLE laypipe_schema_migrations (
 INSERT INTO laypipe_schema_migrations (name, sha256) VALUES
   ('0000_production_read_model.sql', '${"a".repeat(64)}'),
   ('0001_runtime_security.sql', '${"b".repeat(64)}'),
-  ('0002_market_leader_snapshot.sql', '${"c".repeat(64)}');
+  ('0002_market_leader_snapshot.sql', '${"c".repeat(64)}'),
+  ('0003_market_baseline_semantics.sql', '${"d".repeat(64)}');
 `, { role: "laypipe_migration_owner" });
     await psql(container, `
 CREATE ROLE laypipe_runtime_read NOLOGIN;
@@ -235,6 +255,19 @@ ORDER BY r.rolname;
       serviceRole: "laypipe_runtime_service",
     }), { role: "laypipe_migration_owner" });
 
+    // Reapply the append-only function replacement after ownership has moved
+    // to the NOLOGIN service role. This models applying 0003 to an existing
+    // 0000-0002 database and proves CREATE OR REPLACE retains the service ACL.
+    const baselineMigration = readFileSync(
+      resolve(root, "db/migrations/0003_market_baseline_semantics.sql"),
+      "utf8",
+    )
+      .split(/^\s*--> statement-breakpoint\s*$/gm)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(";\n");
+    await psql(container, `${baselineMigration};`, { role: "laypipe_migration_owner" });
+
     const matrix = await psql(container, `
 SELECT
   has_table_privilege('laypipe_runtime_read', 'launches', 'SELECT'),
@@ -250,9 +283,13 @@ SELECT
   has_function_privilege('laypipe_runtime_read', 'laypipe_runtime_initialize_cursor(bigint,text,bigint)', 'EXECUTE'),
   has_function_privilege('laypipe_runtime_read', 'laypipe_runtime_advance_cursor(bigint,text,bigint,bigint,evm_bytes32)', 'EXECUTE'),
   has_function_privilege('laypipe_runtime_read', 'laypipe_runtime_record_observation(bigint,text,bigint,timestamp with time zone,text)', 'EXECUTE'),
-  has_function_privilege('laypipe_runtime_read', 'laypipe_runtime_rollback_chain(bigint,bigint,evm_bytes32)', 'EXECUTE');
+  has_function_privilege('laypipe_runtime_read', 'laypipe_runtime_rollback_chain(bigint,bigint,evm_bytes32)', 'EXECUTE'),
+  has_function_privilege('laypipe_runtime_service', 'laypipe_refresh_market_leaders()', 'EXECUTE'),
+  has_function_privilege('laypipe_untrusted_login', 'laypipe_refresh_market_leaders()', 'EXECUTE'),
+  has_function_privilege('laypipe_runtime_read', 'laypipe_refresh_market_leaders()', 'EXECUTE'),
+  has_function_privilege('laypipe_runtime_write', 'laypipe_refresh_market_leaders()', 'EXECUTE');
 `);
-    assert.equal(matrix.stdout, "t|f|t|t|t|t|t|t|t|t|f|f|f|f");
+    assert.equal(matrix.stdout, "t|f|t|t|t|t|t|t|t|t|f|f|f|f|t|f|f|f");
 
     const readSelect = await psql(container, "SELECT count(*) FROM launches;", {
       role: "laypipe_read_login",
@@ -428,7 +465,7 @@ FROM market_leader_entries WHERE chain_id = 4663 ORDER BY leader_kind;
       `101|${block101}|2026-08-12 00:00:01+00`,
       `most-traded|${token}`,
       `newest|${secondToken}`,
-    ].join("\n"));
+    ].join("\n"), "all-negative or unchanged new pools must not publish a mover");
 
     const firstRefresh = await psql(container, `
 SELECT refreshed_at::text FROM market_leader_snapshots WHERE chain_id = 4663;
@@ -498,7 +535,11 @@ SELECT laypipe_runtime_record_observation(
 SELECT token_address FROM market_leader_entries
 WHERE chain_id = 4663 AND leader_kind = 'biggest-mover';
 `, { role: "laypipe_read_login" });
-    assert.equal(replayedMover.stdout, token);
+    assert.equal(
+      replayedMover.stdout,
+      token,
+      "a new pool must use its first in-window swap as baseline and its second as latest",
+    );
 
     const promotionId = "a".repeat(64);
     const pinDigest = "b".repeat(64);

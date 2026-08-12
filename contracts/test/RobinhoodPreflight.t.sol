@@ -46,6 +46,15 @@ interface ILiveLetsCashHook {
     function treasury() external view returns (address);
 }
 
+contract PreflightRevenueFactoryGate {
+    IERC20 public immutable quoteToken;
+    bool public launchEnabled;
+
+    constructor(IERC20 quoteToken_) {
+        quoteToken = quoteToken_;
+    }
+}
+
 contract RobinhoodPreflightTest is Test {
     address internal constant ARBSYS =
         0x0000000000000000000000000000000000000064;
@@ -121,6 +130,7 @@ contract RobinhoodPreflightTest is Test {
         PipedogRevenueRouter router =
             new PipedogRevenueRouter(
                 pipedog,
+                address(new PreflightRevenueFactoryGate(pipedog)),
                 TREASURY,
                 OPERATIONS,
                 1 ether,

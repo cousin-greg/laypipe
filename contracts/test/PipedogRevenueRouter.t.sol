@@ -10,6 +10,19 @@ import {IArbSysBlockNumber} from
     "../src/lib/ChainBlockNumber.sol";
 import {FeeOnTransferERC20, MockERC20, ReentrantERC20, RejectNative} from "./mocks/RevenueRouterMocks.sol";
 
+contract RevenueRouterFactoryGate {
+    IERC20 public immutable quoteToken;
+    bool public launchEnabled;
+
+    constructor(IERC20 quoteToken_) {
+        quoteToken = quoteToken_;
+    }
+
+    function setLaunchEnabled(bool enabled) external {
+        launchEnabled = enabled;
+    }
+}
+
 contract PipedogRevenueRouterTest is Test {
     address internal constant ARBSYS =
         0x0000000000000000000000000000000000000064;
@@ -25,12 +38,20 @@ contract PipedogRevenueRouterTest is Test {
     address internal constant RECIPIENT = address(0xD00D);
 
     MockERC20 internal pipedog;
+    RevenueRouterFactoryGate internal factoryGate;
     PipedogRevenueRouter internal router;
 
     function setUp() public {
         pipedog = new MockERC20("Pipedog", "PIPEDOG");
+        factoryGate = new RevenueRouterFactoryGate(IERC20(address(pipedog)));
         router = _deployRouter(IERC20(address(pipedog)), SEQUESTER_CAP, TREASURY_CAP, BOUNTY_BPS);
         pipedog.mint(DONOR, 1_000_000 ether);
+    }
+
+    function testRouterPinsFactoryGateAndCanonicalQuote() public view {
+        assertEq(address(router.factory()), address(factoryGate));
+        assertEq(address(router.pipedog()), address(pipedog));
+        assertEq(address(factoryGate.quoteToken()), address(pipedog));
     }
 
     function testAllocateUsesExact252550PolicyIncludingRounding() public {
@@ -228,6 +249,88 @@ contract PipedogRevenueRouterTest is Test {
         router.setMaxTreasuryRoutePerCall(0);
     }
 
+    function testPolicyAndOwnershipMutationsRequireFactoryLaunchPaused()
+        public
+    {
+        _deposit(400 ether);
+        PipedogRevenueRouter successor =
+            _deployRouter(
+                IERC20(address(pipedog)),
+                SEQUESTER_CAP,
+                TREASURY_CAP,
+                BOUNTY_BPS
+            );
+        address pendingOwner = address(0xA11CE);
+
+        factoryGate.setLaunchEnabled(true);
+
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.setTreasury(address(0x1234));
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.setOperationsWallet(address(0x5678));
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.setMaxSequesterPerCall(1);
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.setMaxTreasuryRoutePerCall(1);
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.pause();
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.transferOwnership(pendingOwner);
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.renounceOwnership();
+
+        assertEq(router.treasury(), TREASURY);
+        assertEq(router.operationsWallet(), OPERATIONS);
+        assertEq(router.maxSequesterPerCall(), SEQUESTER_CAP);
+        assertEq(router.maxTreasuryRoutePerCall(), TREASURY_CAP);
+        assertFalse(router.paused());
+        assertEq(router.owner(), address(this));
+        assertEq(router.pendingOwner(), address(0));
+        assertEq(pipedog.balanceOf(address(router)), 400 ether);
+
+        factoryGate.setLaunchEnabled(false);
+        router.pause();
+        router.transferOwnership(pendingOwner);
+        factoryGate.setLaunchEnabled(true);
+
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.unpause();
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        router.migrate(address(successor));
+        vm.expectRevert(PipedogRevenueRouter.FactoryLaunchActive.selector);
+        vm.prank(pendingOwner);
+        router.acceptOwnership();
+
+        assertTrue(router.paused());
+        assertEq(router.owner(), address(this));
+        assertEq(router.pendingOwner(), pendingOwner);
+        assertEq(pipedog.balanceOf(address(router)), 400 ether);
+        assertEq(pipedog.balanceOf(address(successor)), 0);
+
+        factoryGate.setLaunchEnabled(false);
+        vm.prank(pendingOwner);
+        router.acceptOwnership();
+        assertEq(router.owner(), pendingOwner);
+        assertEq(router.pendingOwner(), address(0));
+
+        vm.prank(pendingOwner);
+        router.unpause();
+        vm.prank(pendingOwner);
+        router.setTreasury(address(0x1234));
+        vm.prank(pendingOwner);
+        router.setOperationsWallet(address(0x5678));
+        vm.prank(pendingOwner);
+        router.setMaxSequesterPerCall(1);
+        vm.prank(pendingOwner);
+        router.setMaxTreasuryRoutePerCall(2);
+
+        assertFalse(router.paused());
+        assertEq(router.treasury(), address(0x1234));
+        assertEq(router.operationsWallet(), address(0x5678));
+        assertEq(router.maxSequesterPerCall(), 1);
+        assertEq(router.maxTreasuryRoutePerCall(), 2);
+    }
+
     function testMigrationAllocatesFreshDonationAndPreservesAccounting() public {
         _deposit(400 ether);
         PipedogRevenueRouter successor =
@@ -318,6 +421,23 @@ contract PipedogRevenueRouterTest is Test {
         assertFalse(accepted);
     }
 
+    function testUnrelatedRecoveryRemainsAvailableWhileFactoryLaunchesAreLive()
+        public
+    {
+        MockERC20 accidental = new MockERC20("Accidental", "OOPS");
+        accidental.mint(address(router), 77 ether);
+        vm.deal(address(router), 2 ether);
+        factoryGate.setLaunchEnabled(true);
+
+        router.recoverToken(IERC20(address(accidental)), RECIPIENT);
+        router.recoverNative(payable(RECIPIENT));
+
+        assertEq(accidental.balanceOf(RECIPIENT), 77 ether);
+        assertEq(RECIPIENT.balance, 2 ether);
+        vm.expectRevert(PipedogRevenueRouter.ProtectedToken.selector);
+        router.recoverToken(IERC20(address(pipedog)), RECIPIENT);
+    }
+
     function testNativeRecoveryFailureRevertsWithoutLosingFunds() public {
         RejectNative rejector = new RejectNative();
         vm.deal(address(router), 1 ether);
@@ -373,13 +493,38 @@ contract PipedogRevenueRouterTest is Test {
 
     function testConstructorRejectsInvalidPolicyInputs() public {
         vm.expectRevert(PipedogRevenueRouter.ZeroAddress.selector);
-        new PipedogRevenueRouter(IERC20(address(0xBEEF)), TREASURY, OPERATIONS, 1, 1, 0, address(this));
+        new PipedogRevenueRouter(
+            IERC20(address(0xBEEF)), address(factoryGate), TREASURY, OPERATIONS, 1, 1, 0, address(this)
+        );
 
         vm.expectRevert(PipedogRevenueRouter.ZeroCap.selector);
-        new PipedogRevenueRouter(IERC20(address(pipedog)), TREASURY, OPERATIONS, 0, 1, 0, address(this));
+        new PipedogRevenueRouter(
+            IERC20(address(pipedog)), address(factoryGate), TREASURY, OPERATIONS, 0, 1, 0, address(this)
+        );
 
         vm.expectRevert(PipedogRevenueRouter.InvalidBounty.selector);
-        new PipedogRevenueRouter(IERC20(address(pipedog)), TREASURY, OPERATIONS, 1, 1, 1_001, address(this));
+        new PipedogRevenueRouter(
+            IERC20(address(pipedog)), address(factoryGate), TREASURY, OPERATIONS, 1, 1, 1_001, address(this)
+        );
+
+        vm.expectRevert(PipedogRevenueRouter.InvalidFactory.selector);
+        new PipedogRevenueRouter(
+            IERC20(address(pipedog)), address(0xBEEF), TREASURY, OPERATIONS, 1, 1, 0, address(this)
+        );
+
+        MockERC20 wrongQuote = new MockERC20("Wrong", "WRONG");
+        RevenueRouterFactoryGate wrongGate =
+            new RevenueRouterFactoryGate(IERC20(address(wrongQuote)));
+        vm.expectRevert(PipedogRevenueRouter.InvalidFactory.selector);
+        new PipedogRevenueRouter(
+            IERC20(address(pipedog)), address(wrongGate), TREASURY, OPERATIONS, 1, 1, 0, address(this)
+        );
+
+        factoryGate.setLaunchEnabled(true);
+        vm.expectRevert(PipedogRevenueRouter.InvalidFactory.selector);
+        new PipedogRevenueRouter(
+            IERC20(address(pipedog)), address(factoryGate), TREASURY, OPERATIONS, 1, 1, 0, address(this)
+        );
     }
 
     function _deposit(uint256 amount) internal {
@@ -394,8 +539,18 @@ contract PipedogRevenueRouterTest is Test {
         internal
         returns (PipedogRevenueRouter deployed)
     {
+        RevenueRouterFactoryGate gate = address(token) == address(pipedog)
+            ? factoryGate
+            : new RevenueRouterFactoryGate(token);
         deployed = new PipedogRevenueRouter(
-            token, TREASURY, OPERATIONS, sequesterCap, treasuryCap, bountyBps, address(this)
+            token,
+            address(gate),
+            TREASURY,
+            OPERATIONS,
+            sequesterCap,
+            treasuryCap,
+            bountyBps,
+            address(this)
         );
     }
 
@@ -465,14 +620,23 @@ contract PipedogRevenueRouterInvariantTest is StdInvariant, Test {
     address internal constant OPERATIONS = address(0xB0B);
 
     MockERC20 internal pipedog;
+    RevenueRouterFactoryGate internal factoryGate;
     PipedogRevenueRouter internal router;
     RevenueRouterHandler internal handler;
     uint256 internal initialSupply;
 
     function setUp() public {
         pipedog = new MockERC20("Pipedog", "PIPEDOG");
+        factoryGate = new RevenueRouterFactoryGate(IERC20(address(pipedog)));
         router = new PipedogRevenueRouter(
-            IERC20(address(pipedog)), TREASURY, OPERATIONS, 1_000 ether, 1_000 ether, 100, address(this)
+            IERC20(address(pipedog)),
+            address(factoryGate),
+            TREASURY,
+            OPERATIONS,
+            1_000 ether,
+            1_000 ether,
+            100,
+            address(this)
         );
         handler = new RevenueRouterHandler(pipedog, router);
         pipedog.mint(address(handler), type(uint128).max);

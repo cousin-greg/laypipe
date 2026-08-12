@@ -35,6 +35,11 @@ import {
   serializeLaunchInput,
   type PendingLaunchIntent,
 } from "@/lib/wallet/pending-launches";
+import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import {
+  assertNoPendingWalletMutation,
+  PENDING_WALLET_MUTATION_STORAGE_KEYS,
+} from "@/lib/wallet/pending-wallet-mutations";
 import {
   approvalCalldata,
   assertLaunchPreflight,
@@ -253,6 +258,9 @@ export default function LaunchForm() {
       }
       try {
         const restored = readPendingLaunchForWallet(window.localStorage, account);
+        if (!restored) {
+          assertNoPendingWalletMutation(window.localStorage, account);
+        }
         setPendingIntent(restored);
         setPendingIntentWallet(account);
         setPendingStorageError("");
@@ -272,6 +280,49 @@ export default function LaunchForm() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [account]);
+
+  useEffect(() => {
+    if (!account) return;
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea !== window.localStorage ||
+        (event.key !== null && !PENDING_WALLET_MUTATION_STORAGE_KEYS.has(event.key))
+      ) {
+        return;
+      }
+      prepareOperationGuard.invalidate();
+      setPrepared(null);
+      try {
+        const restored = readPendingLaunchForWallet(window.localStorage, account);
+        if (restored) {
+          setPendingIntent(restored);
+          setPendingIntentWallet(account);
+          setPendingHash(restored.hash);
+          setPendingStorageError("");
+          dispatch({ type: "RESTORE_PENDING", action: restored.action });
+          return;
+        }
+        assertNoPendingWalletMutation(window.localStorage, account);
+        setPendingIntent(null);
+        setPendingIntentWallet(account);
+        setPendingHash(null);
+        setPendingStorageError("");
+        dispatch({ type: "CONNECTED" });
+      } catch (error) {
+        setPendingIntent(null);
+        setPendingIntentWallet(null);
+        setPendingHash(null);
+        setPendingStorageError(describeWalletError(error));
+        dispatch({
+          type: "FAIL",
+          message: describeWalletError(error),
+          recoverTo: "wallet-ready",
+        });
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [account, prepareOperationGuard]);
 
   function edit<T>(setter: (value: T) => void, value: T) {
     if (locked) return;
@@ -365,6 +416,14 @@ export default function LaunchForm() {
         recoverTo: "reviewed",
       });
     }
+  }
+
+  async function withWalletSubmissionLock<T>(operation: () => Promise<T>) {
+    if (!account) throw new Error("Connect a wallet to continue.");
+    return withWalletMutationLock(navigator.locks, account, async () => {
+      assertNoPendingWalletMutation(window.localStorage, account);
+      return operation();
+    });
   }
 
   async function prepareLaunch() {
@@ -550,25 +609,27 @@ export default function LaunchForm() {
         provider,
         deploymentResult.deployment,
       );
-      const hash = await client.sendApproval(account, nextStep.amount, {
-        onSubmissionInvoked: () => {
-          savePendingLaunch(window.localStorage, approvalIntent);
-          submissionInvoked = true;
-          setPendingIntent(approvalIntent);
-        },
-        onSubmitted: (hash) => {
-          submittedHash = hash;
-          savePendingLaunchHash(
-            window.localStorage,
-            account,
-            "approval",
-            predictedToken,
-            hash,
-          );
-          setPendingIntent({ ...approvalIntent, hash });
-          setPendingHash(hash);
-        },
-      });
+      const hash = await withWalletSubmissionLock(() =>
+        client.sendApproval(account, nextStep.amount, {
+          onSubmissionInvoked: () => {
+            savePendingLaunch(window.localStorage, approvalIntent);
+            submissionInvoked = true;
+            setPendingIntent(approvalIntent);
+          },
+          onSubmitted: (hash) => {
+            submittedHash = hash;
+            savePendingLaunchHash(
+              window.localStorage,
+              account,
+              "approval",
+              predictedToken,
+              hash,
+            );
+            setPendingIntent({ ...approvalIntent, hash });
+            setPendingHash(hash);
+          },
+        }),
+      );
       setPendingHash(hash);
       await client.confirmApproval(hash, account, nextStep.amount);
       approvalConfirmed = true;
@@ -675,45 +736,48 @@ export default function LaunchForm() {
         provider,
         deploymentResult.deployment,
       );
-      const preflight = await client.readPreflight(
-        account,
-        prepared.input.configId,
-      );
-      const safety = assertLaunchPreflight({
-        preflight,
-        expectedSelfBurn: mode === "self-burn",
-        firstBuyIn: prepared.input.firstBuyIn,
-      });
-      if (safety.approvalPlan.steps.length > 0) {
+      const hash = await withWalletSubmissionLock(async () => {
+        const preflight = await client.readPreflight(
+          account,
+          prepared.input.configId,
+        );
+        const safety = assertLaunchPreflight({
+          preflight,
+          expectedSelfBurn: mode === "self-burn",
+          firstBuyIn: prepared.input.firstBuyIn,
+        });
+        if (safety.approvalPlan.steps.length > 0) {
+          await assertExactLaunchWalletContext(provider, account);
+          assertPreparedLaunchCreator(prepared.params.creator, account);
+          setPrepared({ ...prepared, preflight, approvalPlan: safety.approvalPlan });
+          dispatch({ type: "PREPARED", needsApproval: true });
+          return null;
+        }
+
         await assertExactLaunchWalletContext(provider, account);
         assertPreparedLaunchCreator(prepared.params.creator, account);
-        setPrepared({ ...prepared, preflight, approvalPlan: safety.approvalPlan });
-        dispatch({ type: "PREPARED", needsApproval: true });
-        return;
-      }
-
-      await assertExactLaunchWalletContext(provider, account);
-      assertPreparedLaunchCreator(prepared.params.creator, account);
-      dispatch({ type: "LAUNCH_SUBMITTED" });
-      const hash = await client.sendLaunch(account, prepared.input, {
-        onSubmissionInvoked: () => {
-          savePendingLaunch(window.localStorage, launchIntent);
-          submissionInvoked = true;
-          setPendingIntent(launchIntent);
-        },
-        onSubmitted: (hash) => {
-          submittedHash = hash;
-          savePendingLaunchHash(
-            window.localStorage,
-            account,
-            "launch",
-            predictedToken,
-            hash,
-          );
-          setPendingIntent({ ...launchIntent, hash });
-          setPendingHash(hash);
-        },
+        dispatch({ type: "LAUNCH_SUBMITTED" });
+        return client.sendLaunch(account, prepared.input, {
+          onSubmissionInvoked: () => {
+            savePendingLaunch(window.localStorage, launchIntent);
+            submissionInvoked = true;
+            setPendingIntent(launchIntent);
+          },
+          onSubmitted: (hash) => {
+            submittedHash = hash;
+            savePendingLaunchHash(
+              window.localStorage,
+              account,
+              "launch",
+              predictedToken,
+              hash,
+            );
+            setPendingIntent({ ...launchIntent, hash });
+            setPendingHash(hash);
+          },
+        });
       });
+      if (!hash) return;
       setPendingHash(hash);
       const confirmed = await client.confirmLaunch(hash, {
         creator: account,
@@ -824,25 +888,27 @@ export default function LaunchForm() {
           invokedAt: Date.now(),
         };
         revocationIntent = intent;
-        const hash = await client.sendApproval(account, BigInt(0), {
-          onSubmissionInvoked: () => {
-            savePendingLaunch(window.localStorage, intent);
-            submissionInvoked = true;
-            setPendingIntent(intent);
-          },
-          onSubmitted: (hash) => {
-            submittedHash = hash;
-            savePendingLaunchHash(
-              window.localStorage,
-              account,
-              "approval",
-              predictedToken,
-              hash,
-            );
-            setPendingIntent({ ...intent, hash });
-            setPendingHash(hash);
-          },
-        });
+        const hash = await withWalletSubmissionLock(() =>
+          client.sendApproval(account, BigInt(0), {
+            onSubmissionInvoked: () => {
+              savePendingLaunch(window.localStorage, intent);
+              submissionInvoked = true;
+              setPendingIntent(intent);
+            },
+            onSubmitted: (hash) => {
+              submittedHash = hash;
+              savePendingLaunchHash(
+                window.localStorage,
+                account,
+                "approval",
+                predictedToken,
+                hash,
+              );
+              setPendingIntent({ ...intent, hash });
+              setPendingHash(hash);
+            },
+          }),
+        );
         setPendingHash(hash);
         await client.confirmApproval(hash, account, BigInt(0));
         removePendingLaunch(

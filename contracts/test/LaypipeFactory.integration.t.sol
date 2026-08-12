@@ -90,20 +90,6 @@ contract LaypipeFactoryIntegrationTest is Test {
         manager = IPoolManager(PipedogProtocolConfig.POOL_MANAGER);
         pipedog = IERC20(PipedogProtocolConfig.PIPEDOG);
 
-        revenueRouter = new PipedogRevenueRouter(
-            pipedog,
-            PROTOCOL_TREASURY,
-            OPERATIONS,
-            ROUTE_CAP,
-            ROUTE_CAP,
-            BOUNTY_BPS,
-            address(this)
-        );
-        _setPipedogBalance(address(revenueRouter), 0);
-        _setPipedogBalance(revenueRouter.SEQUESTER_SINK(), 0);
-        _setPipedogBalance(PROTOCOL_TREASURY, 0);
-        _setPipedogBalance(OPERATIONS, 0);
-
         LaypipeFactory implementation = new LaypipeFactory();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(implementation),
@@ -120,6 +106,23 @@ contract LaypipeFactoryIntegrationTest is Test {
         );
         factory = LaypipeFactory(address(proxy));
         _setPipedogBalance(address(factory), 0);
+
+        revenueRouter = new PipedogRevenueRouter(
+            pipedog,
+            address(factory),
+            PROTOCOL_TREASURY,
+            OPERATIONS,
+            ROUTE_CAP,
+            ROUTE_CAP,
+            BOUNTY_BPS,
+            address(this)
+        );
+        _setPipedogBalance(address(revenueRouter), 0);
+        _setPipedogBalance(revenueRouter.SEQUESTER_SINK(), 0);
+        _setPipedogBalance(PROTOCOL_TREASURY, 0);
+        _setPipedogBalance(OPERATIONS, 0);
+        factory.setTreasury(address(revenueRouter));
+
         tokenImplementation = new LaypipeToken();
 
         hook = _deployHook(address(revenueRouter));

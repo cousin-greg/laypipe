@@ -326,7 +326,10 @@ test("unreadable pending claim storage locks reads and rejects unsafe mutation",
 test("wallet claim UI keeps corrupt persistence locked behind explicit recovery", () => {
   const component = readFileSync(resolve(root, "app/_components/WalletPortfolio.tsx"), "utf8");
   assert.match(component, /readPendingClaimStateForWallet/);
-  assert.match(component, /pendingClaim \|\| claimRecovery/);
+  assert.match(
+    component,
+    /pendingClaim \|\|\s*claimRecovery \|\|\s*crossSurfacePending/,
+  );
   assert.match(component, /!claimStorageReady/);
   assert.match(component, /Claims are locked\./);
   assert.match(component, /resetPendingClaimStore/);

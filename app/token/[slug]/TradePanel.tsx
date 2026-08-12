@@ -5,12 +5,14 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/app/_components/WalletProvider";
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import {
-  readPendingTrade,
+  readPendingTradeForWallet,
   removePendingTrade,
   savePendingTrade,
   savePendingTradeHash,
   type PendingTradeIntent,
 } from "@/lib/wallet/pending-trades";
+import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import { assertNoPendingWalletMutation } from "@/lib/wallet/pending-wallet-mutations";
 import { ensureRobinhoodChain } from "@/lib/web3/launch-client";
 import {
   encodeLaypipeTradeCall,
@@ -69,6 +71,16 @@ function pendingPhase(phase: TradePhase) {
   return phase === "approval-pending" || phase === "trade-pending";
 }
 
+function samePendingPool(
+  intent: PendingTradeIntent,
+  token: TradeTokenIdentity,
+) {
+  return (
+    intent.tokenAddress.toLowerCase() === token.tokenAddress.toLowerCase() &&
+    intent.poolId.toLowerCase() === token.poolId.toLowerCase()
+  );
+}
+
 export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   const wallet = useWallet();
   const deploymentResult = useMemo(
@@ -88,7 +100,13 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   const [pendingHash, setPendingHash] = useState<Hex | null>(null);
   const [restoredIntent, setRestoredIntent] =
     useState<PendingTradeIntent | null>(null);
-  const [pendingStoreReady, setPendingStoreReady] = useState(false);
+  const [pendingStoreBinding, setPendingStoreBinding] = useState<{
+    wallet: string;
+    revision: number;
+  } | null>(null);
+  const [crossTabLockSupported, setCrossTabLockSupported] = useState<
+    boolean | null
+  >(null);
   const [result, setResult] = useState<TradeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [contextWarning, setContextWarning] = useState<string | null>(null);
@@ -99,16 +117,24 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   const reconciliationControllerRef = useRef<AbortController | null>(null);
   const walletRevisionRef = useRef(wallet.revision);
   const account = wallet.account;
+  const pendingForDifferentPool = Boolean(
+    restoredIntent && token && !samePendingPool(restoredIntent, token),
+  );
 
   const liveConfigured = Boolean(
     enabled && token && deploymentResult?.configured,
   );
+  const pendingStoreReady =
+    account === null ||
+    (pendingStoreBinding?.wallet === account.toLowerCase() &&
+      pendingStoreBinding.revision === wallet.revision);
   const inputSymbol = side === "buy" ? "PIPEDOG" : symbol;
   const outputSymbol = side === "buy" ? symbol : "PIPEDOG";
   const quoteSeconds = quote
     ? Math.max(0, Math.ceil((quote.expiresAtMs - clock) / 1_000))
     : 0;
   const controlsLocked =
+    crossTabLockSupported !== true ||
     !pendingStoreReady ||
     pendingPhase(phase) ||
     phase === "preparing" ||
@@ -214,6 +240,15 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   );
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setCrossTabLockSupported(
+        Boolean(navigator.locks && typeof navigator.locks.request === "function"),
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
 
@@ -246,19 +281,20 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       if (!liveConfigured || !account || !token) {
-        setPendingStoreReady(true);
+        setPendingStoreBinding(null);
         setRestoredIntent(null);
         setPendingHash(null);
         return;
       }
       try {
-        const restored = readPendingTrade(
-          window.localStorage,
-          account,
-          token.tokenAddress,
-          token.poolId,
+        const restored = readPendingTradeForWallet(window.localStorage, account);
+        const differentPool = Boolean(
+          restored && !samePendingPool(restored, token),
         );
-        setPendingStoreReady(true);
+        setPendingStoreBinding({
+          wallet: account.toLowerCase(),
+          revision: wallet.revision,
+        });
         setRestoredIntent(restored);
         if (!restored) {
           setPendingHash(null);
@@ -270,14 +306,16 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         }
         setPendingHash(restored.hash);
         setError(
-          restored.hash
-            ? "A prior wallet submission was restored. Reconcile its canonical receipt before retrying."
-            : "A prior wallet submission may have broadcast without returning a hash. Check wallet activity before retrying.",
+          differentPool
+            ? `A prior trade action for ${shortAddress(restored.tokenAddress)} is unresolved. Open that coin to reconcile it before trading anywhere else.`
+            : restored.hash
+              ? "A prior wallet submission was restored. Reconcile its canonical receipt before retrying."
+              : "A prior wallet submission may have broadcast without returning a hash. Check wallet activity before retrying.",
         );
         setPhase("pending-unknown");
-        if (restored.hash) reconcileRestoredTrade(restored);
+        if (restored.hash && !differentPool) reconcileRestoredTrade(restored);
       } catch (caught) {
-        setPendingStoreReady(false);
+        setPendingStoreBinding(null);
         setRestoredIntent(null);
         setPendingHash(null);
         setError(describeTradeError(caught));
@@ -285,7 +323,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [account, liveConfigured, token]);
+  }, [account, liveConfigured, token, wallet.revision]);
 
   function invalidateTrade(nextPhase: TradePhase = "idle") {
     setPreflight(null);
@@ -314,6 +352,14 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         confirmationProvider ? { confirmationProvider } : {},
       ),
     };
+  }
+
+  async function withWalletSubmissionLock<T>(operation: () => Promise<T>) {
+    if (!account) throw new Error("Connect a wallet to continue.");
+    return withWalletMutationLock(navigator.locks, account, async () => {
+      assertNoPendingWalletMutation(window.localStorage, account);
+      return operation();
+    });
   }
 
   async function connectedAccount() {
@@ -384,11 +430,8 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     try {
       const { provider, tradeClient } = client();
       await ensureRobinhoodChain(provider);
-      const pending = await tradeClient.sendNextApproval(
-        account,
-        side,
-        preflight.inputAmount,
-        {
+      const pending = await withWalletSubmissionLock(() =>
+        tradeClient.sendNextApproval(account, side, preflight.inputAmount, {
           onSubmissionInvoked: (submission) => {
             const nextIntent = approvalIntent({
               amount: submission.amount,
@@ -407,7 +450,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
             if (!intent) throw new Error("Approval recovery intent is missing.");
             persistSubmission(intent, hash);
           },
-        },
+        }),
       );
       const confirmation = await tradeClient.confirmApproval(pending, account);
       if (!confirmation.allowanceMatchesIntent) {
@@ -468,8 +511,9 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     try {
       const { provider, tradeClient } = client();
       await ensureRobinhoodChain(provider);
-      const pending = await tradeClient.clearAllowance(account, side, {
-        onSubmissionInvoked: (submission) => {
+      const pending = await withWalletSubmissionLock(() =>
+        tradeClient.clearAllowance(account, side, {
+          onSubmissionInvoked: (submission) => {
           const nextIntent = approvalIntent({
             amount: submission.amount,
             kind: submission.kind,
@@ -481,13 +525,14 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           }
           persistSubmission(nextIntent);
           intent = nextIntent;
-        },
-        onSubmitted: (hash) => {
+          },
+          onSubmitted: (hash) => {
           submitted = hash;
           if (!intent) throw new Error("Allowance-clear recovery intent is missing.");
           persistSubmission(intent, hash);
-        },
-      });
+          },
+        }),
+      );
       if (!pending) {
         clearPersistentSubmission();
         invalidateTrade();
@@ -536,8 +581,9 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       await ensureRobinhoodChain(provider);
       // sendTrade performs a new configured release deployment/token/account/balance and
       // exact-allowance preflight, then simulates the protected calldata.
-      const pending = await tradeClient.sendTrade(quote, {
-        onSubmissionInvoked: (submission) => {
+      const pending = await withWalletSubmissionLock(() =>
+        tradeClient.sendTrade(quote, {
+          onSubmissionInvoked: (submission) => {
           const nextIntent = tradeIntent(submission.quote);
           if (
             nextIntent.target.toLowerCase() !== submission.target.toLowerCase() ||
@@ -547,13 +593,14 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           }
           persistSubmission(nextIntent);
           intent = nextIntent;
-        },
-        onSubmitted: (hash) => {
+          },
+          onSubmitted: (hash) => {
           submitted = hash;
           if (!intent) throw new Error("Trade recovery intent is missing.");
           persistSubmission(intent, hash);
-        },
-      });
+          },
+        }),
+      );
       const confirmed = await tradeClient.confirmTrade(pending, quote);
       setResult({
         hash: pending.hash,
@@ -593,6 +640,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       !pending?.hash ||
       !account ||
       !token ||
+      !samePendingPool(pending, token) ||
       !deploymentResult?.configured ||
       inFlightRef.current
     ) {
@@ -727,9 +775,15 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
   }
 
   function clearReconciledTradeLock() {
-    if (restoredIntent?.hash || !pendingStoreReady) return;
+    if (!restoredIntent || restoredIntent.hash || !pendingStoreReady || !account) return;
     reconciliationRef.current += 1;
-    clearPersistentSubmission();
+    removePendingTrade(
+      window.localStorage,
+      account,
+      restoredIntent.tokenAddress,
+      restoredIntent.poolId,
+    );
+    setRestoredIntent(null);
     invalidateTrade();
   }
 
@@ -939,7 +993,25 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       ) : null}
 
       {phase === "pending-unknown" ? (
-        restoredIntent?.hash ? (
+        pendingForDifferentPool && restoredIntent ? (
+          <>
+            <a
+              className={`button button-quiet ${styles.clearButton}`}
+              href={`/token/${restoredIntent.tokenAddress}`}
+            >
+              Open pending coin
+            </a>
+            {!restoredIntent.hash && pendingStoreReady ? (
+              <button
+                className={`button button-quiet ${styles.clearButton}`}
+                type="button"
+                onClick={clearReconciledTradeLock}
+              >
+                I checked wallet activity; clear lock
+              </button>
+            ) : null}
+          </>
+        ) : restoredIntent?.hash ? (
           <button
             className={`button button-quiet ${styles.clearButton}`}
             type="button"
@@ -978,6 +1050,11 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
       ) : null}
 
       <div className={styles.message} aria-live="polite">
+        {crossTabLockSupported === false ? (
+          <p className={styles.error}>
+            Trading requires browser support for secure cross-tab wallet locks.
+          </p>
+        ) : null}
         {contextWarning ? <p>{contextWarning}</p> : null}
         {error ? <p className={styles.error}>{error}</p> : null}
       </div>

@@ -92,18 +92,6 @@ contract DeployLaypipeBaseSepolia is Script {
         IPoolManager poolManager =
             IPoolManager(BaseSepoliaConfig.POOL_MANAGER);
 
-        PipedogRevenueRouter revenueRouter =
-            new PipedogRevenueRouter(
-                quoteToken,
-                inputs.treasuryWallet,
-                inputs.operationsWallet,
-                inputs.sequesterCap,
-                inputs.treasuryCap,
-                inputs.routerBountyBps,
-                inputs.deployer
-            );
-        deployed.revenueRouter = address(revenueRouter);
-
         LaypipeFactory implementation = new LaypipeFactory();
         deployed.factoryImplementation = address(implementation);
         ERC1967Proxy proxy = new ERC1967Proxy(
@@ -113,7 +101,7 @@ contract DeployLaypipeBaseSepolia is Script {
                 (
                     poolManager,
                     quoteToken,
-                    address(revenueRouter),
+                    inputs.treasuryWallet,
                     inputs.deployer,
                     inputs.launchFee
                 )
@@ -121,6 +109,20 @@ contract DeployLaypipeBaseSepolia is Script {
         );
         LaypipeFactory factory = LaypipeFactory(address(proxy));
         deployed.factoryProxy = address(factory);
+
+        PipedogRevenueRouter revenueRouter =
+            new PipedogRevenueRouter(
+                quoteToken,
+                address(factory),
+                inputs.treasuryWallet,
+                inputs.operationsWallet,
+                inputs.sequesterCap,
+                inputs.treasuryCap,
+                inputs.routerBountyBps,
+                inputs.deployer
+            );
+        deployed.revenueRouter = address(revenueRouter);
+        factory.setTreasury(address(revenueRouter));
 
         LaypipeToken tokenImplementation = new LaypipeToken();
         deployed.tokenImplementation = address(tokenImplementation);
@@ -387,6 +389,8 @@ contract DeployLaypipeBaseSepolia is Script {
                     != deployed.mockPipedog
                 || address(revenueRouter.pipedog())
                     != deployed.mockPipedog
+                || address(revenueRouter.factory())
+                    != deployed.factoryProxy
                 || revenueRouter.pendingOwner()
                     != inputs.finalOwner
                 || IERC20(deployed.mockPipedog).totalSupply()

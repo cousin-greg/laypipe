@@ -208,7 +208,7 @@ market-read readiness probe and returns 503 unless live mode and its database
 and indexer gates are ready. It does not prove launch mutation readiness:
 manifest/RPC, Redis, Pinata, and wallet flows retain separate release gates.
 Keyset cursors are HMAC-authenticated with a
-domain-separated use of the server-only wallet challenge secret, so arbitrary
+domain-separated use of the server-only `MARKET_CURSOR_SECRET`, so arbitrary
 client-generated cursor variants fail before Neon. Indexer work is bounded by
 block batch, guarded by `CRON_SECRET`, idempotent, and safe to retry.
 
@@ -445,7 +445,10 @@ Incident actions:
    original/current-creator wallet portfolios, stale-watermark short circuit,
    both IP and IP-wallet Upstash limits on `POST /api/holdings`, and global
    leader publication where a launch outside the newest page wins the
-   trailing-24-hour ranking. Prove a canonical rollback removes the leader
+   trailing-24-hour ranking. Include an exact-cutoff swap, a pre-cutoff
+   baseline plus one in-window trade, a new-pool first-trade fallback, and an
+   all-negative set; prove Board, detail, and the materialized mover agree.
+   Prove a canonical rollback removes the leader
    snapshot from the database before replay, then verify the prior public
    response ages out within its bounded 10-second CDN TTL plus 20-second stale
    window. Capture

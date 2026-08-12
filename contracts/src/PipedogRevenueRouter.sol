@@ -8,6 +8,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 
+interface ILaypipeFactoryRevenueGate {
+    function launchEnabled() external view returns (bool);
+    function quoteToken() external view returns (IERC20);
+}
+
 /// @title PipedogRevenueRouter
 /// @notice Direct PIPEDOG platform-revenue policy for laypipe.fun.
 /// @dev Trading fees and launch fees already arrive as PIPEDOG, so swapping
@@ -15,6 +20,9 @@ import {ChainBlockNumber} from "./lib/ChainBlockNumber.sol";
 ///      and misleading. During normal operation each newly received token is
 ///      assigned 25% to dead-address sequestration, 25% to the treasury, and
 ///      50% to operations. The owner retains a token-only migration escape.
+///      Every policy/ownership mutation is bound to the immutable factory's
+///      closed launch gate so an approved launch cannot succeed across live
+///      routing-manifest drift.
 contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -27,6 +35,8 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     error ProtectedToken();
     error NativeRecoveryFailed();
     error InvalidSuccessor();
+    error InvalidFactory();
+    error FactoryLaunchActive();
 
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant SEQUESTER_SHARE_BPS = 2_500;
@@ -36,6 +46,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     address public constant SEQUESTER_SINK = 0x000000000000000000000000000000000000dEaD;
 
     IERC20 public immutable pipedog;
+    ILaypipeFactoryRevenueGate public immutable factory;
     uint16 public immutable bountyBps;
 
     address public treasury;
@@ -75,6 +86,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
 
     constructor(
         IERC20 pipedog_,
+        address factory_,
         address treasury_,
         address operationsWallet_,
         uint256 maxSequesterPerCall_,
@@ -87,10 +99,17 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
                 || owner_ == address(0) || treasury_ == address(this) || operationsWallet_ == address(this)
                 || address(pipedog_).code.length == 0
         ) revert ZeroAddress();
+        if (
+            factory_.code.length == 0
+                || address(ILaypipeFactoryRevenueGate(factory_).quoteToken())
+                    != address(pipedog_)
+                || ILaypipeFactoryRevenueGate(factory_).launchEnabled()
+        ) revert InvalidFactory();
         if (maxSequesterPerCall_ == 0 || maxTreasuryRoutePerCall_ == 0) revert ZeroCap();
         if (bountyBps_ > MAX_BOUNTY_BPS) revert InvalidBounty();
 
         pipedog = pipedog_;
+        factory = ILaypipeFactoryRevenueGate(factory_);
         treasury = treasury_;
         operationsWallet = operationsWallet_;
         maxSequesterPerCall = maxSequesterPerCall_;
@@ -192,7 +211,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
         emit OperationsPipedogCollected(operationsWallet, amount);
     }
 
-    function setTreasury(address newTreasury) external onlyOwner {
+    function setTreasury(address newTreasury) external onlyOwner whenFactoryLaunchPaused {
         if (newTreasury == address(0) || newTreasury == address(this)) {
             revert ZeroAddress();
         }
@@ -200,7 +219,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
         treasury = newTreasury;
     }
 
-    function setOperationsWallet(address newWallet) external onlyOwner {
+    function setOperationsWallet(address newWallet) external onlyOwner whenFactoryLaunchPaused {
         if (newWallet == address(0) || newWallet == address(this)) {
             revert ZeroAddress();
         }
@@ -208,23 +227,23 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
         operationsWallet = newWallet;
     }
 
-    function setMaxSequesterPerCall(uint256 newCap) external onlyOwner {
+    function setMaxSequesterPerCall(uint256 newCap) external onlyOwner whenFactoryLaunchPaused {
         if (newCap == 0) revert ZeroCap();
         emit MaxSequesterPerCallUpdated(maxSequesterPerCall, newCap);
         maxSequesterPerCall = newCap;
     }
 
-    function setMaxTreasuryRoutePerCall(uint256 newCap) external onlyOwner {
+    function setMaxTreasuryRoutePerCall(uint256 newCap) external onlyOwner whenFactoryLaunchPaused {
         if (newCap == 0) revert ZeroCap();
         emit MaxTreasuryRoutePerCallUpdated(maxTreasuryRoutePerCall, newCap);
         maxTreasuryRoutePerCall = newCap;
     }
 
-    function pause() external onlyOwner {
+    function pause() external onlyOwner whenFactoryLaunchPaused {
         _pause();
     }
 
-    function unpause() external onlyOwner {
+    function unpause() external onlyOwner whenFactoryLaunchPaused {
         _unpause();
     }
 
@@ -237,6 +256,7 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
     function migrate(address successor)
         external
         onlyOwner
+        whenFactoryLaunchPaused
         whenPaused
         nonReentrant
     {
@@ -278,6 +298,37 @@ contract PipedogRevenueRouter is Ownable2Step, Pausable, ReentrancyGuard {
         (bool ok,) = recipient.call{value: amount}("");
         if (!ok) revert NativeRecoveryFailed();
         emit NativeRecovered(recipient, amount);
+    }
+
+    function transferOwnership(address newOwner)
+        public
+        override
+        onlyOwner
+        whenFactoryLaunchPaused
+    {
+        super.transferOwnership(newOwner);
+    }
+
+    function acceptOwnership() public override whenFactoryLaunchPaused {
+        super.acceptOwnership();
+    }
+
+    function renounceOwnership()
+        public
+        override
+        onlyOwner
+        whenFactoryLaunchPaused
+    {
+        super.renounceOwnership();
+    }
+
+    modifier whenFactoryLaunchPaused() {
+        _requireFactoryLaunchPaused();
+        _;
+    }
+
+    function _requireFactoryLaunchPaused() private view {
+        if (factory.launchEnabled()) revert FactoryLaunchActive();
     }
 
     function _pullExact(address from, uint256 amount) private {

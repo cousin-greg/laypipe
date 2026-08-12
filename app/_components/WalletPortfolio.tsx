@@ -20,6 +20,11 @@ import {
   type PendingClaimRecoveryReason,
   type PendingClaimState,
 } from "@/lib/wallet/pending-claims";
+import { withWalletMutationLock } from "@/lib/wallet/mutation-lock";
+import {
+  assertNoPendingWalletMutation,
+  PENDING_WALLET_MUTATION_STORAGE_KEYS,
+} from "@/lib/wallet/pending-wallet-mutations";
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import {
   CreatorClaimClient,
@@ -66,6 +71,7 @@ export function WalletPortfolio({ view }: { view: View }) {
   const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
   const [pendingClaim, setPendingClaim] = useState<PendingClaimIntent | null>(null);
   const [claimRecovery, setClaimRecovery] = useState<PendingClaimRecoveryReason | null>(null);
+  const [crossSurfacePending, setCrossSurfacePending] = useState<string | null>(null);
   const [claimStateBinding, setClaimStateBinding] = useState<{
     wallet: string;
     revision: number;
@@ -139,12 +145,21 @@ export function WalletPortfolio({ view }: { view: View }) {
       setNextCursor(null);
       setClaimError(null);
       setConfirmedHash(null);
+      setCrossSurfacePending(null);
       let restored: PendingClaimState = { status: "clear" };
       if (account) {
         try {
           restored = readPendingClaimStateForWallet(window.localStorage, account);
+          if (restored.status === "clear") {
+            assertNoPendingWalletMutation(window.localStorage, account);
+          }
         } catch (cause) {
-          restored = pendingClaimRecoveryFromError(cause);
+          const claimState = readPendingClaimStateForWallet(window.localStorage, account);
+          if (claimState.status === "recovery-required") {
+            restored = claimState;
+          } else {
+            setCrossSurfacePending(describeWalletError(cause));
+          }
         }
       }
       const intent = restored.status === "pending" ? restored.intent : null;
@@ -164,6 +179,48 @@ export function WalletPortfolio({ view }: { view: View }) {
       window.cancelAnimationFrame(frame);
     };
   }, [account, load, revision]);
+
+  useEffect(() => {
+    if (!account) return;
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.storageArea !== window.localStorage ||
+        (event.key !== null && !PENDING_WALLET_MUTATION_STORAGE_KEYS.has(event.key))
+      ) {
+        return;
+      }
+      claimRef.current += 1;
+      setClaiming(null);
+      try {
+        assertNoPendingWalletMutation(window.localStorage, account);
+        setPendingClaim(null);
+        setClaimRecovery(null);
+        setCrossSurfacePending(null);
+        setClaimError(null);
+      } catch (cause) {
+        const restored = readPendingClaimStateForWallet(window.localStorage, account);
+        if (restored.status === "pending") {
+          setPendingClaim(restored.intent);
+          setClaimRecovery(null);
+          setCrossSurfacePending(null);
+          setClaiming(restored.intent.poolId);
+          setClaimError(null);
+          return;
+        }
+        setPendingClaim(null);
+        if (restored.status === "recovery-required") {
+          setClaimRecovery(restored.reason);
+          setCrossSurfacePending(null);
+        } else {
+          setClaimRecovery(null);
+          setCrossSurfacePending(describeWalletError(cause));
+        }
+        setClaimError(null);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [account]);
 
   const visible = useMemo(
     () =>
@@ -199,7 +256,14 @@ export function WalletPortfolio({ view }: { view: View }) {
   }
 
   async function claim(position: WalletTokenPosition) {
-    if (!account || !provider || !claimStorageReady || pendingClaim || claimRecovery) return;
+    if (
+      !account ||
+      !provider ||
+      !claimStorageReady ||
+      pendingClaim ||
+      claimRecovery ||
+      crossSurfacePending
+    ) return;
     const claimId = ++claimRef.current;
     const claimAccount = account;
     const claimRevision = revision;
@@ -217,45 +281,52 @@ export function WalletPortfolio({ view }: { view: View }) {
     let keepLocked = false;
     try {
       const client = new CreatorClaimClient(provider, deployment.deployment);
-      const submitted = await client.claim(claimAccount, position.poolId, {
-        onSubmissionInvoked: () => {
-          const intent: PendingClaimIntent = {
-            chainId: 4663,
-            wallet: claimAccount,
-            poolId: position.poolId,
-            hash: null,
-            invokedAt: Date.now(),
-          };
-          try {
-            savePendingClaim(window.localStorage, intent);
-          } catch (cause) {
-            setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
-            throw cause;
-          }
-          submissionInvoked = true;
-          persisted.intent = intent;
-          setPendingClaim(intent);
+      const submitted = await withWalletMutationLock(
+        navigator.locks,
+        claimAccount,
+        async () => {
+          assertNoPendingWalletMutation(window.localStorage, claimAccount);
+          return client.claim(claimAccount, position.poolId, {
+            onSubmissionInvoked: () => {
+              const intent: PendingClaimIntent = {
+                chainId: 4663,
+                wallet: claimAccount,
+                poolId: position.poolId,
+                hash: null,
+                invokedAt: Date.now(),
+              };
+              try {
+                savePendingClaim(window.localStorage, intent);
+              } catch (cause) {
+                setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
+                throw cause;
+              }
+              submissionInvoked = true;
+              persisted.intent = intent;
+              setPendingClaim(intent);
+            },
+            onSubmitted: (hash) => {
+              submittedHash = hash;
+              if (!persisted.intent) {
+                throw new Error("The pending claim intent was not saved before submission.");
+              }
+              try {
+                savePendingClaimHash(
+                  window.localStorage,
+                  claimAccount,
+                  position.poolId,
+                  hash,
+                );
+              } catch (cause) {
+                setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
+                throw cause;
+              }
+              persisted.intent = { ...persisted.intent, hash };
+              setPendingClaim(persisted.intent);
+            },
+          });
         },
-        onSubmitted: (hash) => {
-          submittedHash = hash;
-          if (!persisted.intent) {
-            throw new Error("The pending claim intent was not saved before submission.");
-          }
-          try {
-            savePendingClaimHash(
-              window.localStorage,
-              claimAccount,
-              position.poolId,
-              hash,
-            );
-          } catch (cause) {
-            setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
-            throw cause;
-          }
-          persisted.intent = { ...persisted.intent, hash };
-          setPendingClaim(persisted.intent);
-        },
-      });
+      );
       if (claimId !== claimRef.current || claimRevision !== revision) return;
       submittedHash = submitted.hash;
       await client.confirmClaim(submitted.hash, { account: claimAccount, poolId: position.poolId });
@@ -419,7 +490,7 @@ export function WalletPortfolio({ view }: { view: View }) {
             <a className="button button-quiet button-small" href={explorerTokenUrl(position.tokenAddress)} target="_blank" rel="noreferrer">Explorer</a>
             {position.feeMode === "creator" &&
               position.currentCreator.toLowerCase() === account.toLowerCase() && (
-              <button className="button button-accent button-small" type="button" onClick={() => void claim(position)} disabled={!claimStorageReady || claiming !== null || pendingClaim !== null || claimRecovery !== null}>
+              <button className="button button-accent button-small" type="button" onClick={() => void claim(position)} disabled={!claimStorageReady || claiming !== null || pendingClaim !== null || claimRecovery !== null || crossSurfacePending !== null}>
                 {claiming === position.poolId ? "Claiming..." : "Verify & claim"}
               </button>
             )}
@@ -428,6 +499,13 @@ export function WalletPortfolio({ view }: { view: View }) {
       ))}
       {nextCursor && <button className="button button-quiet" type="button" disabled={loading} onClick={() => void load(nextCursor)}>{loading ? "Loading..." : "Load more"}</button>}
       {claimError && <p className="form-error" role="alert">{claimError}</p>}
+      {crossSurfacePending && (
+        <div className="wallet-snapshot-note" role="alert">
+          <p>
+            Claims are locked because another LayPipe wallet action is unresolved. {crossSurfacePending}
+          </p>
+        </div>
+      )}
       {claimRecovery && (
         <div className="wallet-snapshot-note" role="alert">
           <p>

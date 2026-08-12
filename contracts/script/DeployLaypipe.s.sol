@@ -134,18 +134,6 @@ contract DeployLaypipe is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        PipedogRevenueRouter revenueRouter =
-            new PipedogRevenueRouter(
-                pipedog,
-                treasuryWallet,
-                operationsWallet,
-                sequesterCap,
-                treasuryCap,
-                uint16(routerBountyRaw),
-                deployer
-            );
-        deployed.revenueRouter = address(revenueRouter);
-
         LaypipeFactory implementation = new LaypipeFactory();
         deployed.factoryImplementation = address(implementation);
         ERC1967Proxy proxy = new ERC1967Proxy(
@@ -155,7 +143,7 @@ contract DeployLaypipe is Script {
                 (
                     poolManager,
                     pipedog,
-                    address(revenueRouter),
+                    treasuryWallet,
                     deployer,
                     launchFee
                 )
@@ -163,6 +151,20 @@ contract DeployLaypipe is Script {
         );
         LaypipeFactory factory = LaypipeFactory(address(proxy));
         deployed.factoryProxy = address(factory);
+
+        PipedogRevenueRouter revenueRouter =
+            new PipedogRevenueRouter(
+                pipedog,
+                address(factory),
+                treasuryWallet,
+                operationsWallet,
+                sequesterCap,
+                treasuryCap,
+                uint16(routerBountyRaw),
+                deployer
+            );
+        deployed.revenueRouter = address(revenueRouter);
+        factory.setTreasury(address(revenueRouter));
 
         LaypipeToken tokenImplementation = new LaypipeToken();
         deployed.tokenImplementation = address(tokenImplementation);
@@ -568,6 +570,8 @@ contract DeployLaypipe is Script {
                     != PipedogProtocolConfig.PIPEDOG
                 || address(revenueRouter.pipedog())
                     != PipedogProtocolConfig.PIPEDOG
+                || address(revenueRouter.factory())
+                    != deployed.factoryProxy
                 || revenueRouter.pendingOwner() != finalOwner
         ) revert WiringMismatch();
     }

@@ -726,6 +726,7 @@ async function assertAuditedDeploymentSnapshot(
     swapPoolManager,
     swapPipedog,
     swapHook,
+    revenueFactory,
     revenuePipedog,
     revenueTreasury,
     revenueOperations,
@@ -764,6 +765,7 @@ async function assertAuditedDeploymentSnapshot(
     readAddress(provider, swapRouter, IDENTITY_SELECTORS.poolManager, blockTag),
     readAddress(provider, swapRouter, IDENTITY_SELECTORS.pipedog, blockTag),
     readAddress(provider, swapRouter, IDENTITY_SELECTORS.hook, blockTag),
+    readAddress(provider, revenueRouter, IDENTITY_SELECTORS.factory, blockTag),
     readAddress(provider, revenueRouter, IDENTITY_SELECTORS.pipedog, blockTag),
     readAddress(provider, revenueRouter, IDENTITY_SELECTORS.treasury, blockTag),
     readAddress(provider, revenueRouter, IDENTITY_SELECTORS.operationsWallet, blockTag),
@@ -821,6 +823,7 @@ async function assertAuditedDeploymentSnapshot(
   assertAddressMatch(swapPipedog, manifest.contracts.pipedog.address, "Swap router PIPEDOG");
   assertAddressMatch(swapHook, hook, "Swap router hook");
 
+  assertAddressMatch(revenueFactory, factory, "Revenue router factory");
   assertAddressMatch(revenuePipedog, manifest.contracts.pipedog.address, "Revenue router PIPEDOG");
   assertAddressMatch(revenueTreasury, manifest.governance.treasury, "Revenue treasury");
   assertAddressMatch(revenueOperations, manifest.governance.operations, "Revenue operations wallet");

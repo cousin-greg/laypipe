@@ -120,9 +120,11 @@ The review must independently validate at least these properties:
    must not silently lose or duplicate credit.
 8. **Revenue policy and migration.** Normal 25/25/50 PIPEDOG allocation,
    per-call caps, bounty deductions, dead-address sequestration, pause behavior,
-   and same-PIPEDOG successor migration must be exact. The owner migration power
-   is trusted policy rather than an irrevocable split and must be assessed as
-   such.
+   same-PIPEDOG successor migration, immutable factory/quote binding, and the
+   factory-launch pause gate on every policy, pause, migration, and ownership
+   mutation must be exact. Unrelated-token/native recovery intentionally remains
+   live but must never move PIPEDOG. The owner migration power is trusted policy
+   rather than an irrevocable split and must be assessed as such.
 9. **Robinhood runtime assumptions.** Active block guards use ArbSys rather than
    Solidity's parent-chain `block.number`. Transient-storage guards require
    EIP-1153. Both must fail closed on unsupported runtimes and be re-proved on

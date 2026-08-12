@@ -191,6 +191,35 @@ test("market leaders are bounded, caught-up snapshots tied to canonical blocks",
   }
 });
 
+test("market leader baseline uses the cutoff price with a new-pool fallback", () => {
+  const sql = readFileSync(
+    resolve(root, "db/migrations/0003_market_baseline_semantics.sql"),
+    "utf8",
+  );
+  assert.match(sql, /CREATE OR REPLACE FUNCTION laypipe_refresh_market_leaders\(\)/);
+  assert.match(
+    sql,
+    /cutoff_swaps[\s\S]*s\.block_timestamp <= canonical_timestamp - interval '24 hours'/,
+  );
+  assert.match(
+    sql,
+    /first_window_swaps[\s\S]*ORDER BY w\.pool_id, w\.block_timestamp ASC/,
+  );
+  assert.match(
+    sql,
+    /baseline_swaps[\s\S]*FROM cutoff_swaps c[\s\S]*NOT EXISTS[\s\S]*FROM cutoff_swaps c/,
+  );
+  assert.match(
+    sql,
+    /NOT baseline\.window_fallback OR counts\.trades_24h >= 2/,
+  );
+  assert.match(sql, /score\.change_numerator > 0/);
+
+  const statements = migrationPlan.migrationStatements(sql);
+  assert.equal(statements.length, 2);
+  assert.match(statements[1], /^REVOKE ALL ON FUNCTION/);
+});
+
 test("migration chunks are single statements and discovery is rechecked behind the lock", () => {
   const sql = readFileSync(resolve(root, "db/migrations/0000_production_read_model.sql"), "utf8");
   const statements = migrationPlan.migrationStatements(sql);

@@ -133,6 +133,16 @@ been applied to a shared environment as of this candidate; freeze its digest
 after the first Preview application and use a new numbered migration for every
 later schema change.
 
+The 24-hour price baseline is the newest canonical positive-token swap at or
+before the exact canonical cutoff timestamp. A swap exactly at the cutoff is a
+baseline and is not counted in trailing-window volume. When a new pool has no
+pre-cutoff swap, its first swap strictly after the cutoff is the fallback
+baseline; it needs a second in-window swap to qualify as a mover. Existing
+pools can qualify from one in-window swap plus their cutoff baseline. Board,
+detail, and the materialized global mover use this same definition. Migration
+`0003_market_baseline_semantics.sql` replaces only the leader refresh function;
+the earlier migration files remain immutable.
+
 ## Disposable PostgreSQL integration test
 
 The normal test suite skips the real-PostgreSQL check so CI does not require a

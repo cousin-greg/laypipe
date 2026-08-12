@@ -9,7 +9,7 @@ import {
   TRADE_QUOTE_TTL_MS,
 } from "@/lib/web3/trade-policy";
 
-const STORAGE_KEY = "laypipe.pending-trades.v1";
+export const PENDING_TRADES_STORAGE_KEY = "laypipe.pending-trades.v1";
 const MAX_PENDING_TRADES = 20;
 const BASIS_POINTS = BigInt(10_000);
 const ZERO_WORD = `0x${"00".repeat(32)}`;
@@ -209,7 +209,7 @@ function parseIntent(value: unknown, now: number): PendingTradeIntent | null {
 function readAll(storage: Storage, now = Date.now()) {
   let parsed: unknown;
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(PENDING_TRADES_STORAGE_KEY);
     if (!raw) return [];
     parsed = JSON.parse(raw);
   } catch {
@@ -232,7 +232,7 @@ function readAll(storage: Storage, now = Date.now()) {
 }
 
 function writeAll(storage: Storage, intents: PendingTradeIntent[]) {
-  storage.setItem(STORAGE_KEY, JSON.stringify(intents));
+  storage.setItem(PENDING_TRADES_STORAGE_KEY, JSON.stringify(intents));
 }
 
 function samePool(
@@ -255,12 +255,23 @@ export function readPendingTrade(
   poolId: Hex,
   now = Date.now(),
 ) {
-  const matches = readAll(storage, now).filter((intent) =>
-    samePool(intent, wallet, tokenAddress, poolId),
+  const pending = readPendingTradeForWallet(storage, wallet, now);
+  return pending && samePool(pending, wallet, tokenAddress, poolId)
+    ? pending
+    : null;
+}
+
+export function readPendingTradeForWallet(
+  storage: Storage,
+  wallet: Address,
+  now = Date.now(),
+) {
+  const matches = readAll(storage, now).filter(
+    (intent) => intent.wallet.toLowerCase() === wallet.toLowerCase(),
   );
   if (matches.length > 1) {
     throw new PendingTradeStorageError(
-      "More than one saved trade action exists for this wallet and pool. Trading is blocked until they are reconciled.",
+      "More than one saved trade action exists for this wallet. Trading is blocked until they are reconciled.",
     );
   }
   return matches[0] ?? null;
@@ -282,17 +293,13 @@ export function savePendingTrade(
       "Saved trade transaction state is at capacity. Trading is blocked until pending actions are reconciled.",
     );
   }
-  const existingForPool = current.some((candidate) =>
-    samePool(
-      candidate,
-      intent.wallet,
-      intent.tokenAddress,
-      intent.poolId,
-    ),
+  const existingForWallet = current.some(
+    (candidate) =>
+      candidate.wallet.toLowerCase() === intent.wallet.toLowerCase(),
   );
-  if (existingForPool) {
+  if (existingForWallet) {
     throw new PendingTradeStorageError(
-      "This wallet and pool already have a pending action to reconcile.",
+      "This wallet already has a pending trade action to reconcile.",
     );
   }
   writeAll(storage, [...current, parsed]);
@@ -315,19 +322,24 @@ export function savePendingTradeHash(
     );
   }
   const current = readAll(storage);
-  const index = current.findIndex((candidate) =>
-    samePool(
-      candidate,
+  const walletMatches = current.filter(
+    (candidate) =>
+      candidate.wallet.toLowerCase() === identity.wallet.toLowerCase(),
+  );
+  if (
+    walletMatches.length !== 1 ||
+    !samePool(
+      walletMatches[0]!,
       identity.wallet,
       identity.tokenAddress,
       identity.poolId,
-    ),
-  );
-  if (index < 0) {
+    )
+  ) {
     throw new PendingTradeStorageError(
       "Submitted trade hash has no saved pending intent.",
     );
   }
+  const index = current.indexOf(walletMatches[0]!);
   const saved = current[index];
   if (
     saved.action !== parsed.action ||

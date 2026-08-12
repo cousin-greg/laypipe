@@ -179,10 +179,13 @@ has no generic recovery or migration path that can drain either liability.
 - **Hook owner:** may rotate only the platform treasury destination, and only
   while the factory's global launch gate is closed. The hook is not upgradeable.
   Creator balances and creator-stream ownership remain creator-controlled.
-- **Revenue-router owner:** may pause the sequestration and treasury lanes,
-  rotate treasury/operations destinations, change their per-call caps, recover
-  unrelated assets, and, while paused, migrate all router-held PIPEDOG to a
-  successor contract that reports the same PIPEDOG token.
+- **Revenue-router owner:** only while the factory launch gate is closed, may
+  pause/unpause the sequestration and treasury lanes, rotate
+  treasury/operations destinations, change their per-call caps, transfer or
+  renounce ownership, and, while the router is also paused, migrate all
+  router-held PIPEDOG to a successor contract that reports the same PIPEDOG
+  token. Unrelated-token and forced-native recovery are intentionally exempt:
+  those paths cannot recover PIPEDOG or change audited routing semantics.
 - **Self-burner and swap router:** have no owner or withdrawal path for
   operational assets. Their protocol bindings and bounty/cap parameters are
   immutable.
@@ -197,10 +200,13 @@ irrevocable custody guarantee.
 
 Hook rotation requires launches to be paused beforehand and clears the old
 hook-bound self-burner. Treasury changes require launch to be paused and the
-factory and hook destinations to agree before re-enabling.
+factory and hook destinations to agree before re-enabling. The revenue router
+immutably pins that same factory, verifies its PIPEDOG binding at construction,
+and gates all policy, pause, migration, and ownership changes on the factory's
+closed launch switch.
 
-The factory pause checks are operational interlocks, not a timelock. A Safe can
-batch pause, mutation, and re-enable calls atomically, leaving no public
+The shared factory pause checks are operational interlocks, not a timelock. A
+Safe can batch pause, mutation, and re-enable calls atomically, leaving no public
 revocation window for an outstanding ERC-20 approval. Production therefore
 requires a separately reviewed external timelock/guardian policy; wallet clients
 must still verify the complete pinned implementation, config count and values,

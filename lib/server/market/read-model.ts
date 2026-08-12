@@ -209,7 +209,18 @@ function tokenMetricsCtes(extraSelectedColumns = "") {
     AND s.block_number <= w.last_processed_block
     AND s.block_timestamp <= w.last_processed_at
   ORDER BY s.pool_id, s.block_number DESC, s.log_index DESC
-), baseline_swap AS (
+), cutoff_swap AS (
+  SELECT DISTINCT ON (s.pool_id)
+    s.pool_id, s.pipedog_amount::text AS baseline_pipedog_amount,
+    s.token_amount::text AS baseline_token_amount
+  FROM swaps s
+  JOIN selected p ON p.pool_id = s.pool_id AND p.chain_id = s.chain_id
+  CROSS JOIN watermark w
+  WHERE s.token_amount > 0
+    AND s.block_number <= w.last_processed_block
+    AND s.block_timestamp <= w.last_processed_at - interval '24 hours'
+  ORDER BY s.pool_id, s.block_timestamp DESC, s.block_number DESC, s.log_index DESC
+), first_window_swap AS (
   SELECT DISTINCT ON (s.pool_id)
     s.pool_id, s.pipedog_amount::text AS baseline_pipedog_amount,
     s.token_amount::text AS baseline_token_amount
@@ -220,7 +231,16 @@ function tokenMetricsCtes(extraSelectedColumns = "") {
     AND s.block_number <= w.last_processed_block
     AND s.block_timestamp > w.last_processed_at - interval '24 hours'
     AND s.block_timestamp <= w.last_processed_at
-  ORDER BY s.pool_id, s.block_number ASC, s.log_index ASC
+  ORDER BY s.pool_id, s.block_timestamp ASC, s.block_number ASC, s.log_index ASC
+), baseline_swap AS (
+  SELECT c.pool_id, c.baseline_pipedog_amount, c.baseline_token_amount
+  FROM cutoff_swap c
+  UNION ALL
+  SELECT f.pool_id, f.baseline_pipedog_amount, f.baseline_token_amount
+  FROM first_window_swap f
+  WHERE NOT EXISTS (
+    SELECT 1 FROM cutoff_swap c WHERE c.pool_id = f.pool_id
+  )
 ), swap_stats AS (
   SELECT s.pool_id,
     count(*)::text AS trades_24h,
@@ -585,7 +605,7 @@ function mapToken(row: TokenRow): LiveMarketToken {
       baselinePrice24hPipedog: priceMetric(
         row.baseline_pipedog_amount,
         row.baseline_token_amount,
-        "Exact PIPEDOG/token ratio from the earliest indexed swap in the trailing 24-hour window.",
+        "Exact PIPEDOG/token ratio from the newest indexed swap at or before the 24-hour cutoff, falling back to the first indexed swap after the cutoff for a new pool.",
       ),
       volume24hPipedog: {
         status: "observed",

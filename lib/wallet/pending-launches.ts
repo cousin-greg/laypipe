@@ -7,7 +7,7 @@ import {
   isTransactionHash,
 } from "../web3/types";
 
-const STORAGE_KEY = "laypipe.pending-launches.v1";
+export const PENDING_LAUNCHES_STORAGE_KEY = "laypipe.pending-launches.v1";
 const MAX_PENDING_LAUNCHES = 20;
 
 interface SerializedLaunchCallInput {
@@ -176,7 +176,7 @@ function parseIntent(value: unknown, now: number): PendingLaunchIntent | null {
 function readAll(storage: Storage, now = Date.now()) {
   let parsed: unknown;
   try {
-    const raw = storage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(PENDING_LAUNCHES_STORAGE_KEY);
     if (!raw) return [];
     parsed = JSON.parse(raw);
   } catch {
@@ -199,7 +199,7 @@ function readAll(storage: Storage, now = Date.now()) {
 }
 
 function writeAll(storage: Storage, intents: PendingLaunchIntent[]) {
-  storage.setItem(STORAGE_KEY, JSON.stringify(intents));
+  storage.setItem(PENDING_LAUNCHES_STORAGE_KEY, JSON.stringify(intents));
 }
 
 function sameIntent(

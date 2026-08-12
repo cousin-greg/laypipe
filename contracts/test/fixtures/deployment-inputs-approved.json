@@ -3,9 +3,9 @@
   "kind": "laypipe-robinhood-deployment-inputs-v1",
   "candidate": {
     "sourceCommit": "38b9ddfd7d0cf245ce7911a9c7fd9f6a834ed548",
-    "abiBundleSha256": "0xc3a5533308b05f166d6dafac62dd176124489bd12487cb21a430926e36453c78",
-    "artifactBundleSha256": "0x1626fc85450151a732324e21171630f68abb98acc8b6dd99048aeeb3bf5808ab",
-    "deployScriptRuntimeCodehash": "0xc51b919c20b44d32fda4ff5e8905def6562f439a1ec8f8c4a47f70aad6917d1e",
+    "abiBundleSha256": "0xcc0c896ea0fd906b1c221aba34cbb10731b799f69a68a28ad9b4b6c831d96b31",
+    "artifactBundleSha256": "0x5cd3048620b6114002787f6afd9fdbddfadca57bbb17463c9e513f27b6185928",
+    "deployScriptRuntimeCodehash": "0x6c0a008a607f71e6f65ecc0bf67eaa320038a7f0ed965fdca0e63ff5c5c9eddb",
     "deploymentSourceBundleSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
   },
   "curveReview": {
@@ -41,11 +41,11 @@
   },
   "approval": {
     "status": "approved",
-    "deploymentInputsHash": "sha256:edc1f4d6ede99210ebc2ee05758413c853115518593a6a096aa9e76dc7439d4b",
+    "deploymentInputsHash": "sha256:bb082e3faa29da82f4e8b4304fbbdbd3fd98fb8f9874028e6de6d0275ecde714",
     "approver": "test fixture",
     "approvedAt": "2000-01-01T00:00:00Z"
   },
   "test": {
-    "expectedDeploymentInputsHash": "0xedc1f4d6ede99210ebc2ee05758413c853115518593a6a096aa9e76dc7439d4b"
+    "expectedDeploymentInputsHash": "0xbb082e3faa29da82f4e8b4304fbbdbd3fd98fb8f9874028e6de6d0275ecde714"
   }
 }

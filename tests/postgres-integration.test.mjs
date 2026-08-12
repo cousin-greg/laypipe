@@ -238,6 +238,7 @@ test(
         "0000_production_read_model.sql",
         "0001_runtime_security.sql",
         "0002_market_leader_snapshot.sql",
+        "0003_market_baseline_semantics.sql",
       ],
     );
     const container = `laypipe-pg-${process.pid}-${randomBytes(4).toString("hex")}`;
@@ -310,6 +311,7 @@ test(
       const oldBlock101 = hash("b");
       const newBlock101 = hash("c");
       const launchTx = hash("1");
+      const cutoffSwapTx = hash("0");
       const oldSwapTx = hash("2");
       const oldTransferTx = hash("3");
       const newSwapTx = hash("4");
@@ -330,13 +332,14 @@ BEGIN ISOLATION LEVEL SERIALIZABLE;
 SELECT laypipe_initialize_cursor(4663, 'laypipe', 100);
 INSERT INTO chain_blocks (chain_id, block_number, block_hash, parent_hash, block_timestamp)
 VALUES
-  (4663, 100, '${block100}', '${hash("0")}', now() - interval '10 minutes'),
-  (4663, 101, '${oldBlock101}', '${block100}', now() - interval '5 minutes');
+  (4663, 100, '${block100}', '${hash("0")}', transaction_timestamp() - interval '25 hours'),
+  (4663, 101, '${oldBlock101}', '${block100}', transaction_timestamp() - interval '1 minute');
 INSERT INTO chain_events (
   chain_id, block_number, transaction_hash, transaction_index, log_index,
   contract_address, topic0, topics, data, event_name, decoded_args
 ) VALUES
   (4663, 100, '${launchTx}', 0, 0, '${hook}', '${hash("7")}', '[]', '0x', 'Launched', '{}'),
+  (4663, 100, '${cutoffSwapTx}', 1, 6, '${hook}', '${hash("8")}', '[]', '0x', 'Swap', '{}'),
   (4663, 101, '${oldSwapTx}', 0, 0, '${hook}', '${hash("8")}', '[]', '0x', 'Swap', '{}'),
   (4663, 101, '${oldTransferTx}', 1, 1, '${token}', '${hash("9")}', '[]', '0x', 'Transfer', '{}'),
   (4663, 101, '${feeTx}', 2, 2, '${hook}', '${hash("1")}', '[]', '0x', 'FeeAccrued', '{}'),
@@ -353,7 +356,7 @@ INSERT INTO launches (
   2000000000000000000, '${hook}', '${feeRecipient}', 'self-burn',
   'Pipe Integration', 'PIPE', 'Disposable PostgreSQL integration token.',
   'ipfs://${imageCid}', 'ipfs://${metadataCid}', '{"website":"https://example.test"}',
-  100, now() - interval '10 minutes', '${launchTx}', 0
+  100, transaction_timestamp() - interval '25 hours', '${launchTx}', 0
 );
 INSERT INTO swaps (
   chain_id, pool_id, sender_address, side, amount0, amount1, sqrt_price_x96,
@@ -361,9 +364,14 @@ INSERT INTO swaps (
   block_timestamp, transaction_hash, log_index
 ) VALUES (
   4663, '${pool}', '${trader}', 'buy', -1000000000000000000,
+  4000000000000000000, 79228162514264337593543950336, 1000000, 0, 10000,
+  1000000000000000000, 4000000000000000000, 100,
+  transaction_timestamp() - interval '24 hours 1 minute', '${cutoffSwapTx}', 6
+), (
+  4663, '${pool}', '${trader}', 'buy', -1000000000000000000,
   2000000000000000000, 79228162514264337593543950336, 1000000, 0, 10000,
   1000000000000000000, 2000000000000000000, 101,
-  now() - interval '5 minutes', '${oldSwapTx}', 0
+  transaction_timestamp() - interval '5 minutes', '${oldSwapTx}', 0
 );
 INSERT INTO token_transfers (
   chain_id, token_address, from_address, to_address, amount, block_number,
@@ -480,7 +488,7 @@ SELECT
   (SELECT balance::text FROM token_balances WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}'),
   (SELECT balance::text FROM token_holder_balance_state WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}');
 `);
-      assert.equal(initial.stdout, "102\t2\t7\t1\t1\t1\t1\t1\t1\t1000000000000000000000\t1000000000000000000000");
+      assert.equal(initial.stdout, "102\t2\t8\t2\t2\t1\t1\t1\t1\t1000000000000000000000\t1000000000000000000000");
 
       await psql(container, `
 INSERT INTO token_transfers (
@@ -537,12 +545,16 @@ SELECT
   (SELECT coalesce(observed_safe_head::text, 'null') FROM indexer_cursors WHERE chain_id = 4663 AND stream = 'laypipe'),
   (SELECT coalesce(last_run_status, 'null') FROM indexer_cursors WHERE chain_id = 4663 AND stream = 'laypipe');
 `);
-      assert.equal(rolledBack.stdout, "101\t100\t1\t1\t0\t0\t0\t0\t0\t0\t0\t0\t0\tnull\tnull");
+      assert.equal(rolledBack.stdout, "101\t100\t1\t2\t1\t1\t0\t0\t0\t0\t0\t0\t0\tnull\tnull");
 
       await psql(container, `
 BEGIN ISOLATION LEVEL SERIALIZABLE;
 INSERT INTO chain_blocks (chain_id, block_number, block_hash, parent_hash, block_timestamp)
-VALUES (4663, 101, '${newBlock101}', '${block100}', now() - interval '1 minute');
+VALUES (
+  4663, 101, '${newBlock101}', '${block100}',
+  (SELECT block_timestamp + interval '24 hours' FROM swaps
+   WHERE chain_id = 4663 AND transaction_hash = '${cutoffSwapTx}' AND log_index = 6)
+);
 INSERT INTO chain_events (
   chain_id, block_number, transaction_hash, transaction_index, log_index,
   contract_address, topic0, topics, data, event_name, decoded_args
@@ -557,7 +569,9 @@ INSERT INTO swaps (
   4663, '${pool}', '${trader}', 'buy', -3000000000000000000,
   6000000000000000000, 79228162514264337593543950336, 2000000, 1, 10000,
   3000000000000000000, 6000000000000000000, 101,
-  now() - interval '1 minute', '${newSwapTx}', 0
+  (SELECT block_timestamp + interval '23 hours 59 minutes' FROM swaps
+   WHERE chain_id = 4663 AND transaction_hash = '${cutoffSwapTx}' AND log_index = 6),
+  '${newSwapTx}', 0
 );
 INSERT INTO token_transfers (
   chain_id, token_address, from_address, to_address, amount, block_number,
@@ -686,12 +700,44 @@ WHERE chain_id = 4663 AND stream = 'laypipe';
         pipedogAmount: "3000000000000000000",
         tokenAmount: "6000000000000000000",
       });
+      assert.deepEqual(list.tokens[0].metrics.baselinePrice24hPipedog.value, {
+        pipedogAmount: "1000000000000000000",
+        tokenAmount: "4000000000000000000",
+      });
       assert.equal(list.tokens[0].metrics.volume24hPipedog.value, "3000000000000000000");
       assert.equal(list.tokens[0].metrics.trades24h.value, 1);
-      assert.equal(list.tokens[0].metrics.totalTrades.value, 1);
+      assert.equal(list.tokens[0].metrics.totalTrades.value, 2);
       assert.equal(list.leaders.mostTraded?.tokenAddress, token);
       assert.equal(list.leaders.newest?.tokenAddress, token);
-      assert.equal(list.leaders.biggestMover, null);
+      assert.equal(list.leaders.biggestMover?.tokenAddress, token);
+      assert.deepEqual(
+        list.leaders.biggestMover?.metrics.baselinePrice24hPipedog,
+        list.tokens[0].metrics.baselinePrice24hPipedog,
+      );
+      assert.deepEqual(
+        list.leaders.biggestMover?.metrics.lastPricePipedog,
+        list.tokens[0].metrics.lastPricePipedog,
+      );
+
+      const cutoffDetail = await readModel.getLiveToken(database, token);
+      assert.deepEqual(
+        cutoffDetail.token.metrics.baselinePrice24hPipedog,
+        list.tokens[0].metrics.baselinePrice24hPipedog,
+      );
+      assert.deepEqual(
+        cutoffDetail.token.metrics.lastPricePipedog,
+        list.tokens[0].metrics.lastPricePipedog,
+      );
+      const exactCutoff = await psql(container, `
+SELECT cutoff.block_timestamp = snapshot.snapshot_at - interval '24 hours'
+FROM swaps cutoff
+CROSS JOIN market_leader_snapshots snapshot
+WHERE cutoff.chain_id = 4663
+  AND cutoff.transaction_hash = '${cutoffSwapTx}'
+  AND cutoff.log_index = 6
+  AND snapshot.chain_id = 4663;
+`);
+      assert.equal(exactCutoff.stdout, "t", "baseline fixture must sit exactly at the cutoff");
 
       await psql(container, `
 INSERT INTO chain_events (
@@ -1001,7 +1047,7 @@ SELECT
   (SELECT balance::text FROM token_balances WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}'),
   (SELECT balance::text FROM token_holder_balance_state WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}');
 `);
-      assert.equal(replayed.stdout, "2\t4\t1\t2000000000000000000000\t2000000000000000000000");
+      assert.equal(replayed.stdout, "2\t5\t2\t2000000000000000000000\t2000000000000000000000");
     } finally {
       if (started) {
         const cleanup = await docker(

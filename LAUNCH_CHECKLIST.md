@@ -149,8 +149,10 @@ independent audit.
   integration against Preview Neon.
 - [ ] At representative Preview volume, prove the once-per-minute global
   leader refresh uses the intended window index, can select a winner outside
-  the newest page, and is deleted from the canonical read model immediately on
-  rollback before replay. Confirm the public response stops serving the prior
+  the newest page, and uses the same exact-cutoff baseline as Board/detail.
+  Include the pre-cutoff, new-pool fallback, and all-negative cases. Prove the
+  snapshot is deleted from the canonical read model immediately on rollback
+  before replay. Confirm the public response stops serving the prior
   leader after its bounded 10-second CDN TTL plus 20-second stale window.
 - [-] Canonical Robinhood backfill and `npm run db:reconcile` wait until the
   audited, explicitly authorized Robinhood deployment exists with launches

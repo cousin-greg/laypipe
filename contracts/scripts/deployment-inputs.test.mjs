@@ -335,6 +335,29 @@ test("deployment evidence binds its verifier and the raw Forge path has an in-sc
   assert.match(deploymentSource, /\.stagedSafety\.selfBurnConfigEnabled/);
 });
 
+test("deployment scripts bind the revenue router to an already deployed paused factory", () => {
+  for (const relativePath of [
+    "../script/DeployLaypipe.s.sol",
+    "../script/DeployLaypipeBaseSepolia.s.sol",
+  ]) {
+    const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+    const proxy = source.indexOf("ERC1967Proxy proxy =");
+    const router = source.indexOf("new PipedogRevenueRouter(");
+    const binding = source.indexOf("factory.setTreasury(address(revenueRouter));");
+    const hook = source.indexOf("PipedogHook hook =");
+
+    assert.ok(proxy >= 0, `${relativePath}: factory proxy deployment missing`);
+    assert.ok(router > proxy, `${relativePath}: revenue router must follow the factory proxy`);
+    assert.ok(binding > router, `${relativePath}: factory must bind the revenue router`);
+    assert.ok(hook > binding, `${relativePath}: hook must follow the final treasury binding`);
+    assert.match(
+      source.slice(router, binding),
+      /new PipedogRevenueRouter\([\s\S]*?address\(factory\)/,
+      `${relativePath}: revenue router constructor must pin the factory`,
+    );
+  }
+});
+
 test("committed ABI-SHA256 parity vector and runtime codehash match fresh artifacts", async () => {
   const fixture = JSON.parse(
     readFileSync(
