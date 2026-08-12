@@ -924,7 +924,7 @@ export default function LaunchForm() {
           pendingIntent.calldata.toLowerCase() !== expectedCalldata.toLowerCase()
         ) {
           throw new Error(
-            "Saved approval intent does not match the audited deployment and cannot be reconciled automatically.",
+            "Saved approval intent does not match the configured release deployment and cannot be reconciled automatically.",
           );
         }
         await client.confirmApproval(
@@ -958,7 +958,7 @@ export default function LaunchForm() {
         input.params.creator.toLowerCase() !== account.toLowerCase()
       ) {
         throw new Error(
-          "Saved launch intent does not match the audited deployment and cannot be reconciled automatically.",
+          "Saved launch intent does not match the configured release deployment and cannot be reconciled automatically.",
         );
       }
       const confirmed = await client.confirmLaunch(pendingIntent.hash, {
@@ -1034,7 +1034,7 @@ export default function LaunchForm() {
           <strong>
             {deploymentResult.configured
               ? "Wallet simulation, exact approvals, and receipt checks are enabled."
-              : "The audited production factory is not configured yet."}
+              : "The configured release factory is unavailable."}
           </strong>
           <p>
             {deploymentResult.configured

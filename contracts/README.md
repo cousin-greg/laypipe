@@ -399,10 +399,19 @@ only the proxy address, public getters, or `UPGRADE_INTERFACE_VERSION()` is
 not a version check: an upgraded implementation can preserve or spoof those
 surfaces. Any factory upgrade requires a new reviewed manifest, and launch
 mutations must remain disabled until the frontend and indexer accept it. The
-factory also rejects upgrades while its global launch gate is open. The UUPS
-test suite checks two-step ownership, pending/old-owner rejection, EIP-1967
-slot identity, proxy/runtime codehash separation, invalid implementations,
-initializer closure, and storage preservation across an appended-state mock.
+factory rejects upgrades and every launch-semantic admin setter while its
+global launch gate is open. The frontend additionally requires exactly the two
+audited launch configs; appending an unreviewed config fails manifest identity.
+The UUPS test suite checks two-step ownership, pending/old-owner rejection,
+EIP-1967 slot identity, proxy/runtime codehash separation, invalid
+implementations, initializer closure, and storage preservation across an
+appended-state mock.
+
+The boolean launch gate is an operational interlock, not a timelock: a Safe can
+batch pause, mutation, and re-enable calls in one transaction. Production still
+requires the separately reviewed external timelock/guardian policy, and wallet
+clients must re-check the full configured release snapshot immediately before
+approval and launch.
 
 ## Approved deployment inputs and no-broadcast rehearsal
 

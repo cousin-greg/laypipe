@@ -40,9 +40,9 @@ interface CursorValue {
 }
 
 export function readMarketCursorSecret() {
-  const secret = process.env.WALLET_CHALLENGE_SECRET;
+  const secret = process.env.MARKET_CURSOR_SECRET;
   if (!secret || secret.length < 32) {
-    throw new Error("WALLET_CHALLENGE_SECRET is required for live market cursors.");
+    throw new Error("MARKET_CURSOR_SECRET is required for live market cursors.");
   }
   return secret;
 }

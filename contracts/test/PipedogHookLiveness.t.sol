@@ -76,6 +76,7 @@ contract PipedogHookLivenessTest is Test {
     HookPayoutPoolManager internal manager;
     PipedogHookHarness internal hook;
     PoolId internal poolId;
+    bool public launchEnabled;
 
     function setUp() public {
         pipedog = new SelectiveRejectERC20();
@@ -87,6 +88,19 @@ contract PipedogHookLivenessTest is Test {
         hook.setPendingForTest(poolId, FEES);
         pipedog.mint(address(manager), FEES);
         pipedog.rejectTransfer(address(hook), BAD_TREASURY);
+    }
+
+    function testTreasuryCannotRotateWhileFactoryLaunchGateIsOpen() public {
+        launchEnabled = true;
+
+        vm.expectRevert(PipedogHook.FactoryLaunchActive.selector);
+        hook.setTreasury(GOOD_TREASURY);
+
+        assertEq(hook.treasury(), BAD_TREASURY);
+
+        launchEnabled = false;
+        hook.setTreasury(GOOD_TREASURY);
+        assertEq(hook.treasury(), GOOD_TREASURY);
     }
 
     function testRejectedPlatformTransferCannotFreezeCreatorClaim() public {

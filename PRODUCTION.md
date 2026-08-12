@@ -30,10 +30,9 @@ immutable external-review package; this runbook remains the detailed authority.
 1. **Pinata** — create a public-IPFS project and provide a server-only JWT plus
    its dedicated gateway base URL. The token-art upload endpoint must never
    receive this credential in the browser.
-2. **Alchemy** — create Robinhood Chain Mainnet HTTP and WebSocket endpoints
-   and an authenticated webhook. HTTP backfill plus webhooks is the primary
-   ingestion path; WebSocket is an optional operational fallback. Public RPC
-   is not production indexing infrastructure.
+2. **Alchemy** — create a Robinhood Chain Mainnet HTTP endpoint and an
+   authenticated webhook. HTTP backfill plus webhooks is the implemented
+   ingestion path. Public RPC is not production indexing infrastructure.
 3. **Protocol control** — provide separate Safe addresses for final owner,
    treasury, and operations. Do not use the deployment EOA as the permanent
    administrator or revenue destination.
@@ -62,7 +61,9 @@ immutable external-review package; this runbook remains the detailed authority.
   Exact approvals reduce exposure, but an immediately upgradeable spender can
   still exploit the allowance window if its owner is compromised. The wallet
   must verify the pinned implementation immediately before both approval and
-  launch.
+  launch. The on-chain pause checks cover every launch-semantic admin setter,
+  but a Safe can batch pause, mutation, and re-enable calls atomically; the
+  checks are not a delay or a substitute for the external timelock decision.
 - Decide whether the revenue router's owner migration power is acceptable as
   disclosed policy or must be timelocked/limited before launch. The normal
   25/25/50 routing split is not irrevocable while that migration path exists.
@@ -82,12 +83,54 @@ Copy `.env.example` to an ignored `.env.local` for local work. Put production
 values in Vercel's encrypted environment settings. Never place database,
 pinning, webhook, Redis, or wallet secrets in a `NEXT_PUBLIC_` variable.
 Production and Preview must use different database, Redis, cron, webhook, and
-pinning credentials. Until a separate Preview Redis resource exists, keep its
-upload and mutation APIs disabled. Mark every server-only credential as
-Sensitive in Vercel.
+pinning credentials. Use a separate `MARKET_CURSOR_SECRET` for live read
+pagination; reserve `WALLET_CHALLENGE_SECRET` for mutation profiles. Until a
+separate Preview Redis resource exists, keep its upload and mutation APIs
+disabled. Mark every server-only credential as Sensitive in Vercel.
 Restrict the Pinata key to only the file and JSON pinning permissions this app
 uses. Database clients must initialize lazily so an intentionally unconfigured
 Preview build fails at request time rather than during `next build`.
+
+Every build runs the operator-only configuration gate. With no profile or kill
+switches, its authoritative prebuild defaults to the safe fixture state;
+explicit local prechecks must supply all four switches. Set the exact staged
+state through `LAYPIPE_CONFIG_PROFILE` in Vercel:
+
+```text
+npm run verify:production-config -- safe-fixture
+npm run verify:production-config -- preview-indexer
+npm run verify:production-config -- preview-readonly
+npm run verify:production-config -- preview-mutations
+npm run verify:production-config -- production-indexer
+npm run verify:production-config -- production-readonly
+npm run verify:production-config -- production-mutations
+```
+
+Indexer profiles keep fixture reads while exercising ingestion. Read-only
+profiles serve live indexed reads while IPFS and browser wallet mutations stay
+disabled. Mutation profiles alone enable IPFS writes and launch, trade, and
+claim transactions. Staged profiles fail closed for a Vercel environment or
+source-commit mismatch, incomplete settings, a partial or invalid configured
+release manifest, privileged database credentials, aliases, shared control secrets,
+non-TLS providers, mismatched Neon endpoints or LOGIN roles, and filter capacity
+above the reviewed 2,500-launch design. Output is limited to variable names and
+rule descriptions. This static check cannot prove resources are distinct,
+reachable, least-privileged, funded, or within quota.
+
+`vercel env run` is useful only as a non-authoritative local precheck because
+local and ambient values can override downloaded variables. Retain the actual
+Vercel build's `prebuild` output as static configuration evidence. A passing
+configured release manifest does not claim an independent contract audit;
+release-hash, provider, database, and audit gates remain separate. The initial
+public release profile is `production-readonly`; rehearse its exact equivalent
+as `preview-readonly` first.
+
+Keep the two Git identities distinct: `NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT`
+identifies the separately reviewed contract-release candidate and can remain
+stable across frontend-only releases. `LAYPIPE_APP_SOURCE_COMMIT` identifies the
+application checkout and must equal Vercel's system-provided
+`VERCEL_GIT_COMMIT_SHA` for every staged build. Neither field by itself means an
+external audit has happened.
 
 Database access is split deliberately. `DATABASE_READ_URL` serves market,
 wallet, and reconciliation reads; `DATABASE_WRITE_URL` serves IPFS registry and
@@ -101,10 +144,10 @@ never a runtime identity. Keep
 run `npm run db:grant-runtime` as the owner and rerun the PostgreSQL privilege
 integration before either runtime URL is enabled.
 
-The complete public audited-deployment manifest is the canonical contract
+The complete public configured release manifest is the canonical contract
 configuration for both the browser and indexer. A factory address alone never
 enables wallet mutations. The manifest pins chain `4663`, deployment block,
-full audited source commit, compiler version, ABI and artifact bundle hashes,
+candidate contract source commit, compiler version, ABI and artifact bundle hashes,
 the proxy and EIP-1967 implementation identities, every component address and
 runtime codehash, final governance and revenue destinations, both launch
 configs, launch fee, routing caps, and keeper bounties.
@@ -119,7 +162,7 @@ ownership drift, or configuration drift fail closed. Do not cache a successful
 preflight across wallet mutations.
 
 Approval and launch submission are crash-safe browser workflows. Immediately
-before `eth_sendTransaction`, the client repeats the complete audited deployment
+before `eth_sendTransaction`, the client repeats the complete configured release deployment
 verification and then re-reads the active account and chain. It saves a
 wallet/action/predicted-token intent in local storage before invoking the send
 method and saves the returned hash before waiting. Only an explicit EIP-1193
@@ -132,9 +175,9 @@ wallet provider. Confirmation requires two canonical blocks, exact transaction
 hash/from/to/input, zero native value, matching receipt and block hashes, and
 transaction inclusion in that block. Approval confirmation also re-reads the
 exact allowance at the receipt block. Launch confirmation requires exactly one
-audited-factory `TokenLaunched` event, the mined token and creator, submitted
-config/first-buy values, audited hook and fee recipient, plus the launched
-token's `poolId()` matching the event. A real browser and hardware-wallet
+configured release factory `TokenLaunched` event, the mined token and creator,
+submitted config/first-buy values, configured release hook and fee recipient,
+plus the launched token's `poolId()` matching the event. A real browser and hardware-wallet
 rehearsal remains a release gate; unit fixtures do not prove wallet UX or public
 RPC behavior.
 
@@ -214,7 +257,7 @@ Keep `INDEXER_ENABLED=false` until the migration and Preview rehearsal are
 complete. The default `INDEXER_BATCH_SIZE=10` works with Alchemy's Robinhood
 free-tier `eth_getLogs` range. A wake-up processes at most
 `INDEXER_MAX_BATCHES_PER_RUN=25` windows (250 blocks) under the same pinned safe
-head and complete audited-manifest preflight, stopping when caught up or when
+head and complete configured release manifest preflight, stopping when caught up or when
 the 45-second deadline needs finalization headroom. The ingestion loop reserves
 22 seconds before that deadline for a batch already completing its bounded
 canonical database write, the terminal observation/global-leader refresh,
@@ -244,10 +287,10 @@ model. The repository intentionally does not activate either schedule yet.
 The canonical decoder covers launches; PoolManager swaps (including direct v4
 swaps that bypass LayPipe's router); launch-token transfers; hook fee accrual,
 sweeps, creator claims, deferred platform fees, and platform collections;
-self-burn execution; revenue allocation/routing; and the audited protocol's
+self-burn execution; revenue allocation/routing; and the configured release protocol's
 governance/admin events. Before claiming reconciliation readiness, compare
 event-led fee, platform-tab, revenue-tank, burn, and admin totals against the
-audited contracts' public counters and balances over a pinned block range. The
+configured release contracts' public counters and balances over a pinned block range. The
 repository does not create a Vercel schedule or activate an Alchemy webhook
 automatically.
 

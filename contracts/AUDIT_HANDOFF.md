@@ -195,7 +195,7 @@ command or report authorizes adding `--broadcast`.
 Copy the two aggregate values and all six per-contract ABI/artifact hashes from
 `release-hashes.mjs` into the retained candidate evidence. Then rerun the same
 code in strict mode with the recorded aggregate values (or the two matching
-audited-manifest environment variables):
+configured-manifest environment variables):
 
 ```powershell
 node scripts\release-hashes.mjs --check `

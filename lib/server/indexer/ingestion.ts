@@ -421,7 +421,7 @@ export async function verifyIndexerManifestIdentity(options: {
   atBlock: bigint;
 }) {
   // Reuse the complete snapshot preflight so the indexer cannot drift to a
-  // weaker definition of the audited manifest. Its sole read-only exception
+  // weaker definition of the configured release manifest. Its sole read-only exception
   // is the globally paused launch switch used during staged backfill. Override
   // only blockNumber to pin every check to this finalized canonical block.
   const pinnedProvider: Eip1193Provider = {
@@ -434,7 +434,7 @@ export async function verifyIndexerManifestIdentity(options: {
   };
   const verified = await assertAuditedIndexerDeployment(pinnedProvider, options.manifest);
   if (verified.blockNumber !== options.atBlock) {
-    throw new Error("Audited deployment preflight did not use the finalized block.");
+    throw new Error("Configured release deployment preflight did not use the finalized block.");
   }
 }
 
@@ -503,7 +503,7 @@ async function loadLaunchMetadata(options: {
     hook !== manifest.contracts.hook.address.toLowerCase() ||
     deployer !== launch.creatorAddress
   ) {
-    throw new Error("Launched token bindings do not match the audited manifest event.");
+    throw new Error("Launched token bindings do not match the configured release manifest event.");
   }
 
   const readText = async (selector: string, maxLength: number) => {
@@ -543,7 +543,7 @@ function classifyLaunch(
   manifest: AuditedDeploymentManifest,
 ): "creator" | "self-burn" {
   if (launch.hookAddress !== manifest.contracts.hook.address.toLowerCase()) {
-    throw new Error("TokenLaunched hook does not match the audited manifest.");
+    throw new Error("TokenLaunched hook does not match the configured release manifest.");
   }
   if (
     launch.tokenAddress === ZERO_ADDRESS ||
@@ -567,7 +567,7 @@ function classifyLaunch(
     }
     return "self-burn";
   }
-  throw new Error("TokenLaunched config ID is outside the audited manifest.");
+  throw new Error("TokenLaunched config ID is outside the configured release manifest.");
 }
 
 export async function syncCanonicalIndexerOnce(options: {
@@ -585,14 +585,14 @@ export async function syncCanonicalIndexerOnce(options: {
   const repository = options.repository ?? productionRepository;
   const { rpc, manifest, config } = options;
   if (manifest.environment !== "robinhood-production" || manifest.testOnly) {
-    throw new Error("Production indexer accepts only the Robinhood audited manifest.");
+    throw new Error("Production indexer accepts only the Robinhood configured release manifest.");
   }
   const chainId = quantity(
     await rpc.request<unknown>({ method: "eth_chainId" }),
     "RPC chain ID",
   );
   if (chainId !== BigInt(manifest.chain.chainId)) {
-    throw new Error("Indexer RPC chain does not match the audited deployment manifest.");
+    throw new Error("Indexer RPC chain does not match the configured release manifest.");
   }
   let safeHead = options.safeHead;
   if (safeHead === undefined) {

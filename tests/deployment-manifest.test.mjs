@@ -98,7 +98,7 @@ function completeEnvironment() {
       "300000000000000000000",
     NEXT_PUBLIC_LAYPIPE_REVENUE_BOUNTY_BPS: "25",
     NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT: "ab".repeat(20),
-    NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION: "0.8.26+commit.8a97fa7a",
+    NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION: "0.8.28+commit.7893614a",
     NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256: fakeHash(8),
     NEXT_PUBLIC_LAYPIPE_ARTIFACT_BUNDLE_SHA256: fakeHash(9),
   };
@@ -156,6 +156,7 @@ function manifestProvider(manifest, options = {}) {
   const zeroAddress = "0x0000000000000000000000000000000000000000";
   const selectors = {
     launchFee: "0xcf3cf573",
+    launchConfigCount: "0xae72d871",
     launchEnabled: "0x236a4afb",
     getLaunchConfig: "0x1cad862d",
     hook: "0x7f5a7c7b",
@@ -196,6 +197,9 @@ function manifestProvider(manifest, options = {}) {
       if (selector === selectors.owner) return addressWord(manifest.governance.finalOwner);
       if (selector === selectors.pendingOwner) return addressWord(zeroAddress);
       if (selector === selectors.launchFee) return uintWord(manifest.launch.launchFee);
+      if (selector === selectors.launchConfigCount) {
+        return uintWord(options.launchConfigCount ?? 2);
+      }
       if (selector === selectors.launchEnabled) {
         return uintWord(options.launchEnabled === false ? 0 : 1);
       }
@@ -295,6 +299,21 @@ test("production manifest is complete-or-disabled and pins canonical externals",
   assert.equal(configured.deployment.launch.selfBurn.config.enabled, false);
 });
 
+test("production manifest requires the exact release compiler", () => {
+  const staleCompiler = completeEnvironment();
+  staleCompiler.NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION =
+    "0.8.26+commit.8a97fa7a";
+
+  assert.throws(
+    () => manifests.parseRobinhoodProductionManifest(staleCompiler),
+    /compiler version must be 0\.8\.28\+commit\.7893614a/,
+  );
+  assert.equal(
+    manifests.ROBINHOOD_PRODUCTION_COMPILER_VERSION,
+    "0.8.28+commit.7893614a",
+  );
+});
+
 test("production launch UI defaults to creator fees and cannot select unsafe self-burn", () => {
   const form = readFileSync(
     resolve(repositoryRoot, "app/launch/LaunchForm.tsx"),
@@ -378,6 +397,11 @@ test("implementation, component, and config drift fail closed before a mutation"
       label: "config",
       options: { mutatedConfig: true },
       message: /startTick does not match/,
+    },
+    {
+      label: "extra config",
+      options: { launchConfigCount: 3 },
+      message: /launch-config count does not match/,
     },
   ];
   for (const drift of cases) {

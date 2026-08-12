@@ -1652,6 +1652,11 @@
   },
   {
     "type": "error",
+    "name": "FactoryLaunchActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "HookNotImplemented",
     "inputs": []
   },

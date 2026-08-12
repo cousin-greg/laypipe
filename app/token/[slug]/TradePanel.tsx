@@ -299,7 +299,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
 
   function client() {
     if (!liveConfigured || !token || !deploymentResult?.configured) {
-      throw new Error("Trading is disabled until the audited production manifest is complete.");
+      throw new Error("Trading is disabled until the configured release manifest is complete.");
     }
     const provider = wallet.provider;
     if (!provider) {
@@ -534,7 +534,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
     try {
       const { provider, tradeClient } = client();
       await ensureRobinhoodChain(provider);
-      // sendTrade performs a new audited deployment/token/account/balance and
+      // sendTrade performs a new configured release deployment/token/account/balance and
       // exact-allowance preflight, then simulates the protected calldata.
       const pending = await tradeClient.sendTrade(quote, {
         onSubmissionInvoked: (submission) => {
@@ -619,7 +619,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
           (pending.approval.kind === "reset") !== (amount === BigInt(0))
         ) {
           throw new Error(
-            "Saved approval intent does not match this audited pool and cannot be reconciled automatically.",
+            "Saved approval intent does not match this configured release pool and cannot be reconciled automatically.",
           );
         }
         const confirmation = await tradeClient.confirmApproval(
@@ -679,7 +679,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         pending.calldata.toLowerCase() !== expectedData.toLowerCase()
       ) {
         throw new Error(
-          "Saved trade intent does not match this audited router call and cannot be reconciled automatically.",
+          "Saved trade intent does not match this configured release router call and cannot be reconciled automatically.",
         );
       }
       const confirmed = await tradeClient.confirmTrade(
@@ -765,7 +765,7 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
         </div>
         <p className={styles.disabledTitle}>Trading locked</p>
         <button className="button button-disabled" type="button" disabled>
-          Audited deployment required
+          Configured release deployment required
         </button>
         <p>
           {deploymentResult?.configured === false

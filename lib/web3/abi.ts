@@ -41,6 +41,7 @@ export const LAYPIPE_CALL_SELECTORS = {
   balanceOf: "70a08231",
   getLaunchConfig: "1cad862d",
   launch: "75154d70",
+  launchConfigCount: "ae72d871",
   launchEnabled: "236a4afb",
   launchFee: "cf3cf573",
   mineSalt: "c5ce3f21",
@@ -163,6 +164,10 @@ export function encodeLaunchFeeCall() {
 
 export function encodeLaunchEnabledCall() {
   return functionData(LAYPIPE_CALL_SELECTORS.launchEnabled);
+}
+
+export function encodeLaunchConfigCountCall() {
+  return functionData(LAYPIPE_CALL_SELECTORS.launchConfigCount);
 }
 
 export function encodeQuoteTokenCall() {

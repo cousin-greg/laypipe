@@ -2,10 +2,16 @@ import { readPublicLaunchDeployment } from "./robinhood";
 
 /**
  * Keep every public manifest field as a static process.env reference so Next
- * can inline the audited deployment into client bundles. Missing or partial
+ * can inline the configured release deployment into client bundles. Missing or partial
  * manifests stay fail-closed through readPublicLaunchDeployment.
  */
 export function readBrowserPublicLaunchDeployment() {
+  if (process.env.NEXT_PUBLIC_LAYPIPE_WALLET_MUTATIONS_ENABLED !== "true") {
+    return {
+      configured: false as const,
+      reason: "Wallet mutations are disabled by the public release kill switch.",
+    };
+  }
   return readPublicLaunchDeployment({
     NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS:
       process.env.NEXT_PUBLIC_UNISWAP_V4_POOL_MANAGER_ADDRESS,

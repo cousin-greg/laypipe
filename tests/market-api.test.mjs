@@ -10,7 +10,7 @@ const multiformatsCid = await import("multiformats/cid");
 const ts = require("typescript");
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cache = new Map();
-process.env.WALLET_CHALLENGE_SECRET = "market-test-secret-that-is-longer-than-thirty-two-bytes";
+process.env.MARKET_CURSOR_SECRET = "market-test-secret-that-is-longer-than-thirty-two-bytes";
 
 function loadTypeScript(relativePath) {
   const filename = resolve(root, relativePath);

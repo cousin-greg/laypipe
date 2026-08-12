@@ -10,7 +10,8 @@
         "canonical PIPEDOG immutable quote, currency0 ordering, ERC6909 claim id, settlement, and payout replace native-value accounting",
         "exact ERC20 balance-delta guards replace native transfers; isolated best-effort platform routing and a conserved retry tab keep treasury failures from freezing creator claims",
         "launched-token address ordering validation and registered-pool view support the canonical swap router",
-        "exact-output quote fees are grossed up with full-precision ceiling math so the configured rate applies to gross PIPEDOG flow"
+        "exact-output quote fees are grossed up with full-precision ceiling math so the configured rate applies to gross PIPEDOG flow",
+        "platform treasury rotation is coupled to the factory launch gate so live launch bindings cannot drift during an allowance window"
       ]
     },
     {

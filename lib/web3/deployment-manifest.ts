@@ -6,6 +6,7 @@ import {
   decodeLaunchConfig,
   decodeUint,
   encodeGetLaunchConfigCall,
+  encodeLaunchConfigCountCall,
   encodeLaunchEnabledCall,
   encodeLaunchFeeCall,
   type FactoryLaunchConfig,
@@ -33,10 +34,13 @@ export const EIP1967_IMPLEMENTATION_SLOT =
   "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc" as Hex;
 export const BASE_SEPOLIA_TEST_ACKNOWLEDGEMENT =
   "BASE_SEPOLIA_REHEARSAL_ONLY" as const;
+export const ROBINHOOD_PRODUCTION_COMPILER_VERSION =
+  "0.8.28+commit.7893614a" as const;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const FIXED_CREATOR_FEE_BPS = 7_000;
 const FIXED_TRADING_FEE_RATE = 10_000;
+const AUDITED_LAUNCH_CONFIG_COUNT = BigInt(2);
 
 const IDENTITY_SELECTORS = {
   bountyBps: "0x415307cc",
@@ -401,6 +405,15 @@ export function parseRobinhoodProductionManifest(
   if (deploymentBlock === BigInt(0)) {
     throw new Error("Deployment block must be non-zero.");
   }
+  const compilerVersion = requireValue(
+    env.NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION,
+    "Audited compiler version",
+  );
+  if (compilerVersion !== ROBINHOOD_PRODUCTION_COMPILER_VERSION) {
+    throw new Error(
+      `Audited compiler version must be ${ROBINHOOD_PRODUCTION_COMPILER_VERSION}.`,
+    );
+  }
 
   return {
     manifestVersion: 1,
@@ -410,10 +423,7 @@ export function parseRobinhoodProductionManifest(
     deploymentBlock,
     release: {
       sourceCommit: parseSourceCommit(env.NEXT_PUBLIC_LAYPIPE_SOURCE_COMMIT),
-      compilerVersion: requireValue(
-        env.NEXT_PUBLIC_LAYPIPE_COMPILER_VERSION,
-        "Audited compiler version",
-      ),
+      compilerVersion,
       abiBundleSha256: parseCodehash(
         env.NEXT_PUBLIC_LAYPIPE_ABI_BUNDLE_SHA256,
         "ABI bundle SHA-256",
@@ -726,6 +736,7 @@ async function assertAuditedDeploymentSnapshot(
     revenueTreasuryCap,
     revenueBounty,
     launchFee,
+    launchConfigCount,
     launchEnabled,
     creatorConfigData,
     selfBurnConfigData,
@@ -763,6 +774,7 @@ async function assertAuditedDeploymentSnapshot(
     readUint(provider, revenueRouter, IDENTITY_SELECTORS.maxTreasuryRoutePerCall, blockTag),
     readUint(provider, revenueRouter, IDENTITY_SELECTORS.bountyBps, blockTag),
     rpcCall(provider, factory, encodeLaunchFeeCall(), blockTag).then(decodeUint),
+    rpcCall(provider, factory, encodeLaunchConfigCountCall(), blockTag).then(decodeUint),
     rpcCall(provider, factory, encodeLaunchEnabledCall(), blockTag).then(decodeBool),
     rpcCall(
       provider,
@@ -832,6 +844,11 @@ async function assertAuditedDeploymentSnapshot(
   );
 
   assertUintMatch(launchFee, manifest.launch.launchFee, "Factory launch fee");
+  assertUintMatch(
+    launchConfigCount,
+    AUDITED_LAUNCH_CONFIG_COUNT,
+    "Factory launch-config count",
+  );
   const acceptedReadOnlyPause =
     allowLaunchPausedForReadOnly &&
     manifest.launch.launchEnabled &&

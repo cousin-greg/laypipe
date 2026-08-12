@@ -63,9 +63,11 @@ PostgreSQL rehearsal, dependency audit, and local protocol invariants.
 
 The Board currently uses clearly marked fixture data. Keep
 `LAYPIPE_MARKET_MODE=fixture` until the database migration, canonical backfill,
-audited deployment manifest, readiness checks, and live Preview rehearsal are
+configured release manifest, readiness checks, and live Preview rehearsal are
 all green. `live` selects the Neon-backed API explicitly and never falls back
-to fixture prices when the database or indexer is unavailable.
+to fixture prices when the database or indexer is unavailable. Launch, trade,
+and creator-claim transactions remain inert unless
+`NEXT_PUBLIC_LAYPIPE_WALLET_MUTATIONS_ENABLED=true` is compiled into the build.
 
 ## Contract verification
 
@@ -83,6 +85,40 @@ node scripts\generate-abis.mjs
 
 Do not add `--broadcast` to the deployment script without explicit deployment
 authorization and an independent contract audit.
+
+## Operator configuration preflight
+
+Every `npm run build` runs the secret-safe configuration preflight first. With
+no deployment profile or kill switches configured, the authoritative prebuild
+defaults to the safe fixture state. Explicit local prechecks must supply all
+four switches. Select the staged state in Vercel with
+`LAYPIPE_CONFIG_PROFILE`:
+
+```text
+npm run verify:production-config -- safe-fixture
+npm run verify:production-config -- preview-indexer
+npm run verify:production-config -- preview-readonly
+npm run verify:production-config -- preview-mutations
+npm run verify:production-config -- production-indexer
+npm run verify:production-config -- production-readonly
+npm run verify:production-config -- production-mutations
+```
+
+Indexer profiles ingest while the Board remains a fixture. Read-only profiles
+serve live Board data but keep IPFS and browser wallet mutations off. Mutation
+profiles alone enable pinning and wallet transactions. Staged profiles require
+the complete configured contract-release manifest and the infrastructure
+appropriate to their tier. The contract manifest's source commit identifies the
+separately reviewed protocol candidate. In an actual staged Vercel build,
+server-only `LAYPIPE_APP_SOURCE_COMMIT` independently binds the application
+checkout to `VERCEL_GIT_COMMIT_SHA`.
+
+`vercel env run -e preview -- npm run verify:production-config --
+preview-readonly` is only a local precheck because local and ambient variables
+can override downloaded values. The actual Vercel build's passing `prebuild`
+output is the authoritative static configuration evidence. It does not call
+providers, apply migrations, prove credentials work, or prove an independent
+audit. Complete the provider smoke tests in [PRODUCTION.md](./PRODUCTION.md).
 
 ## Key references
 

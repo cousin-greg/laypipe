@@ -1374,6 +1374,11 @@
   },
   {
     "type": "error",
+    "name": "AdminMutationRequiresLaunchPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "DisabledConfig",
     "inputs": []
   },

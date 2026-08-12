@@ -675,7 +675,7 @@ function launchedTokenFromReceipt(
     );
     if (!sameAddress(hook, manifest.contracts.hook.address)) {
       throw new WalletFlowError(
-        "TokenLaunched hook does not match the audited deployment.",
+        "TokenLaunched hook does not match the configured release deployment.",
       );
     }
     const config = [manifest.launch.creator, manifest.launch.selfBurn].find(
@@ -683,7 +683,7 @@ function launchedTokenFromReceipt(
     );
     if (!config) {
       throw new WalletFlowError(
-        "TokenLaunched config is not present in the audited deployment.",
+        "TokenLaunched config is not present in the configured release deployment.",
       );
     }
     const expectedFeeRecipient = config.config.selfBurn
@@ -741,7 +741,7 @@ export class LaypipeLaunchClient {
   async verifyAuditedDeployment() {
     if (!this.auditedManifest) {
       throw new DeploymentIntegrityError(
-        "The audited deployment manifest is not loaded. Wallet mutations are blocked.",
+        "The configured release manifest is not loaded. Wallet mutations are blocked.",
       );
     }
     return this.verifyDeployment(this.provider, this.auditedManifest);

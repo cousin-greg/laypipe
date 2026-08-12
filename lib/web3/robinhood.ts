@@ -57,7 +57,7 @@ export function readPublicLaunchDeployment(
       reason:
         error instanceof Error
           ? error.message
-          : "The audited deployment manifest is incomplete.",
+          : "The configured release manifest is incomplete.",
     };
   }
 }

@@ -426,13 +426,13 @@ export function resolveVerifiedTradePool(
   identity: TradeTokenIdentity,
 ): VerifiedTradePool {
   if (manifest.testOnly || manifest.environment !== "robinhood-production") {
-    failIntegrity("Trading requires the audited Robinhood production manifest.");
+    failIntegrity("Trading requires the configured Robinhood production release manifest.");
   }
   if (identity.chainId !== manifest.chain.chainId) {
-    failIntegrity("Indexed token chain does not match the audited deployment.");
+    failIntegrity("Indexed token chain does not match the configured release deployment.");
   }
   if (!sameAddress(identity.hookAddress, manifest.contracts.hook.address)) {
-    failIntegrity("Indexed token hook does not match the audited deployment.");
+    failIntegrity("Indexed token hook does not match the configured release deployment.");
   }
   if (!/^0x[0-9a-fA-F]{64}$/.test(identity.poolId)) {
     failIntegrity("Indexed pool ID is malformed.");

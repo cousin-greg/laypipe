@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "prebuild": "tsx scripts/verify-production-config.ts --deployment",
     "build": "next build",
     "start": "next start",
     "db:migrate": "tsx scripts/indexer/migrate.ts",
@@ -14,6 +15,7 @@
     "db:reconcile": "tsx scripts/indexer/reconcile.ts",
     "test": "npm run build && node --test tests/*.test.mjs && npm run verify:runtime",
     "verify:runtime": "node scripts/verify-runtime.mjs",
+    "verify:production-config": "tsx scripts/verify-production-config.ts --profile",
     "lint": "eslint . --ignore-pattern outputs --ignore-pattern .next"
   },
   "overrides": {
@@ -22,6 +24,9 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",
+    "@next/env": "16.2.12",
+    "blockstore-core": "^7.0.1",
+    "ipfs-unixfs-importer": "^17.0.1",
     "multiformats": "^13.4.1",
     "next": "^16.2.12",
     "react": "19.2.6",

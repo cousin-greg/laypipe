@@ -169,16 +169,16 @@ has no generic recovery or migration path that can drain either liability.
 
 ## Administrative trust
 
-- **Factory owner:** may upgrade the launcher for future calls only while the
-  global launch gate is closed, change launch
-  fee and config enablement, rotate compatible infrastructure while launches
-  are paused, and recover assets held by the factory. Factory-held PIPEDOG goes
-  to the protocol treasury; unrelated ERC-20s and force-sent native currency
-  go to the owner. Recovery cannot reach PoolManager liquidity, hook claims,
-  creator tabs, allowances, or user balances.
-- **Hook owner:** may rotate only the platform treasury destination. The hook
-  is not upgradeable. Creator balances and creator-stream ownership remain
-  creator-controlled.
+- **Factory owner:** while the global launch gate is closed, may upgrade the
+  launcher, add or toggle launch configurations, change the launch fee, and
+  rotate compatible hook, token-implementation, self-burner, and treasury
+  bindings for future calls. It may also recover assets held by the factory.
+  Factory-held PIPEDOG goes to the protocol treasury; unrelated ERC-20s and
+  force-sent native currency go to the owner. Recovery cannot reach PoolManager
+  liquidity, hook claims, creator tabs, allowances, or user balances.
+- **Hook owner:** may rotate only the platform treasury destination, and only
+  while the factory's global launch gate is closed. The hook is not upgradeable.
+  Creator balances and creator-stream ownership remain creator-controlled.
 - **Revenue-router owner:** may pause the sequestration and treasury lanes,
   rotate treasury/operations destinations, change their per-call caps, recover
   unrelated assets, and, while paused, migrate all router-held PIPEDOG to a
@@ -195,9 +195,16 @@ governance: there is no migration delay and a hostile compatible successor can
 still bypass the policy. Treat the split as a trusted operating policy, not an
 irrevocable custody guarantee.
 
-Hook rotation automatically pauses launches and clears the old
+Hook rotation requires launches to be paused beforehand and clears the old
 hook-bound self-burner. Treasury changes require launch to be paused and the
 factory and hook destinations to agree before re-enabling.
+
+The factory pause checks are operational interlocks, not a timelock. A Safe can
+batch pause, mutation, and re-enable calls atomically, leaving no public
+revocation window for an outstanding ERC-20 approval. Production therefore
+requires a separately reviewed external timelock/guardian policy; wallet clients
+must still verify the complete pinned implementation, config count and values,
+fee, and bindings immediately before both approval and launch.
 
 The deployment script uses two-step ownership and leaves launch disabled.
 Until `FINAL_OWNER` accepts, the deployment signer remains the current owner.

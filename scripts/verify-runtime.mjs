@@ -90,6 +90,8 @@ const child = spawn(process.execPath, [nextBin, "start", "-H", "127.0.0.1", "-p"
     UPSTASH_REDIS_REST_KV_REST_API_TOKEN: "",
     UPSTASH_REDIS_REST_KV_REST_API_URL: "",
     WALLET_CHALLENGE_SECRET: "",
+    MARKET_CURSOR_SECRET: "",
+    NEXT_PUBLIC_LAYPIPE_WALLET_MUTATIONS_ENABLED: "false",
   },
   stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true,

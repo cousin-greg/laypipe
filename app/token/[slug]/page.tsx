@@ -244,7 +244,7 @@ export default async function TokenPage({
         <span>{marketMode === "live" ? "Indexed market" : "Fixture market"}</span>
         <p>
           {marketMode === "live"
-            ? "Canonical indexed market data. Wallet trading activates only when the complete audited production manifest matches on-chain; unavailable metrics are never estimated."
+            ? "Canonical indexed market data. Wallet trading activates only when the complete configured release manifest matches on-chain; unavailable metrics are never estimated."
             : "This is an interface fixture, not a deployed token or tradeable pool."}
         </p>
         <Link href="/docs#readiness">Why? →</Link>

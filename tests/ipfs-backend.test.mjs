@@ -796,10 +796,225 @@ test("Pinata staging request enforces exact 5 MB/MIME restrictions without expos
   assert.equal(observed.body.max_file_size, 5 * 1024 * 1024);
   assert.deepEqual(observed.body.allow_mime_types, ["image/png"]);
   assert.equal(observed.body.network, "public");
-  assert.equal("cid_version" in observed.body, false);
+  assert.equal(observed.body.cid_version, "v1");
   assert.equal(observed.body.keyvalues.file_sha256, "44".repeat(32));
   assert.equal(observed.init.headers.Authorization, "Bearer test-pinata-jwt-never-sent-to-browser");
   assert.equal(JSON.stringify(result).includes("test-pinata-jwt"), false);
+});
+
+test("public CID prediction matches fixed Kubo v1 vectors at every relevant chunk boundary", async () => {
+  // Independently generated with Kubo v0.42.0 and `ipfs add --cid-version=1`.
+  const vectors = [
+    [0, "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"],
+    [1, "bafkreidogqfzz75tpkmjzjke425xqcrmpcib2p5tg44hnbirumdbpl5adu"],
+    [262_143, "bafkreic6iqyxuiad5dem4bzgyy336yoi6tegdqa4e5vt24gq3btool5cra"],
+    [262_144, "bafkreiekhhjkxu4ztk3tyng3er3ijhg56mb44oe3gwbgquhzu4afrg2ksa"],
+    [262_145, "bafybeigllfqgfpqydppr6cmv56g7ax4wyhruzswvcefv6j5kj77nzttfki"],
+    [5 * 1024 * 1024, "bafybeid7mu43g4fehkxhdkl4x3lu4pybxuxpg57it6r6z7e36soj7h2yd4"],
+  ];
+
+  for (const [size, expectedCid] of vectors) {
+    assert.equal(
+      await pinataModule.predictPublicFileCid(new Uint8Array(size)),
+      expectedCid,
+      `unexpected Kubo v1 CID for ${size} zero bytes`,
+    );
+  }
+});
+
+test("permanent Pinata uploads pin v1 explicitly and file names do not affect the CID", async () => {
+  configureEnvironment();
+  const bytes = new Uint8Array([0]);
+  const expectedCid = "bafkreidogqfzz75tpkmjzjke425xqcrmpcib2p5tg44hnbirumdbpl5adu";
+  const observed = [];
+  const names = ["first-name.bin", "second-name.bin"];
+
+  for (const [index, fileName] of names.entries()) {
+    const uploaded = await pinataModule.uploadPublicFile({
+      bytes,
+      fileName,
+      mimeType: "application/octet-stream",
+      keyvalues: { laypipe_promotion_part: "profile-test" },
+      fetcher: async (url, init = {}) => {
+        assert.equal(String(url), "https://uploads.pinata.cloud/v3/files");
+        const file = init.body.get("file");
+        observed.push({
+          cidVersion: init.body.get("cid_version"),
+          fileName: file.name,
+          name: init.body.get("name"),
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        });
+        return Response.json({
+          data: {
+            id: `${index + 1}1111111-1111-4111-8111-111111111111`,
+            cid: expectedCid,
+            size: bytes.length,
+            mime_type: "application/octet-stream",
+          },
+        });
+      },
+    });
+    assert.equal(uploaded.cid, expectedCid);
+  }
+
+  assert.deepEqual(
+    observed.map(({ cidVersion, fileName, name }) => ({ cidVersion, fileName, name })),
+    names.map((name) => ({ cidVersion: "v1", fileName: name, name })),
+  );
+  assert.deepEqual(observed.map(({ bytes: uploadedBytes }) => [...uploadedBytes]), [[0], [0]]);
+});
+
+test("permanent Pinata uploads reject a CID that does not identify the reviewed bytes", async () => {
+  configureEnvironment();
+  const bytes = new Uint8Array([0]);
+  const wrongCid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  const deleted = [];
+
+  await assert.rejects(
+    pinataModule.uploadPublicFile({
+      bytes,
+      fileName: "metadata.json",
+      mimeType: "application/json",
+      keyvalues: { laypipe_promotion_part: "metadata" },
+      fetcher: async (url, init = {}) => {
+        if (String(url) === "https://uploads.pinata.cloud/v3/files") {
+          assert.equal(init.body.get("cid_version"), "v1");
+          return Response.json({
+            data: {
+              id: "99999999-9999-4999-8999-999999999999",
+              cid: wrongCid,
+              size: bytes.length,
+              mime_type: "application/json",
+            },
+          });
+        }
+        if (init.method === "DELETE") {
+          deleted.push(String(url));
+          return Response.json({ data: null });
+        }
+        throw new Error(`Unexpected network call: ${url}`);
+      },
+    }),
+    (error) => error?.code === "IPFS_CID_MISMATCH" && error?.status === 502,
+  );
+  assert.deepEqual(deleted, [
+    "https://api.pinata.cloud/v3/files/public/99999999-9999-4999-8999-999999999999",
+  ]);
+});
+
+test("CID mismatch cleanup gets an independent deadline when the upload deadline expires", async () => {
+  configureEnvironment();
+  const bytes = new Uint8Array([0]);
+  const wrongCid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  const uploadDeadline = new AbortController();
+  const deleted = [];
+
+  await assert.rejects(
+    pinataModule.uploadPublicFile({
+      bytes,
+      fileName: "deadline.bin",
+      mimeType: "application/octet-stream",
+      keyvalues: { laypipe_promotion_part: "deadline-test" },
+      signal: uploadDeadline.signal,
+      fetcher: async (url, init = {}) => {
+        if (String(url) === "https://uploads.pinata.cloud/v3/files") {
+          uploadDeadline.abort();
+          return Response.json({
+            data: {
+              id: "77777777-7777-4777-8777-777777777777",
+              cid: wrongCid,
+              size: bytes.length,
+              mime_type: "application/octet-stream",
+            },
+          });
+        }
+        if (init.method === "DELETE") {
+          assert.equal(init.signal.aborted, false);
+          deleted.push(String(url));
+          return Response.json({ data: null });
+        }
+        throw new Error(`Unexpected network call: ${url}`);
+      },
+    }),
+    (error) => error?.code === "IPFS_CID_MISMATCH" && error?.status === 502,
+  );
+  assert.deepEqual(deleted, [
+    "https://api.pinata.cloud/v3/files/public/77777777-7777-4777-8777-777777777777",
+  ]);
+});
+
+test("CID mismatch remains fail-closed and warns when provider cleanup fails", async () => {
+  configureEnvironment();
+  const bytes = new Uint8Array([0]);
+  const wrongCid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...values) => warnings.push(values);
+  try {
+    await assert.rejects(
+      pinataModule.uploadPublicFile({
+        bytes,
+        fileName: "cleanup.bin",
+        mimeType: "application/octet-stream",
+        keyvalues: { laypipe_promotion_part: "cleanup-test" },
+        fetcher: async (url, init = {}) => {
+          if (String(url) === "https://uploads.pinata.cloud/v3/files") {
+            return Response.json({
+              data: {
+                id: "66666666-6666-4666-8666-666666666666",
+                cid: wrongCid,
+                size: bytes.length,
+                mime_type: "application/octet-stream",
+              },
+            });
+          }
+          if (init.method === "DELETE") {
+            return Response.json({ error: "forced cleanup failure" }, { status: 500 });
+          }
+          throw new Error(`Unexpected network call: ${url}`);
+        },
+      }),
+      (error) => error?.code === "IPFS_CID_MISMATCH" && error?.status === 502,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(warnings, [[
+    "LayPipe mismatched permanent pin cleanup failed",
+    {
+      error: "PinMismatchCleanupError",
+      fileId: "66666666-6666-4666-8666-666666666666",
+    },
+  ]]);
+});
+
+test("malformed permanent Pinata responses are normalized to an upstream 502", async () => {
+  configureEnvironment();
+  const bytes = new Uint8Array([0]);
+  const malformed = [
+    () => new Response("{", { status: 200, headers: { "Content-Type": "application/json" } }),
+    () => Response.json({
+      data: {
+        id: "55555555-5555-4555-8555-555555555555",
+        cid: "not-a-cid",
+        size: bytes.length,
+        mime_type: "application/octet-stream",
+      },
+    }),
+  ];
+
+  for (const response of malformed) {
+    await assert.rejects(
+      pinataModule.uploadPublicFile({
+        bytes,
+        fileName: "malformed.bin",
+        mimeType: "application/octet-stream",
+        keyvalues: { laypipe_promotion_part: "malformed-test" },
+        fetcher: async () => response(),
+      }),
+      (error) => error?.code === "IPFS_RESPONSE" && error?.status === 502,
+    );
+  }
 });
 
 test("IPFS kill switch blocks staging even when a Pinata JWT exists", async () => {
@@ -1143,10 +1358,13 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     }
     if (urlString === "https://uploads.pinata.cloud/v3/files") {
       const file = init.body.get("file");
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const cid = await pinataModule.predictPublicFileCid(bytes);
       uploads.push({
         name: file.name,
         type: file.type,
-        bytes: Buffer.from(await file.arrayBuffer()),
+        bytes,
+        cid,
         keyvalues: JSON.parse(init.body.get("keyvalues")),
       });
       const isMetadata = file.type === "application/json";
@@ -1155,7 +1373,7 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
           id: isMetadata
             ? "99999999-9999-4999-8999-999999999999"
             : "88888888-8888-4888-8888-888888888888",
-          cid: isMetadata ? metadataCid : imageCid,
+          cid,
           size: file.size,
           mime_type: file.type,
         },
@@ -1182,12 +1400,12 @@ test("pin route validates staged bytes and returns exactly the dual-CID response
     assert.equal(response.status, 201);
     const payload = await response.json();
     assert.deepEqual(Object.keys(payload).sort(), ["image", "metadata", "metadataDocument"]);
-    assert.equal(payload.image.cid, imageCid);
-    assert.equal(payload.metadata.cid, metadataCid);
-    assert.equal(payload.metadataDocument.image, `ipfs://${imageCid}`);
+    assert.equal(payload.image.cid, uploads[0].cid);
+    assert.equal(payload.metadata.cid, uploads[1].cid);
+    assert.equal(payload.metadataDocument.image, `ipfs://${uploads[0].cid}`);
     assert.deepEqual(
       payload.metadataDocument,
-      clientMetadata.buildTokenMetadata(draft, `ipfs://${imageCid}`),
+      clientMetadata.buildTokenMetadata(draft, `ipfs://${uploads[0].cid}`),
     );
     assert.equal(uploads.length, 2);
     assert.equal(uploads[0].type, "image/webp");
@@ -1264,6 +1482,7 @@ test("metadata provider failure keeps the raw stage and resumes without deleting
   const deletes = [];
   let failMetadataOnce = true;
   let failCompletionOnce = true;
+  let pinnedMetadataCid;
   globalThis.fetch = async (url, init = {}) => {
     const urlString = String(url);
     if (urlString === "https://laypipe-test.upstash.io") {
@@ -1312,13 +1531,17 @@ test("metadata provider failure keeps the raw stage and resumes without deleting
         failMetadataOnce = false;
         return Response.json({ error: "forced" }, { status: 500 });
       }
+      const cid = await pinataModule.predictPublicFileCid(
+        new Uint8Array(await file.arrayBuffer()),
+      );
+      if (file.type === "application/json") pinnedMetadataCid = cid;
       return Response.json({
         data: {
           id:
             file.type === "application/json"
               ? "99999999-9999-4999-8999-999999999999"
               : "88888888-8888-4888-8888-888888888888",
-          cid: file.type === "application/json" ? metadataCid : imageCid,
+          cid,
           size: file.size,
           mime_type: file.type,
         },
@@ -1372,7 +1595,7 @@ test("metadata provider failure keeps the raw stage and resumes without deleting
       }),
     );
     assert.equal(completionRetry.status, 201);
-    assert.equal((await completionRetry.json()).metadata.cid, metadataCid);
+    assert.equal((await completionRetry.json()).metadata.cid, pinnedMetadataCid);
     assert.equal(uploadCount, 3, "saved metadata progress must not repin either file");
     assert.equal(stageGetCount, 1);
     assert.deepEqual(deletes, []);

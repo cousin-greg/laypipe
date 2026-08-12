@@ -19,6 +19,10 @@ import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary, toBeforeSwapDelta} from "v4-core/src/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
 
+interface ILaypipeFactoryLaunchGate {
+    function launchEnabled() external view returns (bool);
+}
+
 /// @title PipedogHook
 /// @notice The fee engine for Laypipe pools. Takes the trading fee from the
 ///         PIPEDOG side of every exact-input and exact-output swap. PIPEDOG is
@@ -59,6 +63,7 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
     error DonationsLocked();
     error PartialFillRejected();
     error NotSelf();
+    error FactoryLaunchActive();
 
     event PoolRegistered(PoolId indexed poolId, address indexed creator, PoolConfig config);
     /// @notice The exact PIPEDOG fee taken by a swap — indexers mirror fees
@@ -480,6 +485,9 @@ contract PipedogHook is BaseHook, Ownable2Step, ReentrancyGuard, IUnlockCallback
 
     /// @notice Redirects the platform's share only; creator balances are unaffected.
     function setTreasury(address newTreasury) external onlyOwner {
+        if (ILaypipeFactoryLaunchGate(factory).launchEnabled()) {
+            revert FactoryLaunchActive();
+        }
         if (newTreasury == address(0)) revert ZeroAddress();
         emit TreasuryUpdated(treasury, newTreasury);
         treasury = newTreasury;

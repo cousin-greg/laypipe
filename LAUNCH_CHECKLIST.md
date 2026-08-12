@@ -65,6 +65,9 @@ apply grants with the operator-only migration credential, and add only
   used by LayPipe; do not grant account administration.
 - [ ] Add `PINATA_JWT` as a Sensitive, server-only Vercel variable.
 - [ ] Add the dedicated HTTPS gateway origin as `IPFS_GATEWAY_BASE_URL`.
+- [ ] Add separate server-only `MARKET_CURSOR_SECRET` and
+  `WALLET_CHALLENGE_SECRET` values; read-only deployments require only the
+  market cursor secret.
 - [ ] Confirm the Preview/Production write role has only SELECT/INSERT/UPDATE
   on immutable `ipfs_promotions`; UPDATE is limited by the immutable trigger to
   identical `ON CONFLICT` retries.
@@ -80,7 +83,6 @@ apply grants with the operator-only migration credential, and add only
   it as server-only `ROBINHOOD_RPC_HTTP_URL`.
 - [ ] Put the audit/release RPC in ignored `contracts/.env` as
   `ROBINHOOD_RPC_URL`; do not pass a private URL in the process list.
-- [ ] Optionally add `ROBINHOOD_RPC_WS_URL` as an operational fallback.
 - [ ] Create a dedicated authenticated Alchemy webhook and add its secret as
   `ALCHEMY_WEBHOOK_SIGNING_KEY`.
 - [ ] Create separate Preview and Production `CRON_SECRET` values and Alchemy
@@ -97,7 +99,9 @@ CREATE2/factory integration suite. A public RPC failure is not a passing test.
 - [ ] Create or select separate Safe addresses for `FINAL_OWNER`,
   `TREASURY_WALLET`, and `OPERATIONS_WALLET`.
 - [ ] Decide whether factory upgrades require an on-chain timelock and guardian
-  pause in addition to the existing launch-pause code gate.
+  pause in addition to the existing launch-pause code gate. Treat this as a
+  release gate: a Safe can atomically batch pause, mutation, and re-enable calls,
+  so the boolean check alone creates no allowance-revocation window.
 - [ ] Decide whether the paused same-PIPEDOG revenue-router migration power is
   accepted policy or needs a timelock/stricter contract limit.
 - [ ] Write the signer, quorum, key-loss, rotation, and incident-pause runbook.
@@ -133,6 +137,12 @@ independent audit.
 
 ## Operator: Preview rehearsal
 
+- [ ] Set Preview to `LAYPIPE_CONFIG_PROFILE=preview-indexer`, retain the
+  Vercel build's secret-free `prebuild` output, and rehearse indexing while the
+  Board remains fixture-only. Advance to `preview-readonly` only after backfill
+  and readiness pass. Separately compare the Neon branch, Upstash database,
+  Pinata project/gateway, cron secret, and webhook ID with Production because a
+  static configuration check cannot prove resource separation.
 - [ ] Apply the migration to the isolated Neon Preview branch twice and verify
   idempotence/hash-drift rejection.
 - [ ] Run canonical ingest, rollback, replay, cursor-CAS, and live market-query
@@ -212,6 +222,14 @@ Greg must explicitly authorize each broadcast after the independent audit.
 
 ### Robinhood production
 
+- [ ] Before promotion, set
+  `LAYPIPE_CONFIG_PROFILE=production-readonly` in the exact Production
+  environment and retain the Vercel build's secret-free `prebuild` output.
+  Set server-only `LAYPIPE_APP_SOURCE_COMMIT` to that application's exact Vercel
+  Git SHA; do not replace the contract candidate's manifest source commit.
+  Keep IPFS pinning and the public wallet-mutation switch false. A passing
+  result is configuration evidence only; provider reachability, permissions,
+  quotas, backups, alerts, and the independent audit remain separate gates.
 - [ ] Re-run the entire release suite and compare outputs to the audited
   candidate.
 - [ ] With explicit authorization, deploy with global launches disabled.

@@ -205,7 +205,7 @@ export function WalletPortfolio({ view }: { view: View }) {
     const claimRevision = revision;
     const deployment = readBrowserPublicLaunchDeployment();
     if (!deployment.configured) {
-      setClaimError("The complete audited production manifest is not configured.");
+      setClaimError("The complete configured release manifest is not configured.");
       return;
     }
     setClaiming(position.poolId);
@@ -311,7 +311,7 @@ export function WalletPortfolio({ view }: { view: View }) {
     const operation = ++claimRef.current;
     const deployment = readBrowserPublicLaunchDeployment();
     if (!deployment.configured) {
-      setClaimError("The complete audited production manifest is not configured.");
+      setClaimError("The complete configured release manifest is not configured.");
       return;
     }
     setClaiming(pendingClaim.poolId);
@@ -384,7 +384,7 @@ export function WalletPortfolio({ view }: { view: View }) {
         <div>
           <span className="status-pill">Wallet required</span>
           <h2>Connect to inspect your pipes.</h2>
-          <p>Balances come from the fresh Neon index. Claims are re-verified through your wallet against the audited hook before submission.</p>
+          <p>Balances come from the fresh Neon index. Claims are re-verified through your wallet against the configured release hook before submission.</p>
           <button className="button button-accent" type="button" onClick={() => void connect()} disabled={status === "connecting"}>
             {status === "connecting" ? "Connecting..." : "Connect wallet"}
           </button>

@@ -123,7 +123,7 @@ test("server-renders all product routes", async () => {
     [
       "/launch",
       [
-        /audited production factory is not configured yet/i,
+        /configured release factory is unavailable/i,
         /IPFS pinning happens before wallet transactions/i,
         /Native ETH is used only for Robinhood Chain gas/i,
       ],
@@ -134,7 +134,10 @@ test("server-renders all product routes", async () => {
     ],
     [
       "/rewards",
-      [/Live wallet data is disabled/i, /Claim creator PIPEDOG from the audited hook/i],
+      [
+        /Live wallet data is disabled/i,
+        /Claim creator PIPEDOG from the configured release hook/i,
+      ],
     ],
     [
       "/tokenomics",

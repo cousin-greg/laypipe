@@ -110,6 +110,7 @@ contract LaypipeFactory is
     error SeedRequiresQuote();
     error ResidualQuoteBalance(uint256 expected, uint256 actual);
     error ValueTooLarge();
+    error AdminMutationRequiresLaunchPaused();
     error UpgradeRequiresLaunchPaused();
 
     /// @dev Signature intentionally matches the current LetsCash launch event
@@ -477,6 +478,7 @@ contract LaypipeFactory is
         onlyOwner
         returns (uint256 configId)
     {
+        _requireLaunchPausedForAdminMutation();
         _validateConfig(config);
         configId = _launchConfigs.length;
         _launchConfigs.push(config);
@@ -484,6 +486,7 @@ contract LaypipeFactory is
     }
 
     function setLaunchConfigEnabled(uint256 configId, bool enabled) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         if (configId >= _launchConfigs.length) revert InvalidConfig();
         LaunchConfig storage config = _launchConfigs[configId];
         if (enabled && !_isSupportedActiveConfig(config)) revert InvalidConfig();
@@ -517,6 +520,7 @@ contract LaypipeFactory is
     }
 
     function setHook(PipedogHook newHook) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         if (
             address(newHook).code.length == 0 || newHook.factory() != address(this)
                 || address(newHook.poolManager()) != address(poolManager)
@@ -524,16 +528,11 @@ contract LaypipeFactory is
                 || newHook.treasury() != treasury
         ) revert InvalidInfrastructure();
 
-        // The self-burner binds its hook immutably.
-        // A hook rotation must never leave new launches pointing at helpers
-        // that will claim against the old hook. Atomically pause launches and
-        // clear those dependants; the owner can deploy/rebind replacements,
-        // then explicitly re-enable the supported modes.
+        // The self-burner binds its hook immutably. A paused hook rotation must
+        // never leave future launches pointing at helpers that will claim
+        // against the old hook. Clear those dependants so the owner must
+        // deploy/rebind replacements before explicitly re-enabling launches.
         if (address(hook) != address(0) && address(hook) != address(newHook)) {
-            if (launchEnabled) {
-                launchEnabled = false;
-                emit LaunchEnabledSet(false);
-            }
             if (address(selfBurner) != address(0)) {
                 emit SelfBurnerSet(address(selfBurner), address(0));
                 selfBurner = LaypipeSelfBurner(address(0));
@@ -544,12 +543,14 @@ contract LaypipeFactory is
     }
 
     function setTokenImplementation(LaypipeToken newImplementation) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         if (address(newImplementation).code.length == 0) revert InvalidInfrastructure();
         emit TokenImplementationSet(address(tokenImplementation), address(newImplementation));
         tokenImplementation = newImplementation;
     }
 
     function setSelfBurner(LaypipeSelfBurner newBurner) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         if (
             address(newBurner).code.length == 0 || newBurner.factory() != address(this)
                 || address(newBurner.hook()) != address(hook)
@@ -562,8 +563,9 @@ contract LaypipeFactory is
     }
 
     function setTreasury(address newTreasury) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         if (
-            newTreasury == address(0) || launchEnabled
+            newTreasury == address(0)
                 || (
                     address(hook) != address(0)
                         && hook.treasury() != newTreasury
@@ -574,6 +576,7 @@ contract LaypipeFactory is
     }
 
     function setLaunchFee(uint256 newFee) external onlyOwner {
+        _requireLaunchPausedForAdminMutation();
         emit LaunchFeeSet(launchFee, newFee);
         launchFee = newFee;
     }
@@ -697,5 +700,12 @@ contract LaypipeFactory is
     ///      operational upgrade from occurring while new calls are accepted.
     function _authorizeUpgrade(address) internal view override onlyOwner {
         if (launchEnabled) revert UpgradeRequiresLaunchPaused();
+    }
+
+    /// @dev Every owner mutation that changes a future launch's price, curve,
+    ///      code, or routing must start with the public launch gate closed. This
+    ///      keeps the approved manifest stable during a user's allowance window.
+    function _requireLaunchPausedForAdminMutation() private view {
+        if (launchEnabled) revert AdminMutationRequiresLaunchPaused();
     }
 }

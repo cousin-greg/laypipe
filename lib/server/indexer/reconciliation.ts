@@ -556,7 +556,7 @@ export function pinnedReadProvider(provider: Eip1193Provider, pinned: Hex): Eip1
       if (blockParameter !== pinned) {
         throw new ReconciliationGateError(
           "RPC_BLOCK_UNPINNED",
-          "Audited deployment read was not pinned to the reconciliation block.",
+          "Configured release deployment read was not pinned to the reconciliation block.",
         );
       }
       return provider.request<T>(args);
@@ -662,13 +662,13 @@ export async function runReadOnlyReconciliation(
   if (options.manifest.environment !== "robinhood-production" || options.manifest.testOnly) {
     throw new ReconciliationGateError(
       "MANIFEST_INVALID",
-      "Only the audited Robinhood production manifest can be reconciled.",
+      "Only the configured Robinhood production release manifest can be reconciled.",
     );
   }
   if (options.pinnedBlock < options.manifest.deploymentBlock) {
     throw new ReconciliationGateError(
       "BLOCK_BEFORE_DEPLOYMENT",
-      "Reconciliation block predates the audited deployment.",
+      "Reconciliation block predates the configured release deployment.",
     );
   }
   if (!Number.isSafeInteger(options.finalityBlocks) || options.finalityBlocks < 1) {
@@ -733,7 +733,7 @@ export async function runReadOnlyReconciliation(
     if (error instanceof ReconciliationGateError) throw error;
     throw new ReconciliationGateError(
       "MANIFEST_MISMATCH",
-      "Audited deployment identity or configuration did not match at the pinned block.",
+      "Configured release deployment identity or configuration did not match at the pinned block.",
     );
   }
 

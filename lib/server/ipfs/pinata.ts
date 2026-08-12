@@ -1,3 +1,5 @@
+import { BlackHoleBlockstore } from "blockstore-core/black-hole";
+import { importer } from "ipfs-unixfs-importer";
 import { CID } from "multiformats/cid";
 import { HttpError } from "@/lib/server/auth/http";
 import { parseCid } from "@/lib/server/auth/request-digest";
@@ -59,6 +61,7 @@ const CLEANUP_PAGE_SIZE = 100;
 const CLEANUP_MAX_PAGES = 10;
 const CLEANUP_MAX_DELETES = 100;
 const PINATA_REQUEST_TIMEOUT_MS = 15_000;
+const MISMATCH_CLEANUP_TIMEOUT_MS = 5_000;
 const CLEANUP_TIMEOUT_MS = 45_000;
 const CLEANUP_DELETE_CONCURRENCY = 20;
 const PINATA_FILE_ID_PATTERN =
@@ -154,9 +157,15 @@ function parsePinataFile(payload: unknown): PinataFile {
           ),
         )
       : undefined;
+  let cid: string;
+  try {
+    cid = CID.parse(data.cid).toV1().toString();
+  } catch {
+    throw new HttpError(502, "IPFS_RESPONSE", "Artwork storage returned invalid data.");
+  }
   return {
     id: data.id,
-    cid: parseCid(data.cid),
+    cid,
     size: data.size,
     mimeType: data.mime_type,
     ...(typeof data.name === "string" ? { name: data.name } : {}),
@@ -349,6 +358,7 @@ export async function createPresignedStageUrl(options: {
         date: Math.floor(Date.now() / 1000),
         expires: 60,
         network: "public",
+        cid_version: "v1",
         max_file_size: 5 * 1024 * 1024,
         allow_mime_types: [options.mimeType],
         filename: options.fileName,
@@ -388,6 +398,21 @@ export async function createPresignedStageUrl(options: {
   return { uploadUrl: url.toString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
 }
 
+export async function predictPublicFileCid(bytes: Uint8Array) {
+  const blockstore = new BlackHoleBlockstore();
+  let root: CID | undefined;
+  for await (const entry of importer([{ content: bytes }], blockstore, {
+    cidVersion: 1,
+    rawLeaves: true,
+  })) {
+    root = entry.cid;
+  }
+  if (!root) {
+    throw new HttpError(500, "IPFS_CID", "Artwork storage integrity check failed.");
+  }
+  return root.toV1().toString();
+}
+
 export async function getStagedFile(
   fileId: string,
   fetcher: typeof fetch = fetch,
@@ -406,7 +431,7 @@ export async function getStagedFile(
   if (!response.ok) {
     throw new HttpError(400, "STAGE_NOT_FOUND", "Staged artwork was not found.");
   }
-  const file = parsePinataFile(await response.json());
+  const file = parsePinataFile(await response.json().catch(() => null));
   if (file.id.toLowerCase() !== fileId.toLowerCase()) {
     throw new HttpError(502, "IPFS_RESPONSE", "Artwork storage returned invalid data.");
   }
@@ -470,8 +495,10 @@ export async function uploadPublicFile(options: {
   fetcher?: typeof fetch;
   signal?: AbortSignal;
 }) {
+  const expectedCid = await predictPublicFileCid(options.bytes);
   const form = new FormData();
   form.set("network", "public");
+  form.set("cid_version", "v1");
   form.set("name", options.fileName);
   form.set("keyvalues", JSON.stringify(options.keyvalues));
   form.set(
@@ -494,7 +521,26 @@ export async function uploadPublicFile(options: {
   if (!response.ok) {
     throw new HttpError(502, "IPFS_UPLOAD", "Artwork storage failed.");
   }
-  return parsePinataFile(await response.json());
+  const uploaded = parsePinataFile(await response.json().catch(() => null));
+  if (uploaded.cid !== expectedCid) {
+    const cleaned = await deletePublicFile(
+      uploaded.id,
+      options.fetcher ?? fetch,
+      AbortSignal.timeout(MISMATCH_CLEANUP_TIMEOUT_MS),
+    );
+    if (!cleaned) {
+      console.warn("LayPipe mismatched permanent pin cleanup failed", {
+        error: "PinMismatchCleanupError",
+        fileId: uploaded.id,
+      });
+    }
+    throw new HttpError(
+      502,
+      "IPFS_CID_MISMATCH",
+      "Artwork storage failed its integrity check.",
+    );
+  }
+  return uploaded;
 }
 
 export async function deletePublicFile(
