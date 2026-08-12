@@ -215,7 +215,11 @@ complete. The default `INDEXER_BATCH_SIZE=10` works with Alchemy's Robinhood
 free-tier `eth_getLogs` range. A wake-up processes at most
 `INDEXER_MAX_BATCHES_PER_RUN=25` windows (250 blocks) under the same pinned safe
 head and complete audited-manifest preflight, stopping when caught up or when
-the 45-second deadline needs release headroom. Every batch is also bounded by
+the 45-second deadline needs finalization headroom. The ingestion loop reserves
+22 seconds before that deadline for a batch already completing its bounded
+canonical database write, the terminal observation/global-leader refresh,
+response serialization, and lease release; the RPC deadline uses the earlier
+ingestion boundary. Every batch is also bounded by
 total logs, new launch metadata reads, watched pool/token filter chunks, reorg
 lookback, RPC response bytes, and a 45-second internal deadline. Reaching an
 `eth_getLogs` result ceiling is treated as possible provider truncation and
@@ -396,7 +400,12 @@ Incident actions:
    query plans, indexer staleness, and market-read readiness with isolated
    Preview fixtures. Include holder-balance projection insert/replay/rollback,
    original/current-creator wallet portfolios, stale-watermark short circuit,
-   and both IP and IP-wallet Upstash limits on `POST /api/holdings`. Capture
+   both IP and IP-wallet Upstash limits on `POST /api/holdings`, and global
+   leader publication where a launch outside the newest page wins the
+   trailing-24-hour ranking. Prove a canonical rollback removes the leader
+   snapshot from the database before replay, then verify the prior public
+   response ages out within its bounded 10-second CDN TTL plus 20-second stale
+   window. Capture
    `EXPLAIN (ANALYZE, BUFFERS)` at representative volume; the disposable
    PostgreSQL test proves correctness and index eligibility, not production
    latency. Canonical backfill cannot begin before contracts exist.

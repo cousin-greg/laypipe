@@ -148,6 +148,7 @@ export function MarketBoard() {
   const {
     hasMore,
     lastUpdated,
+    leaders,
     loadMore,
     loadMoreError,
     loadingMore,
@@ -158,7 +159,9 @@ export function MarketBoard() {
   const [featureTab, setFeatureTab] = useState<FeatureTab>("hot");
   const [featurePaused, setFeaturePaused] = useState(false);
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortMode>("hot");
+  const [sort, setSort] = useState<SortMode>(
+    marketMode === "live" ? "newest" : "hot",
+  );
   const [mode, setMode] = useState<"all" | LaunchMode>("all");
   const [cap, setCap] = useState<CapFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
@@ -177,10 +180,14 @@ export function MarketBoard() {
     [marketMode],
   );
 
-  const featured = useMemo(
-    () => rankedToken(featureTab, tokens),
-    [featureTab, tokens],
-  );
+  const featured = useMemo(() => {
+    if (marketMode === "live") {
+      if (featureTab === "hot") return leaders.mostTraded;
+      if (featureTab === "mover") return leaders.biggestMover;
+      return leaders.newest;
+    }
+    return rankedToken(featureTab, tokens);
+  }, [featureTab, leaders, marketMode, tokens]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -192,12 +199,9 @@ export function MarketBoard() {
 
       setSearch(params.get("q") ?? "");
       if (
+        marketMode === "fixture" &&
         ["hot", "market-cap", "newest", "volume", "gainers"].includes(
           sortValue ?? "",
-        ) &&
-        !(
-          marketMode === "live" &&
-          sortValue === "market-cap"
         )
       ) {
         setSort(sortValue as SortMode);
@@ -244,7 +248,7 @@ export function MarketBoard() {
     };
 
     setOrDelete("q", search, "");
-    setOrDelete("sort", sort, "hot");
+    setOrDelete("sort", sort, marketMode === "live" ? "newest" : "hot");
     setOrDelete("mode", mode, "all");
     setOrDelete("mcap", cap, "all");
     setOrDelete("age", date, "all");
@@ -256,7 +260,7 @@ export function MarketBoard() {
       "",
       `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`,
     );
-  }, [cap, date, mode, search, sort, urlReady, view]);
+  }, [cap, date, marketMode, mode, search, sort, urlReady, view]);
 
   const filteredTokens = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -282,12 +286,13 @@ export function MarketBoard() {
       return matchesSearch && matchesMode && matchesCap && matchesDate;
     });
 
+    if (marketMode === "live") return matchingTokens;
+
     return matchingTokens.sort((a, b) => {
       if (sort === "market-cap") return metric(b.marketCap) - metric(a.marketCap);
       if (sort === "newest") return a.ageHours - b.ageHours;
       if (sort === "volume") return compareTokenVolumes(b, a);
       if (sort === "gainers") return compareTokenChanges(b, a);
-      if (marketMode === "live") return b.trades - a.trades;
       if (a.source === "fixture" && b.source === "fixture") {
         return (
           b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
@@ -367,8 +372,7 @@ export function MarketBoard() {
         onFocusCapture={() => setFeaturePaused(true)}
         onBlurCapture={() => setFeaturePaused(false)}
       >
-        {featured ? (
-          <article className="featured-token">
+        <article className="featured-token">
           <header className="featured-header">
             <div className="featured-context">
               <span className="featured-kicker">
@@ -405,105 +409,128 @@ export function MarketBoard() {
             </div>
           </header>
 
-          <div
-            id="featured-market-panel"
-            className="featured-body"
-            role="tabpanel"
-            aria-labelledby={`feature-tab-${featureTab}`}
-          >
-            <div className="featured-identity">
-              <div className="featured-name">
-                <TokenAvatar token={featured} size="large" />
-                <div>
-                  <h2>{featured.name}</h2>
-                  <p>${featured.symbol}</p>
+          {featured ? (
+            <div
+              id="featured-market-panel"
+              className="featured-body"
+              role="tabpanel"
+              aria-labelledby={`feature-tab-${featureTab}`}
+            >
+              <div className="featured-identity">
+                <div className="featured-name">
+                  <TokenAvatar token={featured} size="large" />
+                  <div>
+                    <h2>{featured.name}</h2>
+                    <p>${featured.symbol}</p>
+                  </div>
                 </div>
-              </div>
-              <p>{featured.description}</p>
-              <div className="featured-actions">
-                <Link
-                  className="button button-accent"
-                  href={`/token/${featured.slug}`}
-                >
-                  {marketMode === "live" ? "View indexed market" : "View fixture market"}
-                </Link>
-                <span className={`mode-badge ${featured.mode}`}>
-                  {featured.mode === "self-burn"
-                    ? "Self-burn mode"
-                    : "Creator-fee mode"}
-                </span>
-              </div>
-            </div>
-
-            <div className="featured-chart">
-              <div className="chart-heading">
-                <div>
-                  <span>
-                    {marketMode === "live" ? "Last indexed price" : "Illustrative price"}
+                <p>{featured.description}</p>
+                <div className="featured-actions">
+                  <Link
+                    className="button button-accent"
+                    href={`/token/${featured.slug}`}
+                  >
+                    {marketMode === "live" ? "View indexed market" : "View fixture market"}
+                  </Link>
+                  <span className={`mode-badge ${featured.mode}`}>
+                    {featured.mode === "self-burn"
+                      ? "Self-burn mode"
+                      : "Creator-fee mode"}
                   </span>
-                  <strong>{formatTokenPrice(featured)}</strong>
                 </div>
-                <Change token={featured} />
               </div>
-              {featured.chart.length > 1 ? (
-                <Sparkline
-                  values={featured.chart}
-                  positive={(tokenChangeDirection(featured) ?? 0) >= 0}
-                  label={`${featured.name} illustrative 24 hour price trend`}
-                />
-              ) : (
-                <p className="market-metric-unavailable">
-                  Price history is unavailable until chart indexing is enabled.
-                </p>
-              )}
-              <div className="chart-axis" aria-hidden="true">
-                <span>24h ago</span>
-                <span>Now</span>
-              </div>
-            </div>
 
-            <dl className="featured-stats">
-              <div>
-                <dt>Market cap</dt>
-                <dd>
-                  {featured.marketCap === null
-                    ? "Unavailable"
-                    : compactMoney(featured.marketCap)}
-                </dd>
+              <div className="featured-chart">
+                <div className="chart-heading">
+                  <div>
+                    <span>
+                      {marketMode === "live" ? "Last indexed price" : "Illustrative price"}
+                    </span>
+                    <strong>{formatTokenPrice(featured)}</strong>
+                  </div>
+                  <Change token={featured} />
+                </div>
+                {featured.chart.length > 1 ? (
+                  <Sparkline
+                    values={featured.chart}
+                    positive={(tokenChangeDirection(featured) ?? 0) >= 0}
+                    label={`${featured.name} illustrative 24 hour price trend`}
+                  />
+                ) : (
+                  <p className="market-metric-unavailable">
+                    Price history is unavailable until chart indexing is enabled.
+                  </p>
+                )}
+                <div className="chart-axis" aria-hidden="true">
+                  <span>24h ago</span>
+                  <span>Now</span>
+                </div>
               </div>
-              <div>
-                <dt>24h volume</dt>
-                <dd>{formatTokenVolume(featured)}</dd>
-              </div>
-              <div>
-                <dt>Liquidity</dt>
-                <dd>
-                  {featured.liquidity === null
-                    ? "Unavailable"
-                    : compactMoney(featured.liquidity)}
-                </dd>
-              </div>
-              <div>
-                <dt>Holders</dt>
-                <dd>
-                  {featured.holders === null
-                    ? "Unavailable"
-                    : compactNumber(featured.holders)}
-                </dd>
-              </div>
-            </dl>
-          </div>
-          </article>
-        ) : (
-          <article className="featured-token empty-state">
-            <h2>{refreshState === "refreshing" ? "Loading the live pipe…" : "No indexed launches yet."}</h2>
-            <p>
-              {refreshState === "error"
-                ? "The live market API is unavailable. Fixture data was not substituted."
-                : "This space fills only from verified LayPipe factory events."}
-            </p>
-          </article>
-        )}
+
+              <dl className="featured-stats">
+                <div>
+                  <dt>Market cap</dt>
+                  <dd>
+                    {featured.marketCap === null
+                      ? "Unavailable"
+                      : compactMoney(featured.marketCap)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>24h volume</dt>
+                  <dd>{formatTokenVolume(featured)}</dd>
+                </div>
+                <div>
+                  <dt>Liquidity</dt>
+                  <dd>
+                    {featured.liquidity === null
+                      ? "Unavailable"
+                      : compactMoney(featured.liquidity)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Holders</dt>
+                  <dd>
+                    {featured.holders === null
+                      ? "Unavailable"
+                      : compactNumber(featured.holders)}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <div
+              id="featured-market-panel"
+              className="empty-state"
+              role="tabpanel"
+              aria-labelledby={`feature-tab-${featureTab}`}
+              aria-live="polite"
+            >
+              <h2>
+                {refreshState === "refreshing"
+                  ? "Loading the live pipe…"
+                  : tokens.length === 0
+                    ? "No indexed launches yet."
+                    : featureTab === "hot"
+                      ? "No indexed trades yet."
+                      : featureTab === "mover"
+                        ? "No eligible 24h mover yet."
+                        : "Newest launch unavailable."}
+              </h2>
+              <p>
+                {refreshState === "error"
+                  ? "The live market API is unavailable. Fixture data was not substituted."
+                  : tokens.length === 0
+                    ? "This space fills only from verified LayPipe factory events."
+                    : featureTab === "hot"
+                      ? "Most traded appears after the first qualifying indexed swap."
+                      : featureTab === "mover"
+                        ? "Biggest mover needs at least two qualifying indexed swaps in the trailing 24 hours."
+                        : "The global leader snapshot is waiting for the next caught-up indexer refresh."}
+              </p>
+            </div>
+          )}
+        </article>
       </section>
 
       <section className="protocol-strip" aria-label="Protocol preview stats">
@@ -591,22 +618,23 @@ export function MarketBoard() {
             <span>Sort</span>
             <select
               value={sort}
+              disabled={marketMode === "live"}
               onChange={(event) => {
                 setSort(event.target.value as SortMode);
                 setPage(1);
               }}
             >
-              <option value="hot">
-                {marketMode === "live" ? "Most traded" : "Hot"}
-              </option>
-              <option value="market-cap" disabled={marketMode === "live"}>
-                Market cap{marketMode === "live" ? " (unavailable)" : ""}
-              </option>
-              <option value="newest">Newest</option>
-              <option value="volume">24h volume</option>
-              <option value="gainers">
-                Biggest mover
-              </option>
+              {marketMode === "live" ? (
+                <option value="newest">Newest indexed first</option>
+              ) : (
+                <>
+                  <option value="hot">Hot</option>
+                  <option value="market-cap">Market cap</option>
+                  <option value="newest">Newest</option>
+                  <option value="volume">24h volume</option>
+                  <option value="gainers">Biggest mover</option>
+                </>
+              )}
             </select>
           </label>
 
@@ -683,10 +711,13 @@ export function MarketBoard() {
 
         <div className="results-meta" aria-live="polite">
           <span>
-            {filteredTokens.length} {marketMode === "live" ? "indexed" : "fixture"}{" "}
+            {filteredTokens.length} {marketMode === "live" ? "loaded indexed" : "fixture"}{" "}
             {filteredTokens.length === 1 ? "coin" : "coins"}
           </span>
           <span>
+            {marketMode === "live"
+              ? "Search and filters apply to loaded newest pages only \u00b7 "
+              : ""}
             {refreshState === "refreshing"
               ? `Refreshing ${marketMode === "live" ? "live index" : "fixture adapter"}…`
               : refreshState === "error"

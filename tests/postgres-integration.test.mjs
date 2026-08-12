@@ -131,6 +131,10 @@ const WATERMARK_COLUMNS = [
   "stream", "next_block", "last_processed_block", "last_processed_hash",
   "observed_safe_head", "observed_at", "last_run_status", "updated_at",
 ];
+const LEADER_SNAPSHOT_COLUMNS = [
+  "chain_id", "snapshot_block", "snapshot_hash", "snapshot_at", "refreshed_at",
+];
+const LEADER_TOKEN_COLUMNS = ["leader_kind", ...TOKEN_COLUMNS];
 const WALLET_POSITION_COLUMNS = [
   "token_address", "pool_id", "name", "symbol", "logo_uri",
   "approved_logo_cid", "fee_mode", "launched_at", "block_number", "log_index",
@@ -230,7 +234,11 @@ test(
       });
     assert.deepEqual(
       migrations.map(({ name }) => name),
-      ["0000_production_read_model.sql", "0001_runtime_security.sql"],
+      [
+        "0000_production_read_model.sql",
+        "0001_runtime_security.sql",
+        "0002_market_leader_snapshot.sql",
+      ],
     );
     const container = `laypipe-pg-${process.pid}-${randomBytes(4).toString("hex")}`;
     let started = false;
@@ -629,6 +637,24 @@ WHERE chain_id = 4663 AND stream = 'laypipe';
             WATERMARK_COLUMNS,
           );
         }
+        if (sql === readModel.MARKET_LEADER_SNAPSHOT_SQL) {
+          return preparedQuery(
+            container,
+            sql,
+            ["bigint"],
+            parameters,
+            LEADER_SNAPSHOT_COLUMNS,
+          );
+        }
+        if (sql === readModel.MARKET_LEADERS_SQL) {
+          return preparedQuery(
+            container,
+            sql,
+            ["bigint"],
+            parameters,
+            LEADER_TOKEN_COLUMNS,
+          );
+        }
         throw new Error("Unexpected read-model SQL in PostgreSQL integration test.");
       };
       const database = {
@@ -663,6 +689,9 @@ WHERE chain_id = 4663 AND stream = 'laypipe';
       assert.equal(list.tokens[0].metrics.volume24hPipedog.value, "3000000000000000000");
       assert.equal(list.tokens[0].metrics.trades24h.value, 1);
       assert.equal(list.tokens[0].metrics.totalTrades.value, 1);
+      assert.equal(list.leaders.mostTraded?.tokenAddress, token);
+      assert.equal(list.leaders.newest?.tokenAddress, token);
+      assert.equal(list.leaders.biggestMover, null);
 
       await psql(container, `
 INSERT INTO chain_events (
@@ -787,7 +816,10 @@ WHERE s.chain_id = 4663 AND s.pool_id = '${pool}' AND s.token_amount > 0
 ORDER BY s.block_timestamp DESC, s.block_number DESC, s.log_index DESC
 LIMIT 1;
 `);
-      assert.match(swapPlan.stdout, /Index Only Scan using swaps_pool_market_metrics_idx/);
+      assert.match(
+        swapPlan.stdout,
+        /Index Only Scan using (?:swaps_pool_market_metrics_idx|swaps_market_window_idx)/,
+      );
 
       const artworkPlan = await psql(container, `
 SET enable_seqscan = off;

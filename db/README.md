@@ -29,6 +29,16 @@ permanent Pinata promotion tags.
 - `pool_market_totals` is trigger-maintained on canonical swap insert/delete,
   so total-trade reads are constant per selected pool and reorg rollback repairs
   the aggregate automatically.
+- `market_leader_snapshots` and `market_leader_entries` materialize only the
+  three board leaders: trailing-24-hour most traded, newest, and biggest
+  positive price mover. A fixed trigger runs only after a caught-up `laypipe`
+  cursor observation and no more than once per minute per chain. Each snapshot
+  references its exact canonical block identity, so a reorg cascade deletes the
+  snapshot and every populated leader entry before replay. Missing, stale, or deleted
+  snapshots fail new public leader reads closed; an already cached successful
+  list response may remain at the CDN edge for its 10-second TTL plus 20-second
+  stale window. Request handlers read at most three entry rows rather than
+  globally ranking swaps.
 - `ipfs_promotions` is the immutable allowlist of image/metadata CID pairs
   completed by LayPipe's normalized, wallet-authorized promotion flow. Public
   market and portfolio SQL exposes an artwork CID only when both indexed URIs
@@ -91,9 +101,10 @@ database branch so each instance re-attests before serving live data.
 Until those roles are provisioned, keep live market,
 pinning, and indexer switches disabled.
 
-The migration includes the exact composite ordering index used by launch
-keyset pagination and a partial covering swap index for positive-token market
-metrics. Wallet portfolio reads are same-origin, no-store JSON `POST` requests;
+The migrations include the exact composite ordering index used by launch
+keyset pagination, a partial covering per-pool swap index, and a time-leading
+partial covering index used by the once-per-minute global leader refresh.
+Wallet portfolio reads are same-origin, no-store JSON `POST` requests;
 the address stays out of the URL, and Upstash applies both an IP limit and a
 separate IP-wallet limit before Neon opens. Missing or degraded Upstash fails
 this route closed in production. The wallet SQL rejects a stale watermark
@@ -102,11 +113,15 @@ uses `token_holder_balance_state_pkey`, `admin_events_creator_subject_idx`, and
 `admin_events_creator_pool_idx` for its bounded candidate set.
 
 Before live promotion, run `EXPLAIN (ANALYZE, BUFFERS)` on
-`TOKEN_LIST_SQL` and `TOKEN_DETAIL_SQL` against representative Preview volume.
+`TOKEN_LIST_SQL`, `TOKEN_DETAIL_SQL`, and the leader-refresh query against
+representative Preview volume.
 The selected-launch scan should use `launches_market_page_idx`, and per-pool
 latest/24-hour swap work should use `swaps_pool_market_metrics_idx` rather than
 sequentially scanning all swaps. Capture the plans and table cardinalities in
-the release evidence. Confirm the creator-bound CID-pair lateral join uses
+the release evidence. The leader refresh should use `swaps_market_window_idx`
+to bound its positive-token 24-hour window; monitor refresh duration and do not
+reduce the one-minute throttle without a fresh load test. Confirm the
+creator-bound CID-pair lateral join uses
 `ipfs_promotions_creator_completed_cids_idx` and that a one-URI mismatch or CID
 pair copied by a different creator returns no approved artwork. Also run
 `WALLET_POSITIONS_SQL` for a holder, an original
@@ -201,7 +216,10 @@ database URL, complete audited manifest, and a 32-byte cron secret are required.
 The default 10-block batch is compatible with Alchemy's Robinhood free-tier
 `eth_getLogs` range. One wake-up catches up at most 25 such batches (250 blocks)
 within the 45-second internal deadline and pins one finalized safe head plus one
-complete audited-manifest preflight for that invocation. The watched launch set
+complete audited-manifest preflight for that invocation. Its ingestion/RPC
+boundary reserves the final 22 seconds for an in-flight canonical write, the
+terminal observation and leader refresh, response serialization, and lease
+release inside the 60-second route. The watched launch set
 is capped at
 `INDEXER_FILTER_CHUNK_SIZE * INDEXER_MAX_FILTER_CHUNKS` (2,500 by default);
 crossing it stops before cursor advancement and requires an intentionally

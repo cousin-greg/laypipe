@@ -55,6 +55,11 @@ import { createHttpIndexerRpc } from "./rpc";
 const STREAM = "laypipe";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const LAYPIPE_TOKEN_SUFFIX = "cc";
+// A batch already in flight can consume the ten-second database write deadline,
+// and publishing a caught-up observation can consume another ten seconds while
+// refreshing the global leader projection. Keep two more seconds for response
+// serialization and lease release inside the 60-second Vercel route.
+export const INDEXER_FINALIZATION_RESERVE_MS = 22_000;
 
 export interface IndexerRuntimeConfig {
   finalityBlocks: number;
@@ -898,9 +903,14 @@ export async function runCanonicalIndexer(options?: {
   const manifest = catchupManifest(env, options?.manifest);
   const now = options?.now ?? Date.now;
   const deadlineAt = now() + config.runTimeoutMs;
+  const finalizationReserveMs = Math.min(
+    INDEXER_FINALIZATION_RESERVE_MS,
+    Math.max(0, config.runTimeoutMs - 1_000),
+  );
+  const ingestionDeadlineAt = deadlineAt - finalizationReserveMs;
   const rpc = createHttpIndexerRpc({
     url: env.ROBINHOOD_RPC_HTTP_URL,
-    deadlineAt,
+    deadlineAt: ingestionDeadlineAt,
     fetcher: options?.fetcher,
   });
   const syncOnce = options?.syncOnce ?? syncCanonicalIndexerOnce;
@@ -937,9 +947,10 @@ export async function runCanonicalIndexer(options?: {
   let lastResult: Awaited<ReturnType<typeof syncCanonicalIndexerOnce>> | null = null;
 
   while (batches < config.maxBatchesPerRun) {
-    // Leave two seconds for route serialization and the finally-block lease
-    // release. The loop is also statically capped even if a mocked clock stalls.
-    if (now() >= deadlineAt - 2_000) break;
+    // Stop before the route budget is consumed so an in-flight canonical write,
+    // terminal observation/leader refresh, response, and lease release fit.
+    // The loop is also statically capped even if a mocked clock stalls.
+    if (now() >= ingestionDeadlineAt) break;
     const result = await syncOnce({
       rpc,
       manifest,
@@ -974,7 +985,7 @@ export async function runCanonicalIndexer(options?: {
     status:
       lastResult.status === "idle" || caughtUp
         ? ("caught-up" as const)
-        : now() >= deadlineAt - 2_000
+        : now() >= ingestionDeadlineAt
           ? ("deadline" as const)
           : ("bounded" as const),
     safeHead: lastResult.safeHead,

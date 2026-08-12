@@ -98,10 +98,23 @@ function readyWatermarkRow(overrides = {}) {
   };
 }
 
+function readyLeaderSnapshotRow(overrides = {}) {
+  return {
+    chain_id: "4663",
+    snapshot_block: "124",
+    snapshot_hash: hash("a"),
+    snapshot_at: new Date().toISOString(),
+    refreshed_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 function databaseFor({
   tokenRows = [],
   watermarkRows = [readyWatermarkRow()],
   snapshotWatermarkRows = watermarkRows,
+  leaderSnapshotRows = [readyLeaderSnapshotRow()],
+  leaderRows = [],
 } = {}) {
   const calls = [];
   return {
@@ -115,9 +128,14 @@ function databaseFor({
       const transaction = {
         async query(sql, params = [], queryOptions) {
           calls.push({ sql, params, options: queryOptions, inTransaction: true });
+          if (sql === readModel.INDEXER_WATERMARK_SQL) return watermarkRows;
           if (sql === readModel.MARKET_SNAPSHOT_WATERMARK_SQL) {
             return snapshotWatermarkRows;
           }
+          if (sql === readModel.MARKET_LEADER_SNAPSHOT_SQL) {
+            return leaderSnapshotRows;
+          }
+          if (sql === readModel.MARKET_LEADERS_SQL) return leaderRows;
           return tokenRows;
         },
       };
@@ -207,6 +225,11 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   assert.doesNotMatch(tokenCall.sql, new RegExp(address("a")));
   assert.equal(result.tokens[0].metrics.volume24hPipedog.value, "0");
   assert.equal(result.tokens[0].metrics.volume24hPipedog.status, "observed");
+  assert.deepEqual(result.leaders, {
+    mostTraded: null,
+    newest: null,
+    biggestMover: null,
+  });
   assert.equal(result.tokens[0].metrics.marketCapUsd.status, "unavailable");
   assert.equal(result.tokens[0].metrics.marketCapUsd.value, null);
   assert.match(tokenCall.sql, /WITH watermark AS MATERIALIZED/);
@@ -266,11 +289,79 @@ test("market response uses the watermark and token rows from one concurrent snap
   assert.equal(result.indexer.lastProcessedBlock, "126");
   assert.equal(result.tokens[0].blockNumber, "125");
   assert.deepEqual(
-    database.calls.slice(1, 3).map((call) => ({ sql: call.sql, inTransaction: call.inTransaction })),
+    database.calls.slice(1, 5).map((call) => ({ sql: call.sql, inTransaction: call.inTransaction })),
     [
       { sql: readModel.MARKET_SNAPSHOT_WATERMARK_SQL, inTransaction: true },
+      { sql: readModel.MARKET_LEADER_SNAPSHOT_SQL, inTransaction: true },
       { sql: readModel.TOKEN_LIST_SQL, inTransaction: true },
+      { sql: readModel.MARKET_LEADERS_SQL, inTransaction: true },
     ],
+  );
+});
+
+test("leader snapshot is canonical, bounded, and does not multiply shared-token metrics", async () => {
+  const shared = liveTokenRow({
+    volume_24h_pipedog: "123456789012345678901234567890",
+    trades_24h: "3",
+  });
+  const database = databaseFor({
+    tokenRows: [shared],
+    leaderRows: [
+      { ...shared, leader_kind: "most-traded" },
+      { ...shared, leader_kind: "newest" },
+      { ...shared, leader_kind: "biggest-mover" },
+    ],
+  });
+  const result = await readModel.listLiveTokens(database, { limit: 10, cursor: null });
+  assert.equal(result.leaders.mostTraded.metrics.volume24hPipedog.value, shared.volume_24h_pipedog);
+  assert.equal(result.leaders.newest.metrics.trades24h.value, 3);
+  assert.equal(result.leaders.biggestMover.tokenAddress, shared.token_address);
+  assert.match(readModel.MARKET_LEADERS_SQL, /SELECT DISTINCT chain_id, token_address/);
+  assert.match(readModel.MARKET_LEADERS_SQL, /LIMIT 3/);
+  assert.match(readModel.MARKET_LEADER_SNAPSHOT_SQL, /block\.block_hash = snapshot\.snapshot_hash/);
+  assert.match(readModel.MARKET_LEADER_SNAPSHOT_SQL, /snapshot\.snapshot_block <= cursor\.last_processed_block/);
+});
+
+test("live list fails closed for missing, stale, future, or noncanonical leader snapshots", async () => {
+  const now = new Date("2026-08-11T12:10:00.000Z").getTime();
+  const watermark = readyWatermarkRow({
+    observed_at: "2026-08-11T12:09:59.000Z",
+    updated_at: "2026-08-11T12:09:59.000Z",
+  });
+  const base = readyLeaderSnapshotRow({
+    snapshot_at: "2026-08-11T12:09:59.000Z",
+    refreshed_at: "2026-08-11T12:09:59.000Z",
+  });
+  for (const leaderSnapshotRows of [
+    [],
+    [{ ...base, refreshed_at: "2026-08-11T12:04:59.000Z" }],
+    [{ ...base, snapshot_at: "2026-08-11T12:10:31.000Z" }],
+    [{ ...base, snapshot_block: "125" }],
+  ]) {
+    await assert.rejects(
+      readModel.listLiveTokens(databaseFor({
+        watermarkRows: [watermark],
+        snapshotWatermarkRows: [watermark],
+        leaderSnapshotRows,
+      }), { limit: 10, cursor: null }, undefined, now),
+      /leader snapshot/,
+    );
+  }
+});
+
+test("24-hour volume accepts bounded canonical aggregates above uint256", async () => {
+  const aboveUint256 = (BigInt(1) << BigInt(256)).toString();
+  const result = await readModel.listLiveTokens(databaseFor({
+    tokenRows: [liveTokenRow({ volume_24h_pipedog: aboveUint256 })],
+  }), { limit: 10, cursor: null });
+  assert.equal(result.tokens[0].metrics.volume24hPipedog.value, aboveUint256);
+  assert.throws(
+    () => readModel.normalizeUnsignedAggregate(`1${"0".repeat(156)}`, "Aggregate"),
+    /invalid/,
+  );
+  assert.throws(
+    () => readModel.normalizeUnsignedAggregate("01", "Aggregate"),
+    /invalid/,
   );
 });
 
@@ -476,6 +567,12 @@ test("live health requires a recent indexer cursor and rejects stale or future w
             updated_at: "2026-08-11T12:10:00.000Z",
           }),
         ],
+        leaderSnapshotRows: [
+          readyLeaderSnapshotRow({
+            snapshot_at: "2026-08-11T12:10:00.000Z",
+            refreshed_at: "2026-08-11T12:10:00.000Z",
+          }),
+        ],
       }),
   });
   assert.equal(ready.status, 200);
@@ -494,6 +591,41 @@ test("live health requires a recent indexer cursor and rejects stale or future w
     maxBlockLag: 2,
   });
   assert.equal(body.indexer.cursor.lastProcessedBlock, "124");
+  assert.deepEqual(body.leaders, {
+    status: "ready",
+    snapshot: {
+      chainId: 4663,
+      blockNumber: "124",
+      blockHash: hash("a"),
+      snapshotAt: "2026-08-11T12:10:00.000Z",
+      refreshedAt: "2026-08-11T12:10:00.000Z",
+    },
+  });
+
+  const missingLeaders = await http.handleMarketHealthRequest({
+    marketMode: () => "live",
+    now: () => now,
+    database: async () =>
+      databaseFor({
+        watermarkRows: [
+          readyWatermarkRow({
+            observed_at: "2026-08-11T12:10:00.000Z",
+            updated_at: "2026-08-11T12:10:00.000Z",
+          }),
+        ],
+        leaderSnapshotRows: [],
+      }),
+  });
+  assert.equal(missingLeaders.status, 503);
+  const missingLeadersBody = await missingLeaders.json();
+  assert.equal(missingLeadersBody.status, "not_ready");
+  assert.equal(missingLeadersBody.readyForLiveMarkets, false);
+  assert.equal(missingLeadersBody.database.status, "reachable");
+  assert.equal(missingLeadersBody.indexer.status, "ready");
+  assert.deepEqual(missingLeadersBody.leaders, {
+    status: "missing",
+    snapshot: null,
+  });
 
   const regressedHead = await http.handleMarketHealthRequest({
     marketMode: () => "live",

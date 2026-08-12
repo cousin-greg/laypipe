@@ -21,8 +21,15 @@ export const TOKEN_LIST_MAX_LIMIT = 50;
 export const MARKET_INDEXER_STALE_AFTER_MS = 5 * 60 * 1_000;
 export const MARKET_INDEXER_MAX_CLOCK_SKEW_MS = 30 * 1_000;
 export const MARKET_INDEXER_MAX_BLOCK_LAG = 2;
+export const MARKET_AGGREGATE_MAX_DECIMAL_DIGITS = 156;
 const INDEXER_STREAM = "laypipe";
 const CURSOR_DOMAIN = "laypipe.market.cursor.v1";
+const MARKET_LEADER_KINDS = [
+  "most-traded",
+  "newest",
+  "biggest-mover",
+] as const;
+type MarketLeaderKind = (typeof MARKET_LEADER_KINDS)[number];
 
 export class MarketInputError extends Error {}
 
@@ -189,7 +196,8 @@ const MARKET_SNAPSHOT_WATERMARK_CTE = `watermark AS MATERIALIZED (
     AND c.observed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'
 )`;
 
-const TOKEN_METRICS_CTES = `
+function tokenMetricsCtes(extraSelectedColumns = "") {
+  return `
 , latest_swap AS (
   SELECT DISTINCT ON (s.pool_id)
     s.pool_id, s.pipedog_amount::text AS last_pipedog_amount,
@@ -226,7 +234,7 @@ const TOKEN_METRICS_CTES = `
     AND s.block_timestamp <= w.last_processed_at
   GROUP BY s.pool_id
 )
-SELECT p.chain_id::text, p.token_address, p.pool_id, p.creator_address,
+SELECT ${extraSelectedColumns}p.chain_id::text, p.token_address, p.pool_id, p.creator_address,
   p.config_id::text, p.first_buy_in::text, p.first_buy_out::text,
   p.hook_address, p.fee_recipient_address, p.fee_mode, p.name, p.symbol,
   p.description, p.logo_uri, p.metadata_uri, approved_artwork.image_cid AS approved_logo_cid,
@@ -254,6 +262,9 @@ LEFT JOIN baseline_swap bs ON bs.pool_id = p.pool_id
 LEFT JOIN swap_stats ss ON ss.pool_id = p.pool_id
 LEFT JOIN pool_market_totals mt
   ON mt.chain_id = p.chain_id AND mt.pool_id = p.pool_id`;
+}
+
+const TOKEN_METRICS_CTES = tokenMetricsCtes();
 
 export const TOKEN_LIST_SQL = `
 WITH ${MARKET_SNAPSHOT_WATERMARK_CTE}, selected AS (
@@ -311,6 +322,87 @@ WHERE c.chain_id = $1::bigint AND c.stream = $2::text
   AND c.observed_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
   AND c.observed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'`;
 
+const MARKET_LEADER_SNAPSHOT_PREDICATE = `
+  snapshot.chain_id = $1::bigint
+  AND cursor.stream = '${INDEXER_STREAM}'
+  AND cursor.last_processed_block IS NOT NULL
+  AND cursor.last_processed_hash IS NOT NULL
+  AND cursor.observed_safe_head IS NOT NULL
+  AND cursor.observed_at IS NOT NULL
+  AND cursor.last_run_status = 'caught-up'
+  AND snapshot.snapshot_block <= cursor.last_processed_block
+  AND cursor.observed_safe_head >= cursor.last_processed_block
+  AND cursor.observed_safe_head - cursor.last_processed_block <= ${MARKET_INDEXER_MAX_BLOCK_LAG}
+  AND cursor.observed_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
+  AND cursor.observed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'
+  AND snapshot.snapshot_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
+  AND snapshot.snapshot_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'
+  AND snapshot.refreshed_at >= transaction_timestamp() - interval '${MARKET_INDEXER_STALE_AFTER_MS / 1_000} seconds'
+  AND snapshot.refreshed_at <= transaction_timestamp() + interval '${MARKET_INDEXER_MAX_CLOCK_SKEW_MS / 1_000} seconds'`;
+
+export const MARKET_LEADER_SNAPSHOT_SQL = `
+SELECT snapshot.chain_id::text, snapshot.snapshot_block::text,
+  snapshot.snapshot_hash, snapshot.snapshot_at::text, snapshot.refreshed_at::text
+FROM market_leader_snapshots snapshot
+JOIN indexer_cursors cursor ON cursor.chain_id = snapshot.chain_id
+JOIN chain_blocks block
+  ON block.chain_id = snapshot.chain_id
+  AND block.block_number = snapshot.snapshot_block
+  AND block.block_hash = snapshot.snapshot_hash
+WHERE ${MARKET_LEADER_SNAPSHOT_PREDICATE}`;
+
+const MARKET_LEADER_WATERMARK_CTE = `watermark AS MATERIALIZED (
+  SELECT snapshot.snapshot_block AS last_processed_block,
+    block.block_timestamp AS last_processed_at
+  FROM market_leader_snapshots snapshot
+  JOIN indexer_cursors cursor ON cursor.chain_id = snapshot.chain_id
+  JOIN chain_blocks block
+    ON block.chain_id = snapshot.chain_id
+    AND block.block_number = snapshot.snapshot_block
+    AND block.block_hash = snapshot.snapshot_hash
+  WHERE ${MARKET_LEADER_SNAPSHOT_PREDICATE}
+)`;
+
+export const MARKET_LEADERS_SQL = `
+WITH leader_refs AS MATERIALIZED (
+  SELECT entry.chain_id, entry.leader_kind, entry.token_address
+  FROM market_leader_entries entry
+  WHERE entry.chain_id = $1::bigint
+    AND entry.leader_kind IN ('most-traded', 'newest', 'biggest-mover')
+  ORDER BY CASE entry.leader_kind
+    WHEN 'most-traded' THEN 1
+    WHEN 'newest' THEN 2
+    WHEN 'biggest-mover' THEN 3
+    ELSE 4
+  END
+  LIMIT 3
+), leader_metrics AS MATERIALIZED (
+  WITH ${MARKET_LEADER_WATERMARK_CTE}, selected AS (
+    SELECT launch.*
+    FROM launches launch
+    JOIN (
+      SELECT DISTINCT chain_id, token_address
+      FROM leader_refs
+    ) leader_token
+      ON leader_token.chain_id = launch.chain_id
+      AND leader_token.token_address = launch.token_address
+    CROSS JOIN watermark
+    WHERE launch.block_number <= watermark.last_processed_block
+  )
+  ${TOKEN_METRICS_CTES}
+)
+SELECT leader_refs.leader_kind, leader_metrics.*
+FROM leader_refs
+JOIN leader_metrics
+  ON leader_metrics.chain_id::bigint = leader_refs.chain_id
+  AND leader_metrics.token_address = leader_refs.token_address
+ORDER BY CASE leader_refs.leader_kind
+  WHEN 'most-traded' THEN 1
+  WHEN 'newest' THEN 2
+  WHEN 'biggest-mover' THEN 3
+  ELSE 4
+END`;
+
 interface TokenRow extends DbRow {
   chain_id: string;
   token_address: string;
@@ -342,6 +434,26 @@ interface TokenRow extends DbRow {
   total_trades: string;
 }
 
+interface LeaderTokenRow extends TokenRow {
+  leader_kind: string;
+}
+
+interface LeaderSnapshotRow extends DbRow {
+  chain_id: string;
+  snapshot_block: string;
+  snapshot_hash: string;
+  snapshot_at: string;
+  refreshed_at: string;
+}
+
+export interface MarketLeaderSnapshot {
+  chainId: number;
+  blockNumber: string;
+  blockHash: `0x${string}`;
+  snapshotAt: string;
+  refreshedAt: string;
+}
+
 interface WatermarkRow extends DbRow {
   stream: string;
   next_block: string;
@@ -365,6 +477,16 @@ function count(value: string, label: string) {
   const numeric = Number(normalized);
   if (!Number.isSafeInteger(numeric)) throw new Error(`${label} is too large to serialize.`);
   return numeric;
+}
+
+export function normalizeUnsignedAggregate(value: unknown, label: string) {
+  if (
+    typeof value !== "string" ||
+    !new RegExp(`^(0|[1-9][0-9]{0,${MARKET_AGGREGATE_MAX_DECIMAL_DIGITS - 1}})$`).test(value)
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return value;
 }
 
 function nullableText(value: unknown, label: string) {
@@ -467,7 +589,10 @@ function mapToken(row: TokenRow): LiveMarketToken {
       ),
       volume24hPipedog: {
         status: "observed",
-        value: normalizeUint256(row.volume_24h_pipedog, "Indexed 24-hour volume"),
+        value: normalizeUnsignedAggregate(
+          row.volume_24h_pipedog,
+          "Indexed 24-hour volume",
+        ),
         basis: "Sum of PIPEDOG amounts in indexed swaps during the trailing 24 hours; zero means no such swaps were observed.",
       },
       trades24h: {
@@ -541,6 +666,74 @@ function mapWatermark(row: WatermarkRow): IndexerWatermark {
   };
 }
 
+function requireLeaderSnapshot(
+  row: LeaderSnapshotRow,
+  indexer: IndexerWatermark,
+  nowMs: number,
+): MarketLeaderSnapshot {
+  const chainId = count(row.chain_id, "Market leader snapshot chain ID");
+  const snapshotBlock = normalizeUint256(
+    row.snapshot_block,
+    "Market leader snapshot block",
+  );
+  const snapshotHash = normalizeBytes32(
+    row.snapshot_hash,
+    "Market leader snapshot hash",
+  );
+  const snapshotAt = timestamp(row.snapshot_at, "Market leader snapshot time");
+  const refreshedAt = timestamp(row.refreshed_at, "Market leader refresh time");
+  if (
+    chainId !== LAYPIPE_CHAIN_ID ||
+    indexer.lastProcessedBlock === null ||
+    BigInt(snapshotBlock) > BigInt(indexer.lastProcessedBlock)
+  ) {
+    throw new Error("Live market leader snapshot is not canonical.");
+  }
+  for (const value of [snapshotAt, refreshedAt]) {
+    const ageMs = nowMs - new Date(value).getTime();
+    if (
+      ageMs > MARKET_INDEXER_STALE_AFTER_MS ||
+      ageMs < -MARKET_INDEXER_MAX_CLOCK_SKEW_MS
+    ) {
+      throw new Error("Live market leader snapshot is not fresh.");
+    }
+  }
+  return {
+    chainId,
+    blockNumber: snapshotBlock,
+    blockHash: snapshotHash,
+    snapshotAt,
+    refreshedAt,
+  };
+}
+
+function isMarketLeaderKind(value: string): value is MarketLeaderKind {
+  return (MARKET_LEADER_KINDS as readonly string[]).includes(value);
+}
+
+function mapMarketLeaders(rows: LeaderTokenRow[]) {
+  if (rows.length > MARKET_LEADER_KINDS.length) {
+    throw new Error("Live market leader snapshot is invalid.");
+  }
+  const leaders: LiveTokenListResponse["leaders"] = {
+    mostTraded: null,
+    newest: null,
+    biggestMover: null,
+  };
+  const seen = new Set<MarketLeaderKind>();
+  for (const row of rows) {
+    if (!isMarketLeaderKind(row.leader_kind) || seen.has(row.leader_kind)) {
+      throw new Error("Live market leader snapshot is invalid.");
+    }
+    seen.add(row.leader_kind);
+    const token = mapToken(row);
+    if (row.leader_kind === "most-traded") leaders.mostTraded = token;
+    else if (row.leader_kind === "newest") leaders.newest = token;
+    else leaders.biggestMover = token;
+  }
+  return leaders;
+}
+
 async function loadWatermark(database: DbClient): Promise<IndexerWatermark | null> {
   const rows = await database.query<WatermarkRow>(
     INDEXER_WATERMARK_SQL,
@@ -576,11 +769,16 @@ export async function listLiveTokens(
   }
   const cursor = options.cursor;
   await requireFreshMarketPrecheck(database, nowMs);
-  const [watermarkRows, rows] = await database.transaction(
+  const [watermarkRows, leaderSnapshotRows, rows, leaderRows] = await database.transaction(
     (transaction) => [
       transaction.query<WatermarkRow>(
         MARKET_SNAPSHOT_WATERMARK_SQL,
         [LAYPIPE_CHAIN_ID, INDEXER_STREAM],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+      transaction.query<LeaderSnapshotRow>(
+        MARKET_LEADER_SNAPSHOT_SQL,
+        [LAYPIPE_CHAIN_ID],
         databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
       ),
       transaction.query<TokenRow>(
@@ -592,6 +790,11 @@ export async function listLiveTokens(
           cursor?.tokenAddress ?? null,
           limit + 1,
         ],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+      transaction.query<LeaderTokenRow>(
+        MARKET_LEADERS_SQL,
+        [LAYPIPE_CHAIN_ID],
         databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
       ),
     ] as const,
@@ -607,12 +810,17 @@ export async function listLiveTokens(
   if (assessIndexerFreshness(indexer, nowMs).status !== "fresh") {
     throw new Error("Live market indexer is not ready.");
   }
+  if (leaderSnapshotRows.length !== 1) {
+    throw new Error("Live market leader snapshot is not ready.");
+  }
+  requireLeaderSnapshot(leaderSnapshotRows[0], indexer, nowMs);
   const visible = rows.slice(0, limit);
   const last = visible.at(-1);
   return {
     source: "live",
     chainId: LAYPIPE_CHAIN_ID,
     tokens: visible.map(mapToken),
+    leaders: mapMarketLeaders(leaderRows),
     page: {
       limit,
       nextCursor:
@@ -670,8 +878,43 @@ export async function getLiveToken(
   };
 }
 
-export async function getMarketHealth(database: DbClient) {
-  return loadWatermark(database);
+export async function getMarketHealth(
+  database: DbClient,
+  nowMs = Date.now(),
+) {
+  const [watermarkRows, leaderSnapshotRows] = await database.transaction(
+    (transaction) => [
+      transaction.query<WatermarkRow>(
+        INDEXER_WATERMARK_SQL,
+        [LAYPIPE_CHAIN_ID, INDEXER_STREAM],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+      transaction.query<LeaderSnapshotRow>(
+        MARKET_LEADER_SNAPSHOT_SQL,
+        [LAYPIPE_CHAIN_ID],
+        databaseFetchOptions(DATABASE_READ_TIMEOUT_MS),
+      ),
+    ] as const,
+    {
+      ...MARKET_SNAPSHOT_TRANSACTION_OPTIONS,
+      fetchOptions: { signal: AbortSignal.timeout(DATABASE_READ_TIMEOUT_MS) },
+    },
+  );
+  if (watermarkRows.length > 1 || leaderSnapshotRows.length > 1) {
+    throw new Error("Live market readiness state is invalid.");
+  }
+  const watermarkRow = watermarkRows[0];
+  const indexer = watermarkRow ? mapWatermark(watermarkRow) : null;
+  if (!indexer || assessIndexerFreshness(indexer, nowMs).status !== "fresh") {
+    return { indexer, leaderSnapshot: null };
+  }
+  const leaderSnapshotRow = leaderSnapshotRows[0];
+  return {
+    indexer,
+    leaderSnapshot: leaderSnapshotRow
+      ? requireLeaderSnapshot(leaderSnapshotRow, indexer, nowMs)
+      : null,
+  };
 }
 
 export type IndexerFreshness =

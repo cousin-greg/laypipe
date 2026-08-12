@@ -26,6 +26,7 @@ const database = loadTypeScript("lib/server/db/neon.ts");
 const fingerprint = [
   `0000_production_read_model.sql:${"a".repeat(64)}`,
   `0001_runtime_security.sql:${"b".repeat(64)}`,
+  `0002_market_leader_snapshot.sql:${"c".repeat(64)}`,
 ].join(",");
 
 function identity(access) {
@@ -37,7 +38,7 @@ function identity(access) {
     session_user: `laypipe_${access}_login`,
     current_user: `laypipe_${access}_login`,
     migration_fingerprint: fingerprint,
-    migration_count: "2",
+    migration_count: "3",
     expected_group: group,
     direct_memberships: group,
     in_expected_group: true,
@@ -162,8 +163,8 @@ test("runtime pair matching rejects reused credentials, marker, database, and le
     { session_user: read.session_user },
     { database_id: "22222222-2222-4222-8222-222222222222" },
     { database_name: "laypipe_clone" },
-    { migration_fingerprint: fingerprint.replace("b", "c") },
-    { migration_count: "3" },
+    { migration_fingerprint: fingerprint.replace("b".repeat(64), "d".repeat(64)) },
+    { migration_count: "4" },
   ]) {
     assert.throws(
       () => database.assertMatchingRuntimeDatabaseIdentities(read, { ...write, ...patch }),

@@ -71,6 +71,7 @@ BEGIN
             'public.laypipe_adjust_pool_market_totals()'::regprocedure::oid,
             'public.laypipe_apply_inserted_token_transfers()'::regprocedure::oid,
             'public.laypipe_apply_deleted_token_transfers()'::regprocedure::oid,
+            'public.laypipe_refresh_market_leaders()'::regprocedure::oid,
             'public.laypipe_initialize_cursor(bigint,text,bigint)'::regprocedure::oid,
             'public.laypipe_advance_cursor(bigint,text,bigint,bigint,evm_bytes32)'::regprocedure::oid,
             'public.laypipe_rollback_chain(bigint,bigint,evm_bytes32)'::regprocedure::oid,
@@ -133,7 +134,7 @@ GRANT SELECT ON
   chain_blocks, chain_events, indexer_cursors, launches, swaps,
   pool_market_totals, fee_events, burn_events, revenue_events,
   token_transfers, token_balances, token_holder_balance_state,
-  admin_events, ipfs_promotions
+  admin_events, ipfs_promotions, market_leader_snapshots, market_leader_entries
 TO ${read};
 
 -- Canonical replay requires UPDATE for ON CONFLICT, but immutable triggers
@@ -156,6 +157,7 @@ ALTER FUNCTION laypipe_enforce_cursor_observation() OWNER TO ${service};
 ALTER FUNCTION laypipe_adjust_pool_market_totals() OWNER TO ${service};
 ALTER FUNCTION laypipe_apply_inserted_token_transfers() OWNER TO ${service};
 ALTER FUNCTION laypipe_apply_deleted_token_transfers() OWNER TO ${service};
+ALTER FUNCTION laypipe_refresh_market_leaders() OWNER TO ${service};
 ALTER FUNCTION laypipe_initialize_cursor(bigint, text, bigint) OWNER TO ${service};
 ALTER FUNCTION laypipe_advance_cursor(bigint, text, bigint, bigint, evm_bytes32) OWNER TO ${service};
 ALTER FUNCTION laypipe_rollback_chain(bigint, bigint, evm_bytes32) OWNER TO ${service};
@@ -168,11 +170,15 @@ ALTER FUNCTION laypipe_enforce_cursor_observation() SECURITY DEFINER;
 ALTER FUNCTION laypipe_adjust_pool_market_totals() SECURITY DEFINER;
 ALTER FUNCTION laypipe_apply_inserted_token_transfers() SECURITY DEFINER;
 ALTER FUNCTION laypipe_apply_deleted_token_transfers() SECURITY DEFINER;
+ALTER FUNCTION laypipe_refresh_market_leaders() SECURITY DEFINER;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON
   chain_blocks, chain_events, launches, swaps, fee_events, burn_events,
   revenue_events, token_transfers, admin_events, indexer_cursors,
   pool_market_totals, token_holder_balance_state
+TO ${service};
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  market_leader_snapshots, market_leader_entries
 TO ${service};
 GRANT EXECUTE ON FUNCTION laypipe_initialize_cursor(bigint, text, bigint) TO ${service};
 GRANT EXECUTE ON FUNCTION laypipe_advance_cursor(bigint, text, bigint, bigint, evm_bytes32) TO ${service};
@@ -194,6 +200,7 @@ ALTER FUNCTION laypipe_enforce_cursor_observation() SET search_path = pg_catalog
 ALTER FUNCTION laypipe_adjust_pool_market_totals() SET search_path = pg_catalog, public;
 ALTER FUNCTION laypipe_apply_inserted_token_transfers() SET search_path = pg_catalog, public;
 ALTER FUNCTION laypipe_apply_deleted_token_transfers() SET search_path = pg_catalog, public;
+ALTER FUNCTION laypipe_refresh_market_leaders() SET search_path = pg_catalog, public;
 ALTER FUNCTION laypipe_reject_changed_immutable_row() SET search_path = pg_catalog, public;
 ALTER FUNCTION laypipe_initialize_cursor(bigint, text, bigint) SET search_path = pg_catalog, public;
 ALTER FUNCTION laypipe_advance_cursor(bigint, text, bigint, bigint, evm_bytes32) SET search_path = pg_catalog, public;
@@ -220,7 +227,7 @@ BEGIN
   IF has_schema_privilege('${serviceRole}', 'public', 'CREATE') THEN
     RAISE EXCEPTION 'LayPipe service role retained schema create privilege';
   END IF;
-  IF (SELECT count(*) FROM pg_proc WHERE proowner = service_oid) <> 11
+  IF (SELECT count(*) FROM pg_proc WHERE proowner = service_oid) <> 12
      OR EXISTS (
        SELECT 1 FROM pg_proc p
        WHERE p.proowner = service_oid AND p.oid NOT IN (
@@ -228,6 +235,7 @@ BEGIN
          'public.laypipe_adjust_pool_market_totals()'::regprocedure::oid,
          'public.laypipe_apply_inserted_token_transfers()'::regprocedure::oid,
          'public.laypipe_apply_deleted_token_transfers()'::regprocedure::oid,
+         'public.laypipe_refresh_market_leaders()'::regprocedure::oid,
          'public.laypipe_initialize_cursor(bigint,text,bigint)'::regprocedure::oid,
          'public.laypipe_advance_cursor(bigint,text,bigint,bigint,evm_bytes32)'::regprocedure::oid,
          'public.laypipe_rollback_chain(bigint,bigint,evm_bytes32)'::regprocedure::oid,

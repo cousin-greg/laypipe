@@ -15,8 +15,8 @@ import { trustedIpfsGatewayUrl } from "@/lib/ipfs/gateway";
 import {
   exactPercentChange,
   type ExactPercentChange,
+  requireBoundedUnsignedDecimal,
   requirePipedogPriceRatio,
-  requireUint256Decimal,
 } from "@/lib/market/exact-numbers";
 
 export type ProtocolConfig = {
@@ -108,6 +108,11 @@ export type BoardMarketSource = {
   mode: "fixture" | "live";
   label: string;
   tokens: BoardToken[];
+  leaders: {
+    mostTraded: BoardToken | null;
+    newest: BoardToken | null;
+    biggestMover: BoardToken | null;
+  };
   updatedAt: string | null;
   nextCursor: string | null;
 };
@@ -151,10 +156,24 @@ export const fixtureMarketAdapter: MarketDataAdapter = {
   },
 };
 
+const fixtureTokens = marketSource.tokens.map(fixtureToken);
+
+function fixtureLeaders(tokens: FixtureBoardToken[]): BoardMarketSource["leaders"] {
+  return {
+    mostTraded: [...tokens].sort((a, b) =>
+      b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
+      a.volume24h * (1 + Math.max(a.change24h, 0) / 100)
+    )[0] ?? null,
+    newest: [...tokens].sort((a, b) => a.ageHours - b.ageHours)[0] ?? null,
+    biggestMover: [...tokens].sort((a, b) => b.change24h - a.change24h)[0] ?? null,
+  };
+}
+
 export const fixtureBoardSource: BoardMarketSource = {
   mode: "fixture",
   label: marketSource.label,
-  tokens: marketSource.tokens.map(fixtureToken),
+  tokens: fixtureTokens,
+  leaders: fixtureLeaders(fixtureTokens),
   updatedAt: marketSource.updatedAt,
   nextCursor: null,
 };
@@ -211,10 +230,10 @@ function readObservedCount(value: unknown, label: string) {
   return metric.value as number;
 }
 
-function readObservedUint256(value: unknown, label: string) {
+function readObservedUnsignedAggregate(value: unknown, label: string) {
   const metric = requireObject(value, label);
   if (metric.status !== "observed") throw new Error(`${label} is invalid.`);
-  return requireUint256Decimal(metric.value, label);
+  return requireBoundedUnsignedDecimal(metric.value, label);
 }
 
 function elapsedHours(timestamp: string) {
@@ -248,7 +267,7 @@ export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
     token.metrics.totalTrades,
     "Indexed total trade count",
   );
-  const volume24h = readObservedUint256(
+  const volume24h = readObservedUnsignedAggregate(
     token.metrics.volume24hPipedog,
     "Indexed 24-hour PIPEDOG volume",
   );
@@ -291,6 +310,7 @@ export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
 function parseTokenList(payload: unknown): LiveTokenListResponse {
   const response = requireObject(payload, "Live market response");
   const page = requireObject(response.page, "Live market page");
+  const leaders = requireObject(response.leaders, "Live market leaders");
   const nextCursor = page.nextCursor;
   if (
     response.source !== "live" ||
@@ -306,6 +326,15 @@ function parseTokenList(payload: unknown): LiveTokenListResponse {
   return {
     ...(response as unknown as LiveTokenListResponse),
     tokens: response.tokens.map(requireLiveToken),
+    leaders: {
+      mostTraded: leaders.mostTraded === null
+        ? null
+        : requireLiveToken(leaders.mostTraded),
+      newest: leaders.newest === null ? null : requireLiveToken(leaders.newest),
+      biggestMover: leaders.biggestMover === null
+        ? null
+        : requireLiveToken(leaders.biggestMover),
+    },
   };
 }
 
@@ -336,10 +365,17 @@ export function createApiMarketAdapter(baseUrl = ""): MarketDataAdapter {
       }
 
       const payload = parseTokenList(await response.json());
+      const mapLeader = (token: LiveMarketToken | null) =>
+        token ? mapLiveTokenToBoardToken(token) : null;
       return {
         mode: "live",
         label: "Indexed Robinhood Chain markets",
         tokens: payload.tokens.map(mapLiveTokenToBoardToken),
+        leaders: {
+          mostTraded: mapLeader(payload.leaders.mostTraded),
+          newest: mapLeader(payload.leaders.newest),
+          biggestMover: mapLeader(payload.leaders.biggestMover),
+        },
         updatedAt: payload.indexer?.observedAt ?? payload.indexer?.updatedAt ?? null,
         nextCursor: payload.page.nextCursor,
       };

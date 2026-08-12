@@ -20,6 +20,7 @@ import {
 } from "@/lib/market/pagination";
 import type { MarketDataMode } from "@/lib/server/market/mode";
 import {
+  type BoardMarketSource,
   type BoardToken,
   fixtureBoardSource,
   selectMarketAdapter,
@@ -30,6 +31,7 @@ export type MarketRefreshState = "ready" | "refreshing" | "error";
 type MarketDataContextValue = {
   marketMode: MarketDataMode;
   tokens: BoardToken[];
+  leaders: BoardMarketSource["leaders"];
   refreshState: MarketRefreshState;
   lastUpdated: string | null;
   hasMore: boolean;
@@ -41,6 +43,11 @@ type MarketDataContextValue = {
 const MarketDataContext = createContext<MarketDataContextValue | null>(null);
 
 const tokenKey = (token: BoardToken) => token.slug;
+const emptyMarketLeaders: BoardMarketSource["leaders"] = {
+  mostTraded: null,
+  newest: null,
+  biggestMover: null,
+};
 
 export function MarketDataProvider({
   children,
@@ -52,6 +59,9 @@ export function MarketDataProvider({
   const adapter = useMemo(() => selectMarketAdapter(marketMode), [marketMode]);
   const fixture = marketMode === "fixture" ? fixtureBoardSource : null;
   const [tokens, setTokens] = useState<BoardToken[]>(() => fixture?.tokens ?? []);
+  const [leaders, setLeaders] = useState<BoardMarketSource["leaders"]>(() =>
+    fixture?.leaders ?? emptyMarketLeaders,
+  );
   const tokensRef = useRef<BoardToken[]>(fixture?.tokens ?? []);
   const [refreshState, setRefreshState] = useState<MarketRefreshState>(
     marketMode === "fixture" ? "ready" : "refreshing",
@@ -159,6 +169,7 @@ export function MarketDataProvider({
         }
         tokensRef.current = refreshedTokens;
         setTokens(refreshedTokens);
+        setLeaders(result.leaders);
         setLastUpdated(result.updatedAt);
         consecutiveErrors = 0;
         setRefreshState("ready");
@@ -254,6 +265,7 @@ export function MarketDataProvider({
     () => ({
       marketMode,
       tokens,
+      leaders,
       refreshState,
       lastUpdated,
       hasMore: nextCursor !== null,
@@ -263,6 +275,7 @@ export function MarketDataProvider({
     }),
     [
       lastUpdated,
+      leaders,
       loadMore,
       loadMoreError,
       loadingMore,

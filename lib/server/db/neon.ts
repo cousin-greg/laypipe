@@ -224,7 +224,8 @@ SELECT identity.database_id::text,
   ) AS has_exact_canonical_write,
   EXISTS (
     SELECT 1 FROM unnest(ARRAY[
-      'indexer_cursors', 'pool_market_totals', 'token_holder_balance_state'
+      'indexer_cursors', 'pool_market_totals', 'token_holder_balance_state',
+      'market_leader_snapshots', 'market_leader_entries'
     ]) table_name
     WHERE has_table_privilege(session_user, table_name, 'INSERT')
        OR has_table_privilege(session_user, table_name, 'UPDATE')
@@ -237,7 +238,7 @@ SELECT identity.database_id::text,
       'chain_events', 'indexer_cursors', 'launches', 'swaps',
       'pool_market_totals', 'fee_events', 'burn_events', 'revenue_events',
       'token_transfers', 'token_holder_balance_state', 'admin_events',
-      'ipfs_promotions'
+      'ipfs_promotions', 'market_leader_snapshots', 'market_leader_entries'
     ]) table_name
     WHERE has_table_privilege(session_user, table_name, 'DELETE')
        OR has_table_privilege(session_user, table_name, 'TRUNCATE')
@@ -247,7 +248,9 @@ SELECT identity.database_id::text,
   has_table_privilege(session_user, 'chain_blocks', 'DELETE') AS can_delete_blocks,
   has_table_privilege(session_user, 'indexer_cursors', 'UPDATE') AS can_write_cursor,
   has_table_privilege(session_user, 'pool_market_totals', 'UPDATE')
-    OR has_table_privilege(session_user, 'token_holder_balance_state', 'UPDATE') AS can_write_derived,
+    OR has_table_privilege(session_user, 'token_holder_balance_state', 'UPDATE')
+    OR has_table_privilege(session_user, 'market_leader_snapshots', 'UPDATE')
+    OR has_table_privilege(session_user, 'market_leader_entries', 'UPDATE') AS can_write_derived,
   has_table_privilege(session_user, 'ipfs_promotions', 'INSERT') AS can_insert_promotion,
   has_table_privilege(session_user, 'ipfs_promotions', 'UPDATE') AS can_update_promotion,
   has_table_privilege(session_user, 'ipfs_promotions', 'DELETE') AS can_delete_promotion,

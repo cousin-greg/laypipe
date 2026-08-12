@@ -71,6 +71,11 @@ export interface LiveTokenListResponse {
   source: "live";
   chainId: number;
   tokens: LiveMarketToken[];
+  leaders: {
+    mostTraded: LiveMarketToken | null;
+    newest: LiveMarketToken | null;
+    biggestMover: LiveMarketToken | null;
+  };
   page: {
     limit: number;
     nextCursor: string | null;

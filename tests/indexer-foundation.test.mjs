@@ -155,6 +155,42 @@ test("migration encodes idempotency, reorg cascades, numeric safety, and cursor 
   );
 });
 
+test("market leaders are bounded, caught-up snapshots tied to canonical blocks", () => {
+  const sql = readFileSync(
+    resolve(root, "db/migrations/0002_market_leader_snapshot.sql"),
+    "utf8",
+  );
+  assert.match(sql, /CREATE TABLE market_leader_snapshots/);
+  assert.match(sql, /CREATE TABLE market_leader_entries/);
+  assert.match(sql, /PRIMARY KEY \(chain_id, leader_kind\)/);
+  assert.match(sql, /'most-traded', 'newest', 'biggest-mover'/);
+  assert.match(
+    sql,
+    /FOREIGN KEY \(chain_id, snapshot_block, snapshot_hash\)[\s\S]*chain_blocks[\s\S]*ON DELETE CASCADE/,
+  );
+  assert.match(sql, /CREATE INDEX swaps_market_window_idx/);
+  assert.match(sql, /NEW\.stream <> 'laypipe'/);
+  assert.match(sql, /NEW\.last_run_status <> 'caught-up'/);
+  assert.match(sql, /prior_refresh > refresh_time - interval '1 minute'/);
+  assert.match(sql, /counts\.trades_24h >= 2/);
+  assert.match(sql, /score\.change_numerator > 0/);
+  assert.match(sql, /t\.trades_24h DESC, t\.volume_24h_pipedog DESC/);
+  assert.match(sql, /AFTER UPDATE OF observed_safe_head, observed_at, last_run_status/);
+
+  const statements = migrationPlan.migrationStatements(sql);
+  assert.ok(statements.length > 1);
+  for (const statement of statements) {
+    const topLevelCommands = statement
+      .split(/\r?\n/)
+      .filter((line) => /^(?:CREATE\b|REVOKE\b|DO\b)/.test(line));
+    assert.equal(
+      topLevelCommands.length,
+      1,
+      `leader migration chunk contains multiple top-level commands: ${topLevelCommands.join(", ")}`,
+    );
+  }
+});
+
 test("migration chunks are single statements and discovery is rechecked behind the lock", () => {
   const sql = readFileSync(resolve(root, "db/migrations/0000_production_read_model.sql"), "utf8");
   const statements = migrationPlan.migrationStatements(sql);

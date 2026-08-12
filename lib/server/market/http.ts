@@ -192,7 +192,9 @@ export async function handleMarketHealthRequest(
   try {
     (dependencies.marketCursorSecret ?? readMarketCursorSecret)();
     const database = await (dependencies.database ?? getReadDatabase)();
-    const indexer = await getMarketHealth(database);
+    const nowMs = (dependencies.now ?? Date.now)();
+    const health = await getMarketHealth(database, nowMs);
+    const indexer = health.indexer;
     if (!indexer) {
       return json(
         {
@@ -209,7 +211,7 @@ export async function handleMarketHealthRequest(
     }
     const freshness = assessIndexerFreshness(
       indexer,
-      (dependencies.now ?? Date.now)(),
+      nowMs,
     );
     if (freshness.status === "stale") {
       return json(
@@ -220,6 +222,21 @@ export async function handleMarketHealthRequest(
           readyForLiveMarkets: false,
           database: { status: "reachable" },
           indexer: { status: "stale", freshness, cursor: indexer },
+        },
+        503,
+        NO_STORE_CACHE_CONTROL,
+      );
+    }
+    if (!health.leaderSnapshot) {
+      return json(
+        {
+          status: "not_ready",
+          check: "readiness",
+          marketMode: "live",
+          readyForLiveMarkets: false,
+          database: { status: "reachable" },
+          indexer: { status: "ready", freshness, cursor: indexer },
+          leaders: { status: "missing", snapshot: null },
         },
         503,
         NO_STORE_CACHE_CONTROL,
@@ -237,6 +254,7 @@ export async function handleMarketHealthRequest(
           freshness,
           cursor: indexer,
         },
+        leaders: { status: "ready", snapshot: health.leaderSnapshot },
       },
       200,
       NO_STORE_CACHE_CONTROL,

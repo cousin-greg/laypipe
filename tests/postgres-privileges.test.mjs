@@ -63,12 +63,17 @@ function run(command, args, options = {}) {
 
 const docker = (args, options) => run("docker", args, options);
 
-function psql(container, sql, { role, allowFailure = false } = {}) {
+async function psql(container, sql, { role, allowFailure = false } = {}) {
   const args = [
     "exec", "-i", container, "psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1",
     "-U", role ?? "postgres", "-d", "laypipe_test",
   ];
-  return docker(args, { input: sql, allowFailure });
+  try {
+    return await docker(args, { input: sql, allowFailure });
+  } catch (error) {
+    error.message += `\nSQL probe: ${sql.trim().slice(0, 180)}`;
+    throw error;
+  }
 }
 
 async function runtimeIdentity(container, role, group) {
@@ -142,7 +147,11 @@ ALTER DATABASE laypipe_test OWNER TO laypipe_migration_owner;
 ALTER SCHEMA public OWNER TO laypipe_migration_owner;
 `);
 
-    for (const name of ["0000_production_read_model.sql", "0001_runtime_security.sql"]) {
+    for (const name of [
+      "0000_production_read_model.sql",
+      "0001_runtime_security.sql",
+      "0002_market_leader_snapshot.sql",
+    ]) {
       const migration = readFileSync(resolve(root, "db/migrations", name), "utf8")
         .split(/^\s*--> statement-breakpoint\s*$/gm).map((value) => value.trim()).filter(Boolean)
         .join(";\n");
@@ -186,7 +195,8 @@ CREATE TABLE laypipe_schema_migrations (
 );
 INSERT INTO laypipe_schema_migrations (name, sha256) VALUES
   ('0000_production_read_model.sql', '${"a".repeat(64)}'),
-  ('0001_runtime_security.sql', '${"b".repeat(64)}');
+  ('0001_runtime_security.sql', '${"b".repeat(64)}'),
+  ('0002_market_leader_snapshot.sql', '${"c".repeat(64)}');
 `, { role: "laypipe_migration_owner" });
     await psql(container, `
 CREATE ROLE laypipe_runtime_read NOLOGIN;
@@ -260,6 +270,8 @@ SELECT
       ["laypipe_write_login", "UPDATE indexer_cursors SET next_block = 99;"],
       ["laypipe_write_login", "UPDATE pool_market_totals SET total_trades = 0;"],
       ["laypipe_write_login", "UPDATE token_holder_balance_state SET balance = 0;"],
+      ["laypipe_write_login", "UPDATE market_leader_snapshots SET refreshed_at = now();"],
+      ["laypipe_write_login", "DELETE FROM market_leader_entries;"],
       ["laypipe_write_login", "DELETE FROM ipfs_promotions;"],
     ]) {
       const denied = await psql(container, sql, { role, allowFailure: true });
@@ -318,13 +330,19 @@ CREATE ROLE laypipe_owner_copy LOGIN CREATEDB IN ROLE laypipe_runtime_write;
     const block101 = `0x${"2".repeat(64)}`;
     const parent99 = `0x${"0".repeat(64)}`;
     const launchTx = `0x${"3".repeat(64)}`;
+    const secondLaunchTx = `0x${"a".repeat(64)}`;
     const swapTx = `0x${"4".repeat(64)}`;
+    const swapTx2 = `0x${"8".repeat(64)}`;
+    const secondSwapTx = `0x${"b".repeat(64)}`;
+    const secondSwapTx2 = `0x${"c".repeat(64)}`;
     const transferTx = `0x${"5".repeat(64)}`;
     const factory = `0x${"1".repeat(40)}`;
     const creator = `0x${"2".repeat(40)}`;
     const token = `0x${"3".repeat(40)}`;
+    const secondToken = `0x${"8".repeat(40)}`;
     const hook = `0x${"4".repeat(40)}`;
     const pool = `0x${"6".repeat(64)}`;
+    const secondPool = `0x${"9".repeat(64)}`;
     const holder = `0x${"7".repeat(40)}`;
     const zero = `0x${"0".repeat(40)}`;
     const ingest = await psql(container, `
@@ -341,7 +359,11 @@ INSERT INTO chain_events (
   contract_address, topics, data, event_name, decoded_args
 ) VALUES
   (4663, 100, '${launchTx}', 0, 0, '${factory}', '[]', '0x', 'TokenLaunched', '{}'),
+  (4663, 100, '${secondLaunchTx}', 1, 1, '${factory}', '[]', '0x', 'TokenLaunched', '{}'),
   (4663, 101, '${swapTx}', 0, 0, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${swapTx2}', 0, 2, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${secondSwapTx}', 0, 3, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${secondSwapTx2}', 0, 4, '${hook}', '[]', '0x', 'Swap', '{}'),
   (4663, 101, '${transferTx}', 1, 1, '${token}', '[]', '0x', 'Transfer', '{}')
 ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE
 SET transaction_hash = chain_events.transaction_hash;
@@ -352,6 +374,9 @@ INSERT INTO launches (
 ) VALUES (
   4663, '${token}', '${pool}', '${creator}', 1, 0, 0, '${hook}', '${creator}',
   'creator', 100, '2026-08-12T00:00:00Z', '${launchTx}', 0
+), (
+  4663, '${secondToken}', '${secondPool}', '${creator}', 1, 0, 0, '${hook}', '${creator}',
+  'creator', 100, '2026-08-12T00:00:00Z', '${secondLaunchTx}', 1
 )
 ON CONFLICT (chain_id, token_address) DO UPDATE
 SET token_address = launches.token_address;
@@ -360,8 +385,17 @@ INSERT INTO swaps (
   liquidity, tick, fee_pips, pipedog_amount, token_amount, block_number,
   block_timestamp, transaction_hash, log_index
 ) VALUES (
-  4663, '${pool}', '${creator}', 'buy', -10, 20, 1, 1, 0, 10000, 10, 20,
+  4663, '${pool}', '${creator}', 'buy', -12, 20, 1, 1, 0, 10000, 12, 20,
   101, '2026-08-12T00:00:01Z', '${swapTx}', 0
+) , (
+  4663, '${pool}', '${creator}', 'buy', -10, 20, 1, 1, 0, 10000, 10, 20,
+  101, '2026-08-12T00:00:01Z', '${swapTx2}', 2
+), (
+  4663, '${secondPool}', '${creator}', 'buy', -5, 10, 1, 1, 0, 10000, 5, 10,
+  101, '2026-08-12T00:00:01Z', '${secondSwapTx}', 3
+), (
+  4663, '${secondPool}', '${creator}', 'buy', -5, 10, 1, 1, 0, 10000, 5, 10,
+  101, '2026-08-12T00:00:01Z', '${secondSwapTx2}', 4
 )
 ON CONFLICT (chain_id, transaction_hash, log_index) DO UPDATE
 SET transaction_hash = swaps.transaction_hash;
@@ -382,7 +416,32 @@ SELECT total_trades FROM pool_market_totals WHERE chain_id = 4663 AND pool_id = 
 SELECT balance FROM token_holder_balance_state
 WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}';
 `, { role: "laypipe_write_login" });
-    assert.match(ingest.stdout, /t\n1\n1000$/);
+    assert.match(ingest.stdout, /t\n2\n1000$/);
+
+    const leaders = await psql(container, `
+SELECT snapshot_block, snapshot_hash, snapshot_at::text
+FROM market_leader_snapshots WHERE chain_id = 4663;
+SELECT leader_kind, token_address
+FROM market_leader_entries WHERE chain_id = 4663 ORDER BY leader_kind;
+`, { role: "laypipe_read_login" });
+    assert.equal(leaders.stdout, [
+      `101|${block101}|2026-08-12 00:00:01+00`,
+      `most-traded|${token}`,
+      `newest|${secondToken}`,
+    ].join("\n"));
+
+    const firstRefresh = await psql(container, `
+SELECT refreshed_at::text FROM market_leader_snapshots WHERE chain_id = 4663;
+`, { role: "laypipe_migration_owner" });
+    await psql(container, `
+SELECT laypipe_runtime_record_observation(
+  4663, 'laypipe', 101, '2026-08-12T00:00:03Z', 'caught-up'
+);
+`, { role: "laypipe_write_login" });
+    const throttledRefresh = await psql(container, `
+SELECT refreshed_at::text FROM market_leader_snapshots WHERE chain_id = 4663;
+`, { role: "laypipe_migration_owner" });
+    assert.equal(throttledRefresh.stdout, firstRefresh.stdout);
 
     const wrongRollback = await psql(
       container,
@@ -399,6 +458,47 @@ SELECT count(*) FROM swaps;
 SELECT count(*) FROM token_holder_balance_state;
 `, { role: "laypipe_write_login" });
     assert.equal(rollback.stdout, `1\n101|100|${block100}\n0\n0`);
+    const invalidatedLeaders = await psql(container, `
+SELECT count(*) FROM market_leader_snapshots;
+SELECT count(*) FROM market_leader_entries;
+`, { role: "laypipe_read_login" });
+    assert.equal(invalidatedLeaders.stdout, "0\n0");
+
+    await psql(container, `
+INSERT INTO chain_blocks (
+  chain_id, block_number, block_hash, parent_hash, block_timestamp
+) VALUES (4663, 101, '${block101}', '${block100}', '2026-08-12T00:00:01Z');
+INSERT INTO chain_events (
+  chain_id, block_number, transaction_hash, transaction_index, log_index,
+  contract_address, topics, data, event_name, decoded_args
+) VALUES
+  (4663, 101, '${swapTx}', 0, 0, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${swapTx2}', 0, 2, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${secondSwapTx}', 0, 3, '${hook}', '[]', '0x', 'Swap', '{}'),
+  (4663, 101, '${secondSwapTx2}', 0, 4, '${hook}', '[]', '0x', 'Swap', '{}');
+INSERT INTO swaps (
+  chain_id, pool_id, sender_address, side, amount0, amount1, sqrt_price_x96,
+  liquidity, tick, fee_pips, pipedog_amount, token_amount, block_number,
+  block_timestamp, transaction_hash, log_index
+) VALUES
+  (4663, '${pool}', '${creator}', 'buy', -10, 20, 1, 1, 0, 10000, 10, 20,
+   101, '2026-08-12T00:00:01Z', '${swapTx}', 0),
+  (4663, '${pool}', '${creator}', 'buy', -12, 20, 1, 1, 0, 10000, 12, 20,
+   101, '2026-08-12T00:00:01Z', '${swapTx2}', 2),
+  (4663, '${secondPool}', '${creator}', 'buy', -6, 10, 1, 1, 0, 10000, 6, 10,
+   101, '2026-08-12T00:00:01Z', '${secondSwapTx}', 3),
+  (4663, '${secondPool}', '${creator}', 'buy', -5, 10, 1, 1, 0, 10000, 5, 10,
+   101, '2026-08-12T00:00:01Z', '${secondSwapTx2}', 4);
+SELECT laypipe_runtime_advance_cursor(4663, 'laypipe', 101, 101, '${block101}');
+SELECT laypipe_runtime_record_observation(
+  4663, 'laypipe', 101, '2026-08-12T00:00:04Z', 'caught-up'
+);
+`, { role: "laypipe_write_login" });
+    const replayedMover = await psql(container, `
+SELECT token_address FROM market_leader_entries
+WHERE chain_id = 4663 AND leader_kind = 'biggest-mover';
+`, { role: "laypipe_read_login" });
+    assert.equal(replayedMover.stdout, token);
 
     const promotionId = "a".repeat(64);
     const pinDigest = "b".repeat(64);
@@ -446,7 +546,7 @@ WHERE n.nspname = 'public'
   AND p.proname LIKE 'laypipe_%'
   AND 'search_path=pg_catalog, public' = ANY(coalesce(p.proconfig, ARRAY[]::text[]));
 `);
-    assert.equal(searchPaths.stdout, "12");
+    assert.equal(searchPaths.stdout, "13");
 
     const futureTable = await psql(container, "CREATE TABLE escaped_future(id integer);", {
       role: "laypipe_write_login",

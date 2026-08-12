@@ -1,7 +1,7 @@
 import type { BoardToken } from "../_data/adapter";
 import {
   compareExactPercentChanges,
-  compareUint256Decimals,
+  compareBoundedUnsignedDecimals,
   exactPercentChangeDirection,
   formatExactPercentChange,
   formatPipedogBaseUnits,
@@ -38,7 +38,7 @@ export function tokenChangeDirection(token: BoardToken) {
 
 export function compareTokenVolumes(left: BoardToken, right: BoardToken) {
   if (left.source === "live" && right.source === "live") {
-    return compareUint256Decimals(left.volume24h, right.volume24h);
+    return compareBoundedUnsignedDecimals(left.volume24h, right.volume24h);
   }
   if (left.source === "fixture" && right.source === "fixture") {
     return left.volume24h - right.volume24h;

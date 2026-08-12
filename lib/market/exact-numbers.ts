@@ -5,6 +5,7 @@ const BIGINT_ONE = BigInt(1);
 const BIGINT_TEN = BigInt(10);
 const UINT256_MAX = (BIGINT_ONE << BigInt(256)) - BIGINT_ONE;
 const UINT256_DECIMAL = /^(0|[1-9][0-9]{0,77})$/;
+const BOUNDED_UNSIGNED_DECIMAL = /^(0|[1-9][0-9]{0,155})$/;
 const SIGNED_DERIVED_DECIMAL = /^-?(0|[1-9][0-9]{0,157})$/;
 const PIPEDOG_DECIMALS = 18;
 
@@ -30,6 +31,13 @@ export function requireUint256Decimal(
 
   const parsed = BigInt(value);
   if (parsed > UINT256_MAX || (options.positive && parsed === BIGINT_ZERO)) {
+    throw invalid(label);
+  }
+  return value;
+}
+
+export function requireBoundedUnsignedDecimal(value: unknown, label: string) {
+  if (typeof value !== "string" || !BOUNDED_UNSIGNED_DECIMAL.test(value)) {
     throw invalid(label);
   }
   return value;
@@ -102,6 +110,12 @@ export function exactPercentChange(
 export function compareUint256Decimals(left: string, right: string) {
   const leftValue = BigInt(requireUint256Decimal(left, "Left indexed amount"));
   const rightValue = BigInt(requireUint256Decimal(right, "Right indexed amount"));
+  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+}
+
+export function compareBoundedUnsignedDecimals(left: string, right: string) {
+  const leftValue = BigInt(requireBoundedUnsignedDecimal(left, "Left indexed amount"));
+  const rightValue = BigInt(requireBoundedUnsignedDecimal(right, "Right indexed amount"));
   return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
 }
 
@@ -219,7 +233,7 @@ export function formatPipedogPriceRatio(value: PipedogPriceRatio) {
 }
 
 export function formatPipedogBaseUnits(value: string) {
-  const normalized = requireUint256Decimal(value, "Indexed PIPEDOG volume");
+  const normalized = requireBoundedUnsignedDecimal(value, "Indexed PIPEDOG volume");
   const amount = BigInt(normalized);
   const tokenScale = powerOfTen(PIPEDOG_DECIMALS);
   const suffixes = [

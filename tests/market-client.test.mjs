@@ -183,6 +183,11 @@ test("live adapter requests and returns the server keyset cursor", async () => {
       source: "live",
       chainId: 4663,
       tokens: [liveToken()],
+      leaders: {
+        mostTraded: liveToken(),
+        newest: null,
+        biggestMover: liveToken(),
+      },
       page: { limit: 50, nextCursor: "cursor_2" },
       indexer: null,
     }), {
@@ -201,6 +206,8 @@ test("live adapter requests and returns the server keyset cursor", async () => {
     );
     assert.equal(result.nextCursor, "cursor_2");
     assert.equal(result.tokens[0].source, "live");
+    assert.equal(result.leaders.mostTraded.source, "live");
+    assert.equal(result.leaders.newest, null);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -373,10 +380,25 @@ test("fixture market formatting and numeric fields remain unchanged", () => {
   assert.equal(marketFormat.formatTokenPrice(fixture), "$0.000184");
   assert.equal(marketFormat.formatTokenVolume(fixture), "$42.6K");
   assert.equal(marketFormat.formatTokenChange(fixture), "+38.4%");
+  assert.equal(adapter.fixtureBoardSource.leaders.mostTraded.slug, "pipe-dream");
+  assert.equal(adapter.fixtureBoardSource.leaders.newest.slug, "leaky-alpha");
+  assert.equal(adapter.fixtureBoardSource.leaders.biggestMover.slug, "pipe-dream");
 });
 
-test("live metric payloads reject out-of-range and malformed exact values", () => {
+test("live metric payloads allow bounded aggregates above uint256 and reject malformed exact values", () => {
   const aboveUint256 = (BigInt(UINT256_MAX) + BigInt(1)).toString();
+  const aggregate = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    metrics: {
+      ...liveToken().metrics,
+      volume24hPipedog: {
+        status: "observed",
+        value: aboveUint256,
+        basis: "test",
+      },
+    },
+  });
+  assert.equal(aggregate.volume24h, aboveUint256);
   assert.throws(
     () => adapter.mapLiveTokenToBoardToken({
       ...liveToken(),
@@ -384,7 +406,7 @@ test("live metric payloads reject out-of-range and malformed exact values", () =
         ...liveToken().metrics,
         volume24hPipedog: {
           status: "observed",
-          value: aboveUint256,
+          value: `1${"0".repeat(156)}`,
           basis: "test",
         },
       },

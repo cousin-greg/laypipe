@@ -137,6 +137,11 @@ independent audit.
   idempotence/hash-drift rejection.
 - [ ] Run canonical ingest, rollback, replay, cursor-CAS, and live market-query
   integration against Preview Neon.
+- [ ] At representative Preview volume, prove the once-per-minute global
+  leader refresh uses the intended window index, can select a winner outside
+  the newest page, and is deleted from the canonical read model immediately on
+  rollback before replay. Confirm the public response stops serving the prior
+  leader after its bounded 10-second CDN TTL plus 20-second stale window.
 - [-] Canonical Robinhood backfill and `npm run db:reconcile` wait until the
   audited, explicitly authorized Robinhood deployment exists with launches
   disabled. Preview may rehearse schema, repository, rollback, query, and

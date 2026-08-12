@@ -960,6 +960,7 @@ test("runtime configuration is disabled by default and uses a ten-block free-tie
   assert.equal(config.batchSize, 10);
   assert.equal(config.maxBatchesPerRun, 25);
   assert.equal(config.finalityBlocks, 20);
+  assert.equal(ingestion.INDEXER_FINALIZATION_RESERVE_MS, 22_000);
 });
 
 test("catch-up runner advances multiple ten-block batches and stops when caught up", async () => {
@@ -1106,6 +1107,32 @@ test("catch-up runner stops at max batches, idle, and deadline without an unboun
   });
   assert.equal(deadline.status, "deadline");
   assert.equal(deadlineCalls, 1);
+
+  let maxClock = 1_000;
+  let maxDeadlineCalls = 0;
+  const maxDeadlineObservations = [];
+  const maxDeadline = await ingestion.runCanonicalIndexer({
+    env: {
+      INDEXER_ENABLED: "true",
+      INDEXER_FINALITY_BLOCKS: "20",
+      ROBINHOOD_RPC_HTTP_URL: "https://rpc.test/v2/key",
+      INDEXER_RUN_TIMEOUT_MS: "55000",
+    },
+    now: () => maxClock,
+    syncOnce: async () => {
+      maxDeadlineCalls += 1;
+      // 1,000 + 55,000 - 22,000 = the reserved finalization boundary.
+      maxClock = 34_000;
+      return { status: "ingested", safeHead: "999", nextBlock: "10", rolledBackBlocks: "0", blockCount: 10, eventCount: 0, projectionCount: 0 };
+    },
+    manifest: manifest(),
+    safeHead: 999n,
+    recordObservation: async (value) => maxDeadlineObservations.push(value),
+  });
+  assert.equal(maxDeadline.status, "deadline");
+  assert.equal(maxDeadlineCalls, 1);
+  assert.equal(maxDeadlineObservations.length, 1);
+  assert.equal(maxDeadlineObservations[0].status, "deadline");
 });
 
 test("indexer manifest gate reuses the complete snapshot preflight at the finalized block", () => {

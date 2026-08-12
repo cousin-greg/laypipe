@@ -7,9 +7,11 @@ Native ETH is used for network gas only.
 ## Product surface
 
 - latest-token marquee and rotating fixture Hot/Largest/Newest/Mover feature;
-  live mode exposes exact indexed Most traded/Newest/Biggest mover views and
-  exact PIPEDOG-volume/gainer sorting; market cap remains unavailable until a
-  trusted PIPEDOG-denominated supply valuation is implemented;
+  live mode publishes reorg-safe global Most traded/Newest/Biggest mover
+  leaders while its keyset-paginated Board remains newest-first. PIPEDOG
+  volume and percentage-change displays stay exact; market cap remains
+  unavailable until a trusted PIPEDOG-denominated supply valuation is
+  implemented;
 - responsive 1–5-column Board with card/table views and URL-backed filters;
 - Board, My Tokens, Rewards, Tokenomics, Docs, Launch, and token-detail routes;
 - persistent light/dark themes, injected-wallet connection, and Robinhood
