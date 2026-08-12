@@ -7,7 +7,7 @@ import {
 } from "../auth/http";
 import { enforceRateLimit } from "../auth/redis";
 import type { DbClient } from "../db/neon";
-import { getDatabase } from "../db/neon";
+import { getReadDatabase } from "../db/neon";
 import { readMarketDataMode, type MarketDataMode } from "../market/mode";
 import { MarketInputError, readMarketCursorSecret } from "../market/read-model";
 import {
@@ -99,7 +99,7 @@ export async function handleWalletPortfolioRequest(
     return error("wallet_data_unavailable", "Live wallet data is unavailable right now.", 503);
   }
   try {
-    const database = await (dependencies.database ?? getDatabase)();
+    const database = await (dependencies.database ?? getReadDatabase)();
     const payload = await loadWalletPortfolio(database, parsed, secret, dependencies);
     return response(payload, 200);
   } catch {

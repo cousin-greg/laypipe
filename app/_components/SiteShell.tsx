@@ -7,6 +7,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { useMarketData } from "./MarketDataProvider";
 import { useWallet } from "./WalletProvider";
 import { compactMoney } from "./format";
+import { formatTokenChange, tokenChangeDirection } from "./market-format";
 
 type Theme = "light" | "dark";
 
@@ -194,33 +195,36 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 <span className="marquee-empty">
                   {feedState === "error" ? "Live feed unavailable" : "Waiting for indexed launches"}
                 </span>
-              ) : [...latestTokens, ...latestTokens].map((token, index) => (
-                <Link
-                  href={`/token/${token.slug}`}
-                  key={`${token.slug}-${index}`}
-                  aria-hidden={index >= latestTokens.length}
-                  tabIndex={index >= latestTokens.length ? -1 : undefined}
-                >
-                  <i style={{ background: token.accent }} aria-hidden="true" />
-                  <strong>${token.symbol}</strong>
-                  <span>
-                    {token.marketCap === null ? "Market cap unavailable" : compactMoney(token.marketCap)}
-                  </span>
-                  <em
-                    className={
-                      token.change24h === null
-                        ? undefined
-                        : token.change24h >= 0
-                          ? "up"
-                          : "down"
-                    }
+              ) : [...latestTokens, ...latestTokens].map((token, index) => {
+                const changeDirection = tokenChangeDirection(token);
+                return (
+                  <Link
+                    href={`/token/${token.slug}`}
+                    key={`${token.slug}-${index}`}
+                    aria-hidden={index >= latestTokens.length}
+                    tabIndex={index >= latestTokens.length ? -1 : undefined}
                   >
-                    {token.change24h === null
-                      ? "24h unavailable"
-                      : `${token.change24h >= 0 ? "+" : ""}${token.change24h.toFixed(1)}%`}
-                  </em>
-                </Link>
-              ))}
+                    <i style={{ background: token.accent }} aria-hidden="true" />
+                    <strong>${token.symbol}</strong>
+                    <span>
+                      {token.marketCap === null ? "Market cap unavailable" : compactMoney(token.marketCap)}
+                    </span>
+                    <em
+                      className={
+                        changeDirection === null
+                          ? undefined
+                          : changeDirection >= 0
+                            ? "up"
+                            : "down"
+                      }
+                    >
+                      {changeDirection === null
+                        ? "24h unavailable"
+                        : formatTokenChange(token)}
+                    </em>
+                  </Link>
+                );
+              })}
             </div>
           </div>
           <span className="preview-tag">

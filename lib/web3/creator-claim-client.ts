@@ -77,6 +77,17 @@ export function isClaimSubmissionIndeterminate(error: unknown) {
   return error instanceof ClaimSubmissionIndeterminateError;
 }
 
+export class CanonicalClaimRevertedError extends WalletFlowError {
+  constructor(message = "The claim reverted on-chain after canonical confirmation.") {
+    super(message);
+    this.name = "CanonicalClaimRevertedError";
+  }
+}
+
+export function isCanonicalClaimReverted(error: unknown) {
+  return error instanceof CanonicalClaimRevertedError;
+}
+
 function errorCode(error: unknown) {
   if (!error || typeof error !== "object" || !("code" in error)) return undefined;
   const code = (error as { code?: unknown }).code;
@@ -510,8 +521,9 @@ export class CreatorClaimClient {
       if (!receipt.to || !sameAddress(receipt.to, this.manifest.contracts.hook.address)) {
         throw new WalletFlowError("Claim receipt target does not match the audited hook.");
       }
-      if (BigInt(receipt.status) !== BigInt(1)) {
-        throw new WalletFlowError("The claim reverted on-chain.");
+      const receiptStatus = BigInt(receipt.status);
+      if (receiptStatus !== BigInt(0) && receiptStatus !== BigInt(1)) {
+        throw new WalletFlowError("Claim receipt returned an invalid status value.");
       }
 
       const [transactionValue, blockValue, headValue] = await Promise.all([
@@ -546,6 +558,9 @@ export class CreatorClaimClient {
       ) {
         await abortableDelay(pollIntervalMs, options.signal);
         continue;
+      }
+      if (receiptStatus === BigInt(0)) {
+        throw new CanonicalClaimRevertedError();
       }
       let claimedAmount: bigint | null = null;
       for (const log of receipt.logs) {

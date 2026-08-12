@@ -134,14 +134,43 @@ test("pending claim intent survives reload and stays wallet-bound until cleared"
     { status: "clear" },
   );
   pendingClaims.savePendingClaimHash(storage, wallet, poolId, txHash);
-  assert.equal(
-    pendingClaims.readPendingClaimStateForWallet(storage, wallet).intent.hash,
-    txHash,
+  const hashedIntent = { ...intent, hash: txHash };
+  assert.deepEqual(
+    pendingClaims.readPendingClaimStateForWallet(storage, wallet).intent,
+    hashedIntent,
   );
-  pendingClaims.removePendingClaim(storage, wallet, poolId);
+  assert.throws(
+    () =>
+      pendingClaims.removeExactPendingClaim(storage, {
+        ...hashedIntent,
+        invokedAt: hashedIntent.invokedAt + 1,
+      }),
+    /does not match the saved exact intent/i,
+  );
+  assert.throws(
+    () => pendingClaims.removeExactPendingClaim(storage, intent),
+    /must include its exact transaction hash/i,
+  );
+  assert.deepEqual(
+    pendingClaims.readPendingClaimStateForWallet(storage, wallet).intent,
+    hashedIntent,
+  );
+  const otherIntent = {
+    chainId: 4663,
+    wallet: walletAddress("b"),
+    poolId: transactionHash("e"),
+    hash: transactionHash("8"),
+    invokedAt: intent.invokedAt,
+  };
+  pendingClaims.savePendingClaim(storage, otherIntent);
+  pendingClaims.removeExactPendingClaim(storage, hashedIntent);
   assert.deepEqual(
     pendingClaims.readPendingClaimStateForWallet(storage, wallet),
     { status: "clear" },
+  );
+  assert.deepEqual(
+    pendingClaims.readPendingClaimStateForWallet(storage, otherIntent.wallet),
+    { status: "pending", intent: otherIntent },
   );
 });
 
@@ -302,6 +331,28 @@ test("wallet claim UI keeps corrupt persistence locked behind explicit recovery"
   assert.match(component, /Claims are locked\./);
   assert.match(component, /resetPendingClaimStore/);
   assert.match(component, /I checked wallet activity; reset all local claim locks/);
+  assert.match(component, /removeExactPendingClaim/);
+  const immediateFlow = component.slice(
+    component.indexOf("async function claim("),
+    component.indexOf("async function reconcilePendingClaim("),
+  );
+  assert.match(
+    immediateFlow,
+    /isCanonicalClaimReverted\(cause\)[\s\S]*unlockCanonicallyRevertedClaim\(revertedIntent\)/,
+  );
+  assert.match(
+    immediateFlow,
+    /isClaimSubmissionIndeterminate\(cause\) \|\| submittedHash !== null/,
+  );
+  const reloadFlow = component.slice(
+    component.indexOf("async function reconcilePendingClaim("),
+    component.indexOf("function clearReconciledClaimLock("),
+  );
+  assert.match(
+    reloadFlow,
+    /isCanonicalClaimReverted\(cause\)[\s\S]*unlockCanonicallyRevertedClaim\(pendingClaim\)/,
+  );
+  assert.match(component, /No payout occurred; refresh the claimable balance and retry/);
 });
 
 test("creator claim uses two manifest snapshots and makes account/chain checks last", async () => {
@@ -371,6 +422,14 @@ function claimLog(amount) {
 }
 
 function confirmationProvider(amount, overrides = {}) {
+  const {
+    receiptStatus = "0x1",
+    confirmationHead = "0x65",
+    canonicalBlockHash = blockHash,
+    canonicalTransactions = [txHash],
+    receiptLogs = [claimLog(amount)],
+    ...transactionOverrides
+  } = overrides;
   const data = viem.encodeFunctionData({
     abi: claimAbi,
     functionName: "claim",
@@ -380,10 +439,10 @@ function confirmationProvider(amount, overrides = {}) {
     transactionHash: txHash,
     blockHash,
     blockNumber: "0x64",
-    status: "0x1",
+    status: receiptStatus,
     from: wallet,
     to: hook,
-    logs: [claimLog(amount)],
+    logs: receiptLogs,
   };
   const transaction = {
     hash: txHash,
@@ -393,7 +452,7 @@ function confirmationProvider(amount, overrides = {}) {
     value: "0x0",
     blockHash,
     blockNumber: "0x64",
-    ...overrides,
+    ...transactionOverrides,
   };
   return {
     async request(args) {
@@ -401,9 +460,13 @@ function confirmationProvider(amount, overrides = {}) {
       if (args.method === "eth_getTransactionReceipt") return receipt;
       if (args.method === "eth_getTransactionByHash") return transaction;
       if (args.method === "eth_getBlockByNumber") {
-        return { hash: blockHash, number: "0x64", transactions: [txHash] };
+        return {
+          hash: canonicalBlockHash,
+          number: "0x64",
+          transactions: canonicalTransactions,
+        };
       }
-      if (args.method === "eth_blockNumber") return "0x65";
+      if (args.method === "eth_blockNumber") return confirmationHead;
       throw new Error(`Unexpected ${args.method}`);
     },
   };
@@ -418,7 +481,9 @@ test("claim confirmation binds canonical calldata/value and rejects zero payout"
   );
   await assert.rejects(
     zeroClient.confirmClaim(txHash, { account: wallet, poolId }, { pollIntervalMs: 1 }),
-    /paid zero PIPEDOG/,
+    (error) =>
+      !claim.isCanonicalClaimReverted(error) &&
+      /paid zero PIPEDOG/i.test(error.message),
   );
 
   const wrongValueClient = new claim.CreatorClaimClient(
@@ -444,4 +509,94 @@ test("claim confirmation binds canonical calldata/value and rejects zero payout"
     { pollIntervalMs: 1 },
   );
   assert.equal(confirmed.claimedAmount, 7n);
+});
+
+test("only an exact canonical depth-two status-zero receipt is a proven claim revert", async () => {
+  const canonicalClient = new claim.CreatorClaimClient(
+    submissionProvider(() => txHash),
+    manifest(),
+    verify,
+    {
+      confirmationProvider: confirmationProvider(0n, {
+        receiptStatus: "0x0",
+        receiptLogs: [],
+      }),
+    },
+  );
+  await assert.rejects(
+    canonicalClient.confirmClaim(
+      txHash,
+      { account: wallet, poolId },
+      { timeoutMs: 20, pollIntervalMs: 1 },
+    ),
+    (error) =>
+      claim.isCanonicalClaimReverted(error) &&
+      error instanceof claim.CanonicalClaimRevertedError,
+  );
+
+  const unconfirmedClient = new claim.CreatorClaimClient(
+    submissionProvider(() => txHash),
+    manifest(),
+    verify,
+    {
+      confirmationProvider: confirmationProvider(0n, {
+        receiptStatus: "0x0",
+        confirmationHead: "0x64",
+      }),
+    },
+  );
+  await assert.rejects(
+    unconfirmedClient.confirmClaim(
+      txHash,
+      { account: wallet, poolId },
+      { timeoutMs: 5, pollIntervalMs: 1 },
+    ),
+    (error) =>
+      !claim.isCanonicalClaimReverted(error) &&
+      /still pending/i.test(error.message),
+  );
+
+  const noncanonicalClient = new claim.CreatorClaimClient(
+    submissionProvider(() => txHash),
+    manifest(),
+    verify,
+    {
+      confirmationProvider: confirmationProvider(0n, {
+        receiptStatus: "0x0",
+        canonicalBlockHash: transactionHash("c"),
+      }),
+    },
+  );
+  await assert.rejects(
+    noncanonicalClient.confirmClaim(
+      txHash,
+      { account: wallet, poolId },
+      { timeoutMs: 20, pollIntervalMs: 1 },
+    ),
+    (error) =>
+      !claim.isCanonicalClaimReverted(error) &&
+      /not the canonical block/i.test(error.message),
+  );
+
+  const mismatchedTransactionClient = new claim.CreatorClaimClient(
+    submissionProvider(() => txHash),
+    manifest(),
+    verify,
+    {
+      confirmationProvider: confirmationProvider(0n, {
+        receiptStatus: "0x0",
+        value: "0x1",
+      }),
+    },
+  );
+  await assert.rejects(
+    mismatchedTransactionClient.confirmClaim(
+      txHash,
+      { account: wallet, poolId },
+      { timeoutMs: 20, pollIntervalMs: 1 },
+    ),
+    (error) =>
+      !claim.isCanonicalClaimReverted(error) &&
+      /input, value, sender, target, or block/i.test(error.message),
+  );
 });

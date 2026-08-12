@@ -242,6 +242,7 @@ LEFT JOIN LATERAL (
   SELECT promotion.image_cid
   FROM ipfs_promotions promotion
   WHERE promotion.status = 'completed'
+    AND promotion.wallet_address = p.creator_address
     AND promotion.image_cid = substring(p.logo_uri FROM 8)
     AND promotion.metadata_cid = substring(p.metadata_uri FROM 8)
     AND p.logo_uri = 'ipfs://' || promotion.image_cid

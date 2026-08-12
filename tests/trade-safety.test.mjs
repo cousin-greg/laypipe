@@ -164,7 +164,7 @@ test("persisted trade intent retains every field needed for canonical reload rec
       minimumOutput: "9900",
       slippageBps: 100,
       verifiedBlockNumber: "100",
-      deadlineBlock: "103",
+      deadlineBlock: (100n + trade.TRADE_DEADLINE_BLOCK_BUDGET).toString(),
       createdAtMs,
       expiresAtMs: createdAtMs + 30_000,
     },
@@ -180,6 +180,16 @@ test("persisted trade intent retains every field needed for canonical reload rec
     poolIdFor(),
   );
   assert.deepEqual(restored, { ...intent, hash: TX_HASH });
+
+  assert.throws(
+    () =>
+      pendingTrades.savePendingTrade(memoryStorage(), {
+        ...intent,
+        trade: { ...intent.trade, deadlineBlock: "103" },
+        hash: null,
+      }),
+    /could not be validated/i,
+  );
 });
 
 const tokenReads = parseAbi([
@@ -481,7 +491,10 @@ test("trusted quotes require exact allowance and derive a nonzero slippage floor
   assert.equal(quote.expectedOutput, 25n);
   assert.equal(quote.minimumOutput, 24n);
   assert.equal(quote.verifiedBlockNumber, 100n);
-  assert.equal(quote.deadlineBlock, 103n);
+  assert.equal(
+    quote.deadlineBlock,
+    quote.verifiedBlockNumber + trade.TRADE_DEADLINE_BLOCK_BUDGET,
+  );
   assert.equal(quote.expiresAtMs, 31_000);
   assert.ok(
     provider.calls.some(
@@ -557,7 +570,9 @@ test("trade submission rechecks time, canonical head, chain, and account after e
   const cases = [
     {
       name: "block drift",
-      afterEstimate: { blockNumber: 104n },
+      afterEstimate: {
+        blockNumber: 100n + trade.TRADE_DEADLINE_BLOCK_BUDGET + 1n,
+      },
       expected: /block drift|deadline/i,
     },
     {
@@ -605,6 +620,106 @@ test("trade submission rechecks time, canonical head, chain, and account after e
   });
   await assert.rejects(client.sendTrade(quote), /quote.*expired/i);
   assert.equal(provider.calls.some(({ method }) => method === "eth_sendTransaction"), false);
+});
+
+test("deadline policy tolerates fast L2 cadence but remains bounded by wall time and blocks", async () => {
+  assert.equal(trade.TRADE_QUOTE_TTL_MS, 30_000);
+  assert.equal(trade.TRADE_WALLET_SUBMISSION_GRACE_MS, 30_000);
+  assert.equal(trade.TRADE_DEADLINE_STRESS_BLOCKS_PER_SECOND, 20);
+  assert.equal(trade.TRADE_DEADLINE_BLOCK_BUDGET, 1_200n);
+
+  let fastNow = 1_000;
+  const fastProvider = mockProvider({
+    afterEstimate: {
+      // Forty L2 blocks/second across nearly the complete 30-second UI
+      // window is twice the policy's rate assumption and still reaches,
+      // but does not exceed, the bounded router deadline.
+      blockNumber: 1_300n,
+      run: () => {
+        fastNow = 30_999;
+      },
+    },
+  });
+  let fastVerificationCount = 0;
+  const fastVerifiedSnapshot = async () => {
+    const blockNumber = fastVerificationCount === 0 ? 100n : 1_299n;
+    fastVerificationCount += 1;
+    return {
+      blockNumber,
+      blockTag: `0x${blockNumber.toString(16)}`,
+    };
+  };
+  const fastClient = new trade.LaypipeTradeClient(
+    fastProvider,
+    manifest(),
+    identity(),
+    { verifyDeployment: fastVerifiedSnapshot, now: () => fastNow },
+  );
+  const fastQuote = await fastClient.prepareQuote({
+    owner: OWNER,
+    side: "buy",
+    inputAmount: 10n,
+    slippageBps: 100,
+  });
+  assert.equal(fastQuote.deadlineBlock, 1_300n);
+  assert.equal((await fastClient.sendTrade(fastQuote)).hash, TX_HASH);
+  const protectedRouterCalls = fastProvider.calls.filter(
+    ({ method, params }) =>
+      method === "eth_call" &&
+      params[0].to.toLowerCase() === ROUTER.toLowerCase(),
+  );
+  assert.equal(protectedRouterCalls.at(-1).params[1], "0x513");
+
+  const overBudgetProvider = mockProvider({
+    afterEstimate: { blockNumber: 1_301n },
+  });
+  const overBudgetClient = new trade.LaypipeTradeClient(
+    overBudgetProvider,
+    manifest(),
+    identity(),
+    { verifyDeployment: verifiedSnapshot, now: () => 1_000 },
+  );
+  const overBudgetQuote = await overBudgetClient.prepareQuote({
+    owner: OWNER,
+    side: "buy",
+    inputAmount: 10n,
+    slippageBps: 100,
+  });
+  await assert.rejects(
+    overBudgetClient.sendTrade(overBudgetQuote),
+    /block drift|deadline/i,
+  );
+  assert.equal(
+    overBudgetProvider.calls.some(({ method }) => method === "eth_sendTransaction"),
+    false,
+  );
+
+  let slowNow = 1_000;
+  const slowProvider = mockProvider({
+    afterEstimate: {
+      blockNumber: 101n,
+      run: () => {
+        slowNow = 31_001;
+      },
+    },
+  });
+  const slowClient = new trade.LaypipeTradeClient(
+    slowProvider,
+    manifest(),
+    identity(),
+    { verifyDeployment: verifiedSnapshot, now: () => slowNow },
+  );
+  const slowQuote = await slowClient.prepareQuote({
+    owner: OWNER,
+    side: "buy",
+    inputAmount: 10n,
+    slippageBps: 100,
+  });
+  await assert.rejects(slowClient.sendTrade(slowQuote), /quote.*expired/i);
+  assert.equal(
+    slowProvider.calls.some(({ method }) => method === "eth_sendTransaction"),
+    false,
+  );
 });
 
 test("deadline is quote-bound and cannot be extended in client state", async () => {
@@ -959,6 +1074,9 @@ test("token detail preserves fixture fail-closed gating and shared TokenAvatar",
   assert.match(panel, /inFlightRef\.current/);
   assert.match(panel, /result\?\.allowanceCleared === false/);
   assert.match(panel, /disabled=\{controlsLocked\}/);
+  assert.match(panel, /Submit window/);
+  assert.match(panel, /Router block cap/);
+  assert.match(panel, /quote\.deadlineBlock\.toString\(\)/);
   assert.doesNotMatch(panel, /MAX_UINT|unlimited approval/i);
 
   assert.match(panel, /onSubmissionInvoked:[\s\S]*persistSubmission\(nextIntent\)/);

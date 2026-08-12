@@ -11,6 +11,7 @@ import {
 import {
   pendingClaimRecoveryFromError,
   readPendingClaimStateForWallet,
+  removeExactPendingClaim,
   removePendingClaim,
   resetPendingClaimStore,
   savePendingClaim,
@@ -22,6 +23,7 @@ import {
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import {
   CreatorClaimClient,
+  isCanonicalClaimReverted,
   isClaimSubmissionIndeterminate,
 } from "@/lib/web3/creator-claim-client";
 import { describeWalletError } from "@/lib/web3/launch-client";
@@ -176,6 +178,26 @@ export function WalletPortfolio({ view }: { view: View }) {
     [account, payload, view],
   );
 
+  function unlockCanonicallyRevertedClaim(intent: PendingClaimIntent) {
+    try {
+      removeExactPendingClaim(window.localStorage, intent);
+      setPendingClaim(null);
+      setClaimRecovery(null);
+      setClaiming(null);
+      setConfirmedHash(null);
+      setClaimError(
+        "The claim was canonically confirmed as reverted. No payout occurred; refresh the claimable balance and retry.",
+      );
+      return true;
+    } catch (cause) {
+      setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
+      setClaimError(
+        "The claim reverted, but its exact local safety record could not be cleared. Claims remain locked.",
+      );
+      return false;
+    }
+  }
+
   async function claim(position: WalletTokenPosition) {
     if (!account || !provider || !claimStorageReady || pendingClaim || claimRecovery) return;
     const claimId = ++claimRef.current;
@@ -190,6 +212,7 @@ export function WalletPortfolio({ view }: { view: View }) {
     setClaimError(null);
     setConfirmedHash(null);
     let submittedHash: `0x${string}` | null = null;
+    const persisted = { intent: null as PendingClaimIntent | null };
     let submissionInvoked = false;
     let keepLocked = false;
     try {
@@ -210,13 +233,14 @@ export function WalletPortfolio({ view }: { view: View }) {
             throw cause;
           }
           submissionInvoked = true;
+          persisted.intent = intent;
           setPendingClaim(intent);
         },
         onSubmitted: (hash) => {
           submittedHash = hash;
-          setPendingClaim((current) =>
-            current ? { ...current, hash } : current,
-          );
+          if (!persisted.intent) {
+            throw new Error("The pending claim intent was not saved before submission.");
+          }
           try {
             savePendingClaimHash(
               window.localStorage,
@@ -228,6 +252,8 @@ export function WalletPortfolio({ view }: { view: View }) {
             setClaimRecovery(pendingClaimRecoveryFromError(cause).reason);
             throw cause;
           }
+          persisted.intent = { ...persisted.intent, hash };
+          setPendingClaim(persisted.intent);
         },
       });
       if (claimId !== claimRef.current || claimRevision !== revision) return;
@@ -243,6 +269,16 @@ export function WalletPortfolio({ view }: { view: View }) {
     } catch (cause) {
       if (claimId !== claimRef.current) return;
       setClaimError(describeWalletError(cause));
+      const revertedIntent = persisted.intent;
+      if (
+        isCanonicalClaimReverted(cause) &&
+        revertedIntent?.hash &&
+        submittedHash &&
+        revertedIntent.hash.toLowerCase() === submittedHash.toLowerCase()
+      ) {
+        keepLocked = !unlockCanonicallyRevertedClaim(revertedIntent);
+        return;
+      }
       keepLocked = isClaimSubmissionIndeterminate(cause) || submittedHash !== null;
       if (
         !keepLocked &&
@@ -295,6 +331,10 @@ export function WalletPortfolio({ view }: { view: View }) {
       await load(null);
     } catch (cause) {
       if (operation !== claimRef.current) return;
+      if (isCanonicalClaimReverted(cause)) {
+        unlockCanonicallyRevertedClaim(pendingClaim);
+        return;
+      }
       setClaimError(describeWalletError(cause));
     }
   }

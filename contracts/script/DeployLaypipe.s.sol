@@ -24,6 +24,8 @@ import {PreflightRobinhood} from "./PreflightRobinhood.s.sol";
 /// @notice Deploys the fresh PIPEDOG-quote stack and leaves launch disabled.
 contract DeployLaypipe is Script {
     error InvalidDeploymentConfig();
+    error DeploymentInputsNotApproved();
+    error DeploymentInputsMismatch();
     error HookAddressMismatch(address expected, address actual);
     error HookFlagsMismatch(uint160 expected, uint160 actual);
     error WiringMismatch();
@@ -37,6 +39,27 @@ contract DeployLaypipe is Script {
         address swapRouter;
         address revenueRouter;
     }
+
+    struct ReviewedInputs {
+        address deployer;
+        address finalOwner;
+        address treasuryWallet;
+        address operationsWallet;
+        uint256 supply;
+        int256 tickSpacing;
+        int256 startTick;
+        uint256 launchFee;
+        uint256 sequesterCap;
+        uint256 treasuryCap;
+        uint256 selfBurnCap;
+        uint256 routerBountyBps;
+        uint256 selfBurnBountyBps;
+    }
+
+    bytes32 private constant DEPLOYMENT_INPUTS_KIND_HASH =
+        0x21b1662a0d9416874507f0d5ec266f5dc2dc6b8c3b7d5b024a52d1accd7f8750;
+    bytes32 private constant APPROVED_STATUS_HASH =
+        0x2b29265fc125740ae6bbc5035ae7af720b6932f4a3e44ba5ac02955c21ca9a05;
 
     function run() external returns (Deployment memory deployed) {
         PreflightRobinhood preflight = new PreflightRobinhood();
@@ -63,6 +86,24 @@ contract DeployLaypipe is Script {
         uint256 deployerPrivateKey =
             vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
+
+        _requireApprovedDeploymentInputs(
+            ReviewedInputs({
+                deployer: deployer,
+                finalOwner: finalOwner,
+                treasuryWallet: treasuryWallet,
+                operationsWallet: operationsWallet,
+                supply: supply,
+                tickSpacing: rawTickSpacing,
+                startTick: rawStartTick,
+                launchFee: launchFee,
+                sequesterCap: sequesterCap,
+                treasuryCap: treasuryCap,
+                selfBurnCap: selfBurnCap,
+                routerBountyBps: routerBountyRaw,
+                selfBurnBountyBps: selfBurnBountyRaw
+            })
+        );
 
         if (
             finalOwner == address(0) || treasuryWallet == address(0)
@@ -193,6 +234,256 @@ contract DeployLaypipe is Script {
         _assertWiring(deployed, finalOwner);
         _logDeployment(
             deployed, finalOwner, supply, tickSpacing, startTick
+        );
+    }
+
+    /// @dev The reviewed script enforces the approved values and its own exact
+    ///      compiled runtime before `startBroadcast`. Git/source identity is
+    ///      established separately by the clean-checkout rehearsal wrapper.
+    function _requireApprovedDeploymentInputs(ReviewedInputs memory inputs)
+        private
+        view
+    {
+        string memory manifest = vm.readFile(
+            vm.envString("LAYPIPE_DEPLOYMENT_INPUTS_PATH")
+        );
+        bytes32 approvedDigest =
+            vm.envBytes32("LAYPIPE_APPROVED_DEPLOYMENT_INPUTS_HASH");
+        _validateApprovedDeploymentInputs(
+            manifest,
+            approvedDigest,
+            address(this).codehash,
+            inputs
+        );
+    }
+
+    function _validateApprovedDeploymentInputs(
+        string memory manifest,
+        bytes32 approvedDigest,
+        bytes32 runningScriptCodehash,
+        ReviewedInputs memory inputs
+    ) private pure {
+        string memory manifestDigest = vm.parseJsonString(
+            manifest, ".approval.deploymentInputsHash"
+        );
+        string memory expectedDigest =
+            _sha256PrefixedHex(approvedDigest);
+        bytes32 computedDigest = deploymentInputsDigest(manifest);
+
+        if (
+            vm.parseJsonUint(manifest, ".schemaVersion") != 1
+                || keccak256(bytes(vm.parseJsonString(manifest, ".kind")))
+                    != DEPLOYMENT_INPUTS_KIND_HASH
+                || keccak256(
+                    bytes(vm.parseJsonString(manifest, ".approval.status"))
+                ) != APPROVED_STATUS_HASH
+                || keccak256(bytes(manifestDigest))
+                    != keccak256(bytes(expectedDigest))
+                || computedDigest != approvedDigest
+                || approvedDigest == bytes32(0)
+        ) revert DeploymentInputsNotApproved();
+
+        if (
+            vm.parseJsonUint(manifest, ".chain.chainId")
+                != PipedogProtocolConfig.CHAIN_ID
+                || vm.parseJsonAddress(manifest, ".chain.pipedog")
+                    != PipedogProtocolConfig.PIPEDOG
+                || vm.parseJsonAddress(manifest, ".chain.poolManager")
+                    != PipedogProtocolConfig.POOL_MANAGER
+                || vm.parseJsonAddress(manifest, ".chain.create2Deployer")
+                    != PipedogProtocolConfig.CREATE2_DEPLOYER
+                || vm.parseJsonBytes32(
+                    manifest,
+                    ".candidate.deployScriptRuntimeCodehash"
+                ) != runningScriptCodehash
+                || vm.parseJsonAddress(manifest, ".addresses.deployer")
+                    != inputs.deployer
+                || vm.parseJsonAddress(manifest, ".addresses.finalOwner")
+                    != inputs.finalOwner
+                || vm.parseJsonAddress(manifest, ".addresses.treasuryWallet")
+                    != inputs.treasuryWallet
+                || vm.parseJsonAddress(
+                    manifest, ".addresses.operationsWallet"
+                ) != inputs.operationsWallet
+                || vm.parseJsonUint(manifest, ".economics.supplyWei")
+                    != inputs.supply
+                || vm.parseJsonInt(manifest, ".economics.tickSpacing")
+                    != inputs.tickSpacing
+                || vm.parseJsonInt(manifest, ".economics.startTick")
+                    != inputs.startTick
+                || vm.parseJsonUint(
+                    manifest, ".economics.launchFeePipedogWei"
+                ) != inputs.launchFee
+                || vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxSequesterPerCallPipedogWei"
+                ) != inputs.sequesterCap
+                || vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxTreasuryRoutePerCallPipedogWei"
+                ) != inputs.treasuryCap
+                || vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxSelfBurnPerCallPipedogWei"
+                ) != inputs.selfBurnCap
+                || vm.parseJsonUint(manifest, ".economics.routerBountyBps")
+                    != inputs.routerBountyBps
+                || vm.parseJsonUint(
+                    manifest, ".economics.selfBurnBountyBps"
+                ) != inputs.selfBurnBountyBps
+                || vm.parseJsonBool(
+                    manifest, ".stagedSafety.globalLaunchEnabled"
+                )
+                || !vm.parseJsonBool(
+                    manifest, ".stagedSafety.creatorConfigEnabled"
+                )
+                || vm.parseJsonBool(
+                    manifest, ".stagedSafety.selfBurnConfigEnabled"
+                )
+        ) revert DeploymentInputsMismatch();
+    }
+
+    /// @dev Test/review surface for the exact guard invoked by `run` before
+    ///      `startBroadcast`. It reads no environment and deploys nothing.
+    function validateApprovedDeploymentInputs(
+        string memory manifest,
+        bytes32 approvedDigest,
+        ReviewedInputs memory inputs
+    ) external view {
+        _validateApprovedDeploymentInputs(
+            manifest,
+            approvedDigest,
+            address(this).codehash,
+            inputs
+        );
+    }
+
+    function deploymentInputsDigest(string memory manifest)
+        public
+        pure
+        returns (bytes32)
+    {
+        bytes32 candidateDigest = sha256(
+            abi.encode(
+                sha256(
+                    bytes(
+                        vm.parseJsonString(
+                            manifest, ".candidate.sourceCommit"
+                        )
+                    )
+                ),
+                vm.parseJsonBytes32(
+                    manifest, ".candidate.abiBundleSha256"
+                ),
+                vm.parseJsonBytes32(
+                    manifest, ".candidate.artifactBundleSha256"
+                ),
+                vm.parseJsonBytes32(
+                    manifest,
+                    ".candidate.deployScriptRuntimeCodehash"
+                ),
+                sha256(
+                    bytes(
+                        vm.parseJsonString(
+                            manifest,
+                            ".candidate.deploymentSourceBundleSha256"
+                        )
+                    )
+                ),
+                sha256(
+                    bytes(
+                        vm.parseJsonString(
+                            manifest, ".curveReview.configHash"
+                        )
+                    )
+                )
+            )
+        );
+        bytes32 chainDigest = sha256(
+            abi.encode(
+                vm.parseJsonUint(manifest, ".chain.chainId"),
+                vm.parseJsonAddress(manifest, ".chain.pipedog"),
+                vm.parseJsonAddress(manifest, ".chain.poolManager"),
+                vm.parseJsonAddress(manifest, ".chain.create2Deployer")
+            )
+        );
+        bytes32 addressesDigest = sha256(
+            abi.encode(
+                vm.parseJsonAddress(manifest, ".addresses.deployer"),
+                vm.parseJsonAddress(manifest, ".addresses.finalOwner"),
+                vm.parseJsonAddress(
+                    manifest, ".addresses.treasuryWallet"
+                ),
+                vm.parseJsonAddress(
+                    manifest, ".addresses.operationsWallet"
+                )
+            )
+        );
+        bytes32 economicsDigest = sha256(
+            abi.encode(
+                vm.parseJsonUint(manifest, ".economics.supplyWei"),
+                vm.parseJsonInt(manifest, ".economics.tickSpacing"),
+                vm.parseJsonInt(manifest, ".economics.startTick"),
+                vm.parseJsonUint(
+                    manifest, ".economics.launchFeePipedogWei"
+                ),
+                vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxSequesterPerCallPipedogWei"
+                ),
+                vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxTreasuryRoutePerCallPipedogWei"
+                ),
+                vm.parseJsonUint(
+                    manifest,
+                    ".economics.maxSelfBurnPerCallPipedogWei"
+                ),
+                vm.parseJsonUint(manifest, ".economics.routerBountyBps"),
+                vm.parseJsonUint(
+                    manifest, ".economics.selfBurnBountyBps"
+                )
+            )
+        );
+        bytes32 safetyDigest = sha256(
+            abi.encode(
+                vm.parseJsonBool(
+                    manifest, ".stagedSafety.globalLaunchEnabled"
+                ),
+                vm.parseJsonBool(
+                    manifest, ".stagedSafety.creatorConfigEnabled"
+                ),
+                vm.parseJsonBool(
+                    manifest, ".stagedSafety.selfBurnConfigEnabled"
+                )
+            )
+        );
+        return sha256(
+            abi.encode(
+                vm.parseJsonUint(manifest, ".schemaVersion"),
+                sha256(bytes(vm.parseJsonString(manifest, ".kind"))),
+                candidateDigest,
+                chainDigest,
+                addressesDigest,
+                economicsDigest,
+                safetyDigest
+            )
+        );
+    }
+
+    function _sha256PrefixedHex(bytes32 digest)
+        private
+        pure
+        returns (string memory)
+    {
+        bytes memory digestHex = bytes(vm.toString(digest));
+        bytes memory digestWithoutPrefix =
+            new bytes(digestHex.length - 2);
+        for (uint256 i; i < digestWithoutPrefix.length; ++i) {
+            digestWithoutPrefix[i] = digestHex[i + 2];
+        }
+        return string.concat(
+            "sha256:", string(digestWithoutPrefix)
         );
     }
 

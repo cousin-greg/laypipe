@@ -46,6 +46,17 @@ import {
   ROBINHOOD_CHAIN_ID_HEX,
   ROBINHOOD_PUBLIC_RPC_URL,
 } from "./chains";
+import {
+  TRADE_DEADLINE_BLOCK_BUDGET,
+  TRADE_QUOTE_TTL_MS,
+} from "./trade-policy";
+
+export {
+  TRADE_DEADLINE_BLOCK_BUDGET,
+  TRADE_DEADLINE_STRESS_BLOCKS_PER_SECOND,
+  TRADE_QUOTE_TTL_MS,
+  TRADE_WALLET_SUBMISSION_GRACE_MS,
+} from "./trade-policy";
 
 const SWAP_ROUTER_ABI = swapRouterAbiJson as Abi;
 const TOKEN_ABI = tokenAbiJson as Abi;
@@ -53,8 +64,6 @@ const ZERO = BigInt(0);
 const ONE = BigInt(1);
 const BASIS_POINTS = BigInt(10_000);
 
-export const TRADE_QUOTE_TTL_MS = 30_000;
-export const TRADE_QUOTE_MAX_BLOCK_DRIFT = BigInt(3);
 export const TRADE_CONFIRMATION_BLOCKS = BigInt(2);
 export const MIN_TRADE_SLIPPAGE_BPS = 50;
 export const MAX_TRADE_SLIPPAGE_BPS = 500;
@@ -1027,7 +1036,7 @@ export class LaypipeTradeClient {
       );
     }
     const deadlineBlock =
-      preflight.blockNumber + TRADE_QUOTE_MAX_BLOCK_DRIFT;
+      preflight.blockNumber + TRADE_DEADLINE_BLOCK_BUDGET;
     const data = encodeLaypipeTradeCall({
       side: options.side,
       pool: preflight.pool,
@@ -1088,7 +1097,7 @@ export class LaypipeTradeClient {
     }
     if (
       quote.deadlineBlock !==
-      quote.verifiedBlockNumber + TRADE_QUOTE_MAX_BLOCK_DRIFT
+      quote.verifiedBlockNumber + TRADE_DEADLINE_BLOCK_BUDGET
     ) {
       throw new WalletFlowError("Quote block deadline was modified.");
     }

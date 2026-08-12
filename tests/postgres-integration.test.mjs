@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -131,6 +131,12 @@ const WATERMARK_COLUMNS = [
   "stream", "next_block", "last_processed_block", "last_processed_hash",
   "observed_safe_head", "observed_at", "last_run_status", "updated_at",
 ];
+const WALLET_POSITION_COLUMNS = [
+  "token_address", "pool_id", "name", "symbol", "logo_uri",
+  "approved_logo_cid", "fee_mode", "launched_at", "block_number", "log_index",
+  "creator_address", "current_creator", "wallet_balance", "launched_by_wallet",
+  "claimed_pipedog", "burned_tokens",
+];
 
 function interpolateSql(sql, parameters = []) {
   return sql.replace(/\$(\d+)/g, (_match, index) => {
@@ -170,6 +176,7 @@ function parseRows(output, columns) {
     return Object.fromEntries(columns.map((column, index) => {
       const raw = values[index] === NULL_MARKER ? null : values[index];
       if (column === "log_index") return [column, Number(raw)];
+      if (column === "launched_by_wallet") return [column, raw === "t"];
       if (column === "socials") return [column, raw === null ? null : JSON.parse(raw)];
       return [column, raw];
     }));
@@ -200,20 +207,31 @@ test(
   async () => {
     const migrationPlan = loadTypeScript("scripts/indexer/migration-plan.ts");
     const readModel = loadTypeScript("lib/server/market/read-model.ts");
+    const walletReadModel = loadTypeScript("lib/server/wallet/read-model.ts");
     const repository = loadTypeScript("lib/server/indexer/repository.ts");
     const promotionRegistry = loadTypeScript("lib/server/ipfs/registry.ts");
     process.env.IPFS_GATEWAY_BASE_URL = "https://laypipe-test.mypinata.cloud/ipfs";
-    const migrationSource = readFileSync(
-      resolve(root, "db/migrations/0000_production_read_model.sql"),
-      "utf8",
+    const migrations = readdirSync(resolve(root, "db/migrations"))
+      .filter((name) => /^\d+.*\.sql$/.test(name))
+      .sort((left, right) => left.localeCompare(right))
+      .map((name) => {
+        const source = readFileSync(resolve(root, "db/migrations", name), "utf8");
+        const sha256 = createHash("sha256").update(source).digest("hex");
+        return {
+          name,
+          source,
+          sha256,
+          command: migrationPlan.buildMigrationCommand({
+            name,
+            sha256,
+            statements: migrationPlan.migrationStatements(source),
+          }),
+        };
+      });
+    assert.deepEqual(
+      migrations.map(({ name }) => name),
+      ["0000_production_read_model.sql", "0001_runtime_security.sql"],
     );
-    const migrationName = "0000_production_read_model.sql";
-    const migrationHash = createHash("sha256").update(migrationSource).digest("hex");
-    const migrationCommand = migrationPlan.buildMigrationCommand({
-      name: migrationName,
-      sha256: migrationHash,
-      statements: migrationPlan.migrationStatements(migrationSource),
-    });
     const container = `laypipe-pg-${process.pid}-${randomBytes(4).toString("hex")}`;
     let started = false;
 
@@ -240,10 +258,10 @@ test(
 
       let ready = false;
       for (let attempt = 0; attempt < 60; attempt += 1) {
-        const probe = await docker(
-          ["exec", container, "pg_isready", "-U", "postgres", "-d", "laypipe_test"],
-          { allowFailure: true },
-        );
+        // pg_isready can report that the server accepts connections before the
+        // entrypoint has finished creating POSTGRES_DB. Probe the actual test
+        // database so parallel CI containers cannot race initialization.
+        const probe = await psql(container, "SELECT 1;", { allowFailure: true });
         if (probe.code === 0) {
           ready = true;
           break;
@@ -252,18 +270,21 @@ test(
       }
       assert.equal(ready, true, "Disposable PostgreSQL did not become ready.");
 
-      await psql(container, migrationCommand);
-      await psql(container, migrationCommand);
+      for (const migration of migrations) await psql(container, migration.command);
+      for (const migration of migrations) await psql(container, migration.command);
       const ledger = await psql(
         container,
         "SELECT name, sha256 FROM laypipe_schema_migrations ORDER BY name;",
       );
-      assert.equal(ledger.stdout, `${migrationName}\t${migrationHash}`);
+      assert.equal(
+        ledger.stdout,
+        migrations.map(({ name, sha256 }) => `${name}\t${sha256}`).join("\n"),
+      );
 
       const mismatchedMigration = migrationPlan.buildMigrationCommand({
-        name: migrationName,
+        name: migrations[0].name,
         sha256: "f".repeat(64),
-        statements: migrationPlan.migrationStatements(migrationSource),
+        statements: migrationPlan.migrationStatements(migrations[0].source),
       });
       const mismatch = await psql(container, mismatchedMigration, { allowFailure: true });
       assert.notEqual(mismatch.code, 0);
@@ -289,6 +310,10 @@ test(
       const burnTx = hash("7");
       const revenueTx = hash("8");
       const adminTx = hash("9");
+      const copiedArtworkCreator = address("7");
+      const copiedArtworkToken = address("8");
+      const copiedArtworkPool = hash("e");
+      const copiedArtworkLaunchTx = hash("d");
       const imageCid = "bafkreig6cmq5xgc3ed4qknhtupzyqvkt3qquhyxphgxdxd3hkpdvweezly";
       const metadataCid = "bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku";
 
@@ -639,16 +664,107 @@ WHERE chain_id = 4663 AND stream = 'laypipe';
       assert.equal(list.tokens[0].metrics.trades24h.value, 1);
       assert.equal(list.tokens[0].metrics.totalTrades.value, 1);
 
+      await psql(container, `
+INSERT INTO chain_events (
+  chain_id, block_number, transaction_hash, transaction_index, log_index,
+  contract_address, topic0, topics, data, event_name, decoded_args
+) VALUES (
+  4663, 101, '${copiedArtworkLaunchTx}', 2, 2, '${hook}', '${hash("7")}',
+  '[]', '0x', 'TokenLaunched', '{}'
+);
+INSERT INTO launches (
+  chain_id, token_address, pool_id, creator_address, config_id, first_buy_in,
+  first_buy_out, hook_address, fee_recipient_address, fee_mode, name, symbol,
+  description, logo_uri, metadata_uri, socials, block_number, launched_at,
+  transaction_hash, log_index
+) VALUES (
+  4663, '${copiedArtworkToken}', '${copiedArtworkPool}', '${copiedArtworkCreator}',
+  1, 0, 0, '${hook}', '${copiedArtworkCreator}', 'creator',
+  'Copied Artwork', 'COPY', 'Attempts to reuse another creator''s approved CIDs.',
+  'ipfs://${imageCid}', 'ipfs://${metadataCid}', '{}', 101,
+  now() - interval '30 seconds', '${copiedArtworkLaunchTx}', 2
+);
+`);
+
+      const copiedArtworkDetail = await readModel.getLiveToken(
+        database,
+        copiedArtworkToken,
+      );
+      assert.equal(copiedArtworkDetail.token.creatorAddress, copiedArtworkCreator);
+      assert.equal(copiedArtworkDetail.token.logoGatewayUrl, null);
+      const originalArtworkDetail = await readModel.getLiveToken(database, token);
+      assert.equal(
+        originalArtworkDetail.token.logoGatewayUrl,
+        `https://laypipe-test.mypinata.cloud/ipfs/${imageCid}`,
+      );
+
+      const queryWalletDatabase = async (sql, parameters = []) => {
+        if (sql === walletReadModel.WALLET_WATERMARK_SQL) {
+          return preparedQuery(
+            container,
+            sql,
+            ["bigint", "text"],
+            parameters,
+            WATERMARK_COLUMNS,
+          );
+        }
+        if (sql === walletReadModel.WALLET_POSITIONS_SQL) {
+          return preparedQuery(
+            container,
+            sql,
+            ["bigint", "evm_address", "bigint", "integer", "evm_address", "integer"],
+            parameters,
+            WALLET_POSITION_COLUMNS,
+          );
+        }
+        throw new Error("Unexpected wallet SQL in PostgreSQL integration test.");
+      };
+      const walletDatabase = {
+        query: queryWalletDatabase,
+        async transaction(factory, options) {
+          assert.equal(options?.isolationLevel, "RepeatableRead");
+          assert.equal(options?.readOnly, true);
+          const queries = factory({ query: queryWalletDatabase });
+          return Promise.all(queries);
+        },
+      };
+      const copiedArtworkPortfolio = await walletReadModel.loadWalletPortfolio(
+        walletDatabase,
+        { wallet: copiedArtworkCreator, limit: 12, cursor: null },
+        "postgres-integration-cursor-secret-longer-than-thirty-two-bytes",
+      );
+      assert.equal(copiedArtworkPortfolio.positions.length, 1);
+      assert.equal(copiedArtworkPortfolio.positions[0].tokenAddress, copiedArtworkToken);
+      assert.equal(copiedArtworkPortfolio.positions[0].logoGatewayUrl, null);
+      const originalArtworkPortfolio = await walletReadModel.loadWalletPortfolio(
+        walletDatabase,
+        { wallet: creator, limit: 12, cursor: null },
+        "postgres-integration-cursor-secret-longer-than-thirty-two-bytes",
+      );
+      assert.equal(originalArtworkPortfolio.positions.length, 1);
+      assert.equal(
+        originalArtworkPortfolio.positions[0].logoGatewayUrl,
+        `https://laypipe-test.mypinata.cloud/ipfs/${imageCid}`,
+      );
+
       const indexes = await psql(container, `
 SELECT indexname
 FROM pg_indexes
 WHERE schemaname = 'public'
-  AND indexname IN ('launches_market_page_idx', 'swaps_pool_market_metrics_idx')
+  AND indexname IN (
+    'ipfs_promotions_creator_completed_cids_idx',
+    'launches_market_page_idx',
+    'swaps_pool_market_metrics_idx'
+  )
 ORDER BY indexname;
 `);
       assert.equal(
         indexes.stdout,
-        "launches_market_page_idx\nswaps_pool_market_metrics_idx",
+        [
+          "ipfs_promotions_creator_completed_cids_idx",
+          "launches_market_page_idx",
+          "swaps_pool_market_metrics_idx",
+        ].join("\n"),
       );
 
       const launchPlan = await psql(container, `
@@ -679,21 +795,24 @@ EXPLAIN (COSTS OFF)
 SELECT promotion_id
 FROM ipfs_promotions
 WHERE status = 'completed'
+  AND wallet_address = '${creator}'
   AND image_cid = '${imageCid}'
   AND metadata_cid = '${metadataCid}'
 LIMIT 1;
 `);
       assert.match(
         artworkPlan.stdout,
-        /Index Only Scan using ipfs_promotions_completed_cids_idx/,
+        /Index Only Scan using ipfs_promotions_creator_completed_cids_idx/,
       );
       const artworkPair = await psql(container, `
 SELECT
   count(*) FILTER (
-    WHERE image_cid = '${imageCid}' AND metadata_cid = '${metadataCid}'
+    WHERE wallet_address = '${creator}'
+      AND image_cid = '${imageCid}' AND metadata_cid = '${metadataCid}'
   )::text,
   count(*) FILTER (
-    WHERE image_cid = '${imageCid}' AND metadata_cid = '${imageCid}'
+    WHERE wallet_address = '${copiedArtworkCreator}'
+      AND image_cid = '${imageCid}' AND metadata_cid = '${metadataCid}'
   )::text
 FROM ipfs_promotions
 WHERE status = 'completed';
@@ -850,7 +969,7 @@ SELECT
   (SELECT balance::text FROM token_balances WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}'),
   (SELECT balance::text FROM token_holder_balance_state WHERE chain_id = 4663 AND token_address = '${token}' AND holder_address = '${holder}');
 `);
-      assert.equal(replayed.stdout, "2\t3\t1\t2000000000000000000000\t2000000000000000000000");
+      assert.equal(replayed.stdout, "2\t4\t1\t2000000000000000000000\t2000000000000000000000");
     } finally {
       if (started) {
         const cleanup = await docker(

@@ -4,6 +4,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -59,6 +60,19 @@ import {
 import { readBrowserPublicLaunchDeployment } from "@/lib/web3/browser-deployment";
 import type { Address, Hex } from "@/lib/web3/types";
 import { formatUnits, parseUnits } from "@/lib/web3/units";
+import {
+  createWalletBoundPinnedCache,
+  readWalletBoundPinnedAssets,
+  retainPinnedCacheForWallet,
+  type WalletBoundPinnedCache,
+} from "./pinned-cache";
+import {
+  assertExactLaunchWalletContext,
+  assertPreparedLaunchCreator,
+  isStaleLaunchWalletOperation,
+  LaunchPrepareOperationGuard,
+  type LaunchWalletSnapshot,
+} from "./wallet-operation";
 import styles from "./launch.module.css";
 
 const PIPEDOG_DECIMALS = 18;
@@ -77,11 +91,6 @@ interface CompletedLaunch {
   poolId: Hex;
   transactionHash: Hex;
   allowanceCleared: boolean | null;
-}
-
-interface PinnedCache {
-  fingerprint: string;
-  assets: PinnedLaunchAssets;
 }
 
 function shortAddress(address: Address) {
@@ -130,7 +139,8 @@ export default function LaunchForm() {
   const [artwork, setArtwork] = useState<ValidatedArtwork | null>(null);
   const [artworkError, setArtworkError] = useState("");
   const [prepared, setPrepared] = useState<PreparedLaunch | null>(null);
-  const [pinnedCache, setPinnedCache] = useState<PinnedCache | null>(null);
+  const [pinnedCache, setPinnedCache] =
+    useState<WalletBoundPinnedCache | null>(null);
   const [pendingHash, setPendingHash] = useState<Hex | null>(null);
   const [pendingIntent, setPendingIntent] =
     useState<PendingLaunchIntent | null>(null);
@@ -144,6 +154,14 @@ export default function LaunchForm() {
   const handledWalletRevisionRef = useRef(walletRevision);
   const ignoreNextWalletRevisionRef = useRef(false);
   const pendingOperationRef = useRef(0);
+  const [prepareOperationGuard] = useState(
+    () => new LaunchPrepareOperationGuard(),
+  );
+  const walletSnapshotRef = useRef<LaunchWalletSnapshot>({
+    provider,
+    account,
+    revision: walletRevision,
+  });
 
   const pendingIntentReady =
     account === null ||
@@ -159,6 +177,27 @@ export default function LaunchForm() {
   ].includes(machine.phase) || pendingIntent !== null;
   const tokenLabel = `${name || "Your coin"} ${symbol ? `$${symbol}` : ""}`;
   const firstBuyLooksZero = /^0*(?:\.0*)?$/.test(firstBuy.trim());
+
+  useLayoutEffect(() => {
+    const previous = walletSnapshotRef.current;
+    walletSnapshotRef.current = {
+      provider,
+      account,
+      revision: walletRevision,
+    };
+    if (
+      previous.provider !== provider ||
+      previous.revision !== walletRevision ||
+      previous.account?.toLowerCase() !== account?.toLowerCase()
+    ) {
+      prepareOperationGuard.invalidate();
+    }
+  }, [account, prepareOperationGuard, provider, walletRevision]);
+
+  useEffect(
+    () => () => prepareOperationGuard.invalidate(),
+    [prepareOperationGuard],
+  );
 
   useEffect(() => {
     if (handledWalletRevisionRef.current === walletRevision) return;
@@ -205,6 +244,7 @@ export default function LaunchForm() {
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
+      setPinnedCache((cache) => retainPinnedCacheForWallet(cache, account));
       if (!account) {
         setPendingIntent(null);
         setPendingIntentWallet(null);
@@ -339,9 +379,24 @@ export default function LaunchForm() {
       return;
     }
 
+    const operation = prepareOperationGuard.begin({
+      provider,
+      account,
+      walletRevision,
+    });
+    const assertCurrentOperation = () => {
+      prepareOperationGuard.assertCurrent(operation, walletSnapshotRef.current);
+    };
+    const assertExactCurrentOperation = async () => {
+      assertCurrentOperation();
+      await assertExactLaunchWalletContext(provider, account);
+      assertCurrentOperation();
+    };
+
     dispatch({ type: "PREPARE" });
     try {
       await ensureRobinhoodChain(provider);
+      assertCurrentOperation();
       const metadata = currentMetadata();
       const amounts = currentAmounts();
       const configId =
@@ -354,6 +409,7 @@ export default function LaunchForm() {
       );
 
       const firstPreflight = await client.readPreflight(account, configId);
+      assertCurrentOperation();
       assertLaunchPreflight({
         preflight: firstPreflight,
         expectedSelfBurn: mode === "self-burn",
@@ -361,18 +417,29 @@ export default function LaunchForm() {
       });
 
       const fingerprint = await launchFingerprint(metadata, artwork);
-      const assets =
-        pinnedCache?.fingerprint === fingerprint
-          ? pinnedCache.assets
-          : await pinLaunchAssets({
-              file: artwork.file,
-              metadata,
-              wallet: account,
-              provider,
-              browserOrigin: window.location.origin,
-            });
-      if (pinnedCache?.fingerprint !== fingerprint) {
-        setPinnedCache({ fingerprint, assets });
+      assertCurrentOperation();
+      const cachedAssets = readWalletBoundPinnedAssets(
+        pinnedCache,
+        account,
+        fingerprint,
+      );
+      const assets = cachedAssets ?? await pinLaunchAssets({
+        file: artwork.file,
+        metadata,
+        wallet: account,
+        provider,
+        browserOrigin: window.location.origin,
+        signal: operation.signal,
+      });
+      await assertExactCurrentOperation();
+      if (!cachedAssets) {
+        setPinnedCache(
+          createWalletBoundPinnedCache({
+            wallet: account,
+            fingerprint,
+            assets,
+          }),
+        );
       }
 
       const params: FactoryTokenParams = {
@@ -395,7 +462,9 @@ export default function LaunchForm() {
         configId,
         sender: account,
       });
+      assertCurrentOperation();
       const freshPreflight = await client.readPreflight(account, configId);
+      assertCurrentOperation();
       const safety = assertLaunchPreflight({
         preflight: freshPreflight,
         expectedSelfBurn: mode === "self-burn",
@@ -407,6 +476,8 @@ export default function LaunchForm() {
         ...amounts,
         salt: mined.salt,
       };
+      await assertExactCurrentOperation();
+      assertPreparedLaunchCreator(input.params.creator, account);
       setPrepared({
         assets,
         params,
@@ -420,11 +491,21 @@ export default function LaunchForm() {
         needsApproval: safety.approvalPlan.steps.length > 0,
       });
     } catch (error) {
+      if (!prepareOperationGuard.isCurrent(operation, walletSnapshotRef.current)) {
+        return;
+      }
+      if (isStaleLaunchWalletOperation(error)) {
+        setPrepared(null);
+        dispatch({ type: "REVIEW" });
+        return;
+      }
       dispatch({
         type: "FAIL",
         message: describeWalletError(error),
         recoverTo: "wallet-ready",
       });
+    } finally {
+      prepareOperationGuard.finish(operation);
     }
   }
 
@@ -456,12 +537,15 @@ export default function LaunchForm() {
       hash: null,
       invokedAt: Date.now(),
     };
-    dispatch({ type: "APPROVAL_SUBMITTED" });
-    setPendingHash(null);
     let submissionInvoked = false;
     let submittedHash: Hex | null = null;
+    let approvalConfirmed = false;
     try {
-      await ensureRobinhoodChain(provider);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
+      await assertExactLaunchWalletContext(provider, account);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
+      dispatch({ type: "APPROVAL_SUBMITTED" });
+      setPendingHash(null);
       const client = new LaypipeLaunchClient(
         provider,
         deploymentResult.deployment,
@@ -487,6 +571,7 @@ export default function LaunchForm() {
       });
       setPendingHash(hash);
       await client.confirmApproval(hash, account, nextStep.amount);
+      approvalConfirmed = true;
       removePendingLaunch(
         window.localStorage,
         account,
@@ -504,6 +589,8 @@ export default function LaunchForm() {
         expectedSelfBurn: mode === "self-burn",
         firstBuyIn: prepared.input.firstBuyIn,
       });
+      await assertExactLaunchWalletContext(provider, account);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
       setPrepared({
         ...prepared,
         preflight,
@@ -515,6 +602,17 @@ export default function LaunchForm() {
         needsAnotherApproval: safety.approvalPlan.steps.length > 0,
       });
     } catch (error) {
+      const staleWallet = isStaleLaunchWalletOperation(error);
+      if (staleWallet && approvalConfirmed) {
+        setPrepared(null);
+        dispatch({
+          type: "FAIL",
+          message:
+            "The approval was confirmed, but the wallet context changed. Prepare again before another mutation.",
+          recoverTo: "wallet-ready",
+        });
+        return;
+      }
       const canonicalRevert = isCanonicalTransactionReverted(error);
       const keepLocked =
         !canonicalRevert &&
@@ -529,17 +627,20 @@ export default function LaunchForm() {
         setPendingIntent(null);
         setPendingHash(null);
       }
-      if (canonicalRevert) {
+      if (canonicalRevert || staleWallet) {
         setPrepared(null);
       }
       dispatch({
         type: "FAIL",
-        message: canonicalRevert
+        message: staleWallet
+          ? describeWalletError(error)
+          : canonicalRevert
           ? "The exact approval was canonically confirmed as reverted. Prepare again from a fresh manifest snapshot."
           : keepLocked
           ? `${describeWalletError(error)} Do not retry this approval until it is reconciled.`
           : describeWalletError(error),
-        recoverTo: canonicalRevert ? "wallet-ready" : "approval-required",
+        recoverTo:
+          canonicalRevert || staleWallet ? "wallet-ready" : "approval-required",
       });
     }
   }
@@ -567,7 +668,9 @@ export default function LaunchForm() {
     let submissionInvoked = false;
     let submittedHash: Hex | null = null;
     try {
-      await ensureRobinhoodChain(provider);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
+      await assertExactLaunchWalletContext(provider, account);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
       const client = new LaypipeLaunchClient(
         provider,
         deploymentResult.deployment,
@@ -582,11 +685,15 @@ export default function LaunchForm() {
         firstBuyIn: prepared.input.firstBuyIn,
       });
       if (safety.approvalPlan.steps.length > 0) {
+        await assertExactLaunchWalletContext(provider, account);
+        assertPreparedLaunchCreator(prepared.params.creator, account);
         setPrepared({ ...prepared, preflight, approvalPlan: safety.approvalPlan });
         dispatch({ type: "PREPARED", needsApproval: true });
         return;
       }
 
+      await assertExactLaunchWalletContext(provider, account);
+      assertPreparedLaunchCreator(prepared.params.creator, account);
       dispatch({ type: "LAUNCH_SUBMITTED" });
       const hash = await client.sendLaunch(account, prepared.input, {
         onSubmissionInvoked: () => {
@@ -643,6 +750,7 @@ export default function LaunchForm() {
       setPendingHash(null);
       dispatch({ type: "LAUNCH_CONFIRMED" });
     } catch (error) {
+      const staleWallet = isStaleLaunchWalletOperation(error);
       const canonicalRevert = isCanonicalTransactionReverted(error);
       const keepLocked =
         !canonicalRevert &&
@@ -657,17 +765,20 @@ export default function LaunchForm() {
         setPendingIntent(null);
         setPendingHash(null);
       }
-      if (canonicalRevert) {
+      if (canonicalRevert || staleWallet) {
         setPrepared(null);
       }
       dispatch({
         type: "FAIL",
-        message: canonicalRevert
+        message: staleWallet
+          ? describeWalletError(error)
+          : canonicalRevert
           ? "The launch was canonically confirmed as reverted. Prepare again from a fresh manifest snapshot."
           : keepLocked
           ? `${describeWalletError(error)} Do not retry this launch until it is reconciled.`
           : describeWalletError(error),
-        recoverTo: canonicalRevert ? "wallet-ready" : "ready-to-launch",
+        recoverTo:
+          canonicalRevert || staleWallet ? "wallet-ready" : "ready-to-launch",
       });
     }
   }

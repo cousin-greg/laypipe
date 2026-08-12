@@ -40,7 +40,7 @@ jobs:
       - name: Run real PostgreSQL 16 integration
         env:
           LAYPIPE_RUN_POSTGRES_INTEGRATION: "1"
-        run: node --test tests/postgres-integration.test.mjs
+        run: node --test tests/postgres-integration.test.mjs tests/postgres-privileges.test.mjs
 
       - name: Lint and type-check
         run: |
@@ -100,7 +100,7 @@ jobs:
         run: >-
           forge test -vv
           --match-contract
-          '^(ChainBlockNumberTest|CurveSimulationMathTest|CurveEconomicsTest|LaypipeFactoryUpgradeTest|LaypipeSwapRouterTest|LaypipeTokenTest|PipedogHookLivenessTest|PipedogRevenueRouterTest|PipedogRevenueRouterInvariantTest)$'
+          '^(ChainBlockNumberTest|CurveSimulationMathTest|CurveEconomicsTest|DeploymentInputsGateTest|LaypipeFactoryUpgradeTest|LaypipeSwapRouterTest|LaypipeTokenTest|PipedogHookLivenessTest|PipedogRevenueRouterTest|PipedogRevenueRouterInvariantTest)$'
 
       - name: Verify reference-source provenance
         run: node scripts/check-source-fidelity.mjs
@@ -110,8 +110,8 @@ jobs:
           node scripts/generate-abis.mjs
           git diff --exit-code -- abi
 
-      - name: Test deterministic release hashing
-        run: node --test scripts/release-hashes.test.mjs
+      - name: Test deterministic release and deployment-input gates
+        run: node --test scripts/release-hashes.test.mjs scripts/deployment-inputs.test.mjs
 
       - name: Verify pinned release bundle hashes
         run: >-

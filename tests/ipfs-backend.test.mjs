@@ -27,6 +27,10 @@ const registryModule = await tsImport(
   "../lib/server/ipfs/registry.ts",
   import.meta.url,
 );
+const databaseModule = await tsImport(
+  "../lib/server/db/neon.ts",
+  import.meta.url,
+);
 const imageModule = await tsImport("../lib/server/ipfs/image.ts", import.meta.url);
 const metadataModule = await tsImport(
   "../lib/server/ipfs/metadata.ts",
@@ -65,12 +69,88 @@ function configureEnvironment() {
   process.env.UPSTASH_REDIS_REST_KV_REST_API_URL = "https://laypipe-test.upstash.io";
   process.env.UPSTASH_REDIS_REST_KV_REST_API_TOKEN = "test-upstash-token";
   process.env.CRON_SECRET = "test-cron-secret-that-is-at-least-32-bytes";
-  process.env.DATABASE_URL =
-    "postgresql://test:test@ep-test.us-east-2.aws.neon.tech/laypipe_test";
+  process.env.DATABASE_WRITE_URL =
+    "postgresql://write-test:test@ep-test.us-east-2.aws.neon.tech/laypipe_test";
+  process.env.DATABASE_READ_URL =
+    "postgresql://read-test:test@ep-test.us-east-2.aws.neon.tech/laypipe_test";
+  process.env.LAYPIPE_DB_READ_ROLE = "laypipe_runtime_read";
+  process.env.LAYPIPE_DB_WRITE_ROLE = "laypipe_runtime_write";
 }
 
 function promotionRegistryResponse(init) {
   const body = JSON.parse(init.body);
+  if (body.query === databaseModule.RUNTIME_DATABASE_ATTESTATION_SQL) {
+    const access = body.params[0] === "laypipe_runtime_read" ? "read" : "write";
+    const write = access === "write";
+    const group = `laypipe_runtime_${access}`;
+    const row = {
+      database_id: "11111111-1111-4111-8111-111111111111",
+      database_name: "laypipe_test",
+      session_user: `laypipe_${access}_login`,
+      current_user: `laypipe_${access}_login`,
+      migration_fingerprint: [
+        `0000_production_read_model.sql:${"a".repeat(64)}`,
+        `0001_runtime_security.sql:${"b".repeat(64)}`,
+      ].join(","),
+      migration_count: "2",
+      expected_group: group,
+      direct_memberships: group,
+      in_expected_group: true,
+      membership_admin_option: false,
+      membership_inherit_option: true,
+      membership_set_option: true,
+      role_superuser: false,
+      role_inherit: true,
+      role_create_role: false,
+      role_create_db: false,
+      role_can_login: true,
+      role_replication: false,
+      role_bypass_rls: false,
+      owns_relation: false,
+      owns_function: false,
+      owns_schema: false,
+      expected_group_superuser: false,
+      expected_group_inherit: true,
+      expected_group_create_role: false,
+      expected_group_create_db: false,
+      expected_group_can_login: false,
+      expected_group_replication: false,
+      expected_group_bypass_rls: false,
+      expected_group_has_parent: false,
+      expected_group_owns_relation: false,
+      expected_group_owns_function: false,
+      expected_group_owns_schema: false,
+      can_create_database: false,
+      can_create_schema: false,
+      can_create_temp: false,
+      can_modify_identity: false,
+      can_modify_migration_ledger: false,
+      can_modify_canonical: write,
+      has_exact_canonical_write: write,
+      can_modify_cursor_or_derived: false,
+      can_delete_or_truncate_any: false,
+      can_read_launches: true,
+      can_write_blocks: write,
+      can_delete_blocks: false,
+      can_write_cursor: false,
+      can_write_derived: false,
+      can_insert_promotion: write,
+      can_update_promotion: write,
+      can_delete_promotion: false,
+      can_execute_initialize_cursor: write,
+      can_execute_advance_cursor: write,
+      can_execute_record_observation: write,
+      can_execute_rollback: write,
+    };
+    const fields = Object.keys(row).map((name) => ({
+      name,
+      dataTypeID: typeof row[name] === "boolean" ? 16 : 25,
+    }));
+    const values = Object.values(row).map((value) =>
+      typeof value === "boolean" ? (value ? "t" : "f") : value,
+    );
+    return Response.json({ fields, rows: [values], rowCount: 1, command: "SELECT" });
+  }
   if (body.query === registryModule.PROMOTION_REGISTRY_READY_SQL) {
     assert.deepEqual(body.params, []);
     return Response.json({

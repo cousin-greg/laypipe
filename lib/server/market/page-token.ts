@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 import type { LiveTokenDetailResponse } from "../../market/live";
-import { getDatabase } from "../db/neon";
+import { getReadDatabase } from "../db/neon";
 import { MarketInputError, getLiveToken, parseLiveTokenSlug } from "./read-model";
 
 export const LIVE_TOKEN_PAGE_CACHE_SECONDS = 10;
@@ -18,7 +18,7 @@ export interface LiveTokenPageDependencies {
 }
 
 const readCachedToken = unstable_cache(
-  async (address: string) => getLiveToken(await getDatabase(), address),
+  async (address: string) => getLiveToken(await getReadDatabase(), address),
   ["laypipe-live-token-page-v1"],
   { revalidate: LIVE_TOKEN_PAGE_CACHE_SECONDS },
 );

@@ -246,3 +246,17 @@ broadcast/cache artifacts.
 
 Never add `--broadcast` without explicit authorization and an independent
 audit.
+
+The ignored `.deployment-inputs.approved.json` binds the approved curve hash,
+candidate/source/artifact hashes, exact compiled `DeployLaypipe` runtime
+codehash, chain dependencies, deployer/Safe/revenue addresses, all deployment
+economics, and staged disabled-launch state. The clean wrapper requires a clean
+release-relevant worktree, rejects every `FOUNDRY_*`/`DAPP_*` override, builds
+the canonical artifact, and—with the immutable audited checkout—binds
+Git/source, curve review, and current artifacts. The reviewed, unmodified
+`DeployLaypipe` independently recomputes the same ABI-encoded SHA-256 digest,
+compares its runtime codehash, and deep-matches all manifest values/constants
+before `startBroadcast`. The digest is an unsigned integrity identifier, not a
+signature; retain written independent approval for it. An arbitrarily modified
+raw script is not protected by an in-script guard. Preserve the approved
+manifest/report outside the checkout as immutable release evidence.

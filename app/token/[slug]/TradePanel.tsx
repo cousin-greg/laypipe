@@ -872,8 +872,12 @@ export function TradePanel({ enabled, symbol, token }: TradePanelProps) {
             <dd>{formatUnits(quote.minimumOutput, 18, 6)} {outputSymbol}</dd>
           </div>
           <div>
-            <dt>Quote</dt>
+            <dt>Submit window</dt>
             <dd>{quoteSeconds > 0 ? `${quoteSeconds}s left` : "Expired"}</dd>
+          </div>
+          <div>
+            <dt>Router block cap</dt>
+            <dd>L2 block {quote.deadlineBlock.toString()}</dd>
           </div>
         </dl>
       ) : null}

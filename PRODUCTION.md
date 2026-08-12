@@ -13,9 +13,11 @@ immutable external-review package; this runbook remains the detailed authority.
 - The `laypipe-production` Neon integration is attached to Production and
   Preview. Preview database branching is enabled, so preview migrations and
   data do not touch the production branch.
-- The `laypipe-production-rate-limits` Upstash database is attached to
-  Production only. Preview upload/mutation routes intentionally fail closed
-  instead of sharing the production nonce and rate-limit store.
+- The `laypipe-production-rate-limits` Upstash database still needs to be
+  accepted and verified in the Vercel Marketplace for Production. Until its
+  injected REST URL/token are confirmed by a fail-closed smoke test, upload
+  and mutation routes must remain disabled. Preview must use a separate Redis
+  resource and must never share Production nonce or rate-limit state.
 - `NEXT_PUBLIC_SITE_URL`, `LAYPIPE_MARKET_MODE=fixture`, a production
   wallet-challenge secret, a production cron secret, and the
   `IPFS_PINNING_ENABLED=false` kill switch are configured in Vercel. Pinata
@@ -86,6 +88,18 @@ Sensitive in Vercel.
 Restrict the Pinata key to only the file and JSON pinning permissions this app
 uses. Database clients must initialize lazily so an intentionally unconfigured
 Preview build fails at request time rather than during `next build`.
+
+Database access is split deliberately. `DATABASE_READ_URL` serves market,
+wallet, and reconciliation reads; `DATABASE_WRITE_URL` serves IPFS registry and
+canonical indexer work. They use separate rotatable LOGIN credentials, each
+inheriting exactly one reviewed read/write NOLOGIN role, and must target the same
+primary Neon branch. A third NOLOGIN service role owns only the exact fixed-path
+maintenance functions; its sole ADMIN member is the operator-only migration
+owner, with the INHERIT and SET options required to maintain those functions,
+never a runtime identity. Keep
+`DATABASE_MIGRATION_URL` operator-local and out of Vercel. After every migration,
+run `npm run db:grant-runtime` as the owner and rerun the PostgreSQL privilege
+integration before either runtime URL is enabled.
 
 The complete public audited-deployment manifest is the canonical contract
 configuration for both the browser and indexer. A factory address alone never
@@ -268,16 +282,17 @@ must pass the image URI as `TokenParams.logo` and the metadata URI as
 `TokenParams.metadataURI`. The pin route records the exact completed promotion,
 wallet, digest, normalized image CID, and metadata CID in `ipfs_promotions`
 before returning success. That write is immutable and idempotent; a missing or
-malformed `DATABASE_URL` stops publishing before any new permanent upload, and
-a database write failure prevents success after the pins are durable so the
+malformed `DATABASE_WRITE_URL` stops publishing before any new permanent upload,
+and a database write failure prevents success after the pins are durable so the
 same request can repair the registry without repinning.
 A gateway URL is a delivery convenience; `ipfs://` is the durable identity.
 
 Board, token-detail, and wallet portfolio reads expose a gateway image only
-when both indexed on-chain URIs exactly match one completed promotion record.
-A direct factory caller can still put arbitrary URIs on-chain, but those tokens
-render as initials. Public reads never query Pinata to validate artwork and
-never translate an unapproved CID into a fetchable URL.
+when both indexed on-chain URIs exactly match one completed promotion record and
+its wallet equals the launch's original creator. A direct factory caller can
+still put arbitrary or another creator's approved URIs on-chain, but those tokens
+render as initials. Public reads never query Pinata to validate artwork and never
+translate an unapproved CID into a fetchable URL.
 Back up `ipfs_promotions` before opening uploads. Its loss does not affect token
 ownership or trading and fails safely to initials, but artwork availability is
 not restored by chain replay alone; retain the correlated permanent Pinata tags

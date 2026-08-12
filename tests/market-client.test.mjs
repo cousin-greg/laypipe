@@ -47,6 +47,9 @@ function loadTypeScript(relativePath) {
 
 const pagination = loadTypeScript("lib/market/pagination.ts");
 const adapter = loadTypeScript("app/_data/adapter.ts");
+const exactNumbers = loadTypeScript("lib/market/exact-numbers.ts");
+const marketFormat = loadTypeScript("app/_components/market-format.ts");
+const UINT256_MAX = ((BigInt(1) << BigInt(256)) - BigInt(1)).toString();
 
 function liveToken(tokenAddress = `0x${"a".repeat(40)}`) {
   return {
@@ -215,6 +218,237 @@ test("live adapter accepts only canonical Pinata artwork URLs", () => {
     logoGatewayUrl: `https://attacker.example/ipfs/${cid}`,
   });
   assert.equal(rejected.artworkUrl, null);
+});
+
+test("live market metrics preserve extreme uint256 values without overflow or underflow", () => {
+  const maximum = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    metrics: {
+      ...liveToken().metrics,
+      lastPricePipedog: {
+        status: "observed",
+        value: { pipedogAmount: UINT256_MAX, tokenAmount: "1" },
+        basis: "test",
+      },
+      volume24hPipedog: {
+        status: "observed",
+        value: UINT256_MAX,
+        basis: "test",
+      },
+    },
+  });
+  assert.deepEqual(maximum.price, {
+    pipedogAmount: UINT256_MAX,
+    tokenAmount: "1",
+  });
+  assert.equal(maximum.volume24h, UINT256_MAX);
+  assert.equal(
+    marketFormat.formatTokenPrice(maximum),
+    "1.15792e+77 PIPEDOG",
+  );
+  assert.equal(
+    marketFormat.formatTokenVolume(maximum),
+    "1.158e+59 PIPEDOG",
+  );
+
+  const tiny = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    metrics: {
+      ...liveToken().metrics,
+      lastPricePipedog: {
+        status: "observed",
+        value: { pipedogAmount: "1", tokenAmount: UINT256_MAX },
+        basis: "test",
+      },
+      volume24hPipedog: {
+        status: "observed",
+        value: "1",
+        basis: "test",
+      },
+    },
+  });
+  assert.equal(
+    marketFormat.formatTokenPrice(tiny),
+    "8.63617e-78 PIPEDOG",
+  );
+  assert.equal(marketFormat.formatTokenVolume(tiny), "1e-18 PIPEDOG");
+});
+
+test("live volume and percentage comparisons retain exact ordering", () => {
+  const lowerVolume = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(`0x${"1".repeat(40)}`),
+    metrics: {
+      ...liveToken().metrics,
+      lastPricePipedog: {
+        status: "observed",
+        value: {
+          pipedogAmount: UINT256_MAX,
+          tokenAmount: (BigInt(UINT256_MAX) - BigInt(1)).toString(),
+        },
+        basis: "test",
+      },
+      baselinePrice24hPipedog: {
+        status: "observed",
+        value: { pipedogAmount: "1", tokenAmount: "1" },
+        basis: "test",
+      },
+      volume24hPipedog: {
+        status: "observed",
+        value: (BigInt(UINT256_MAX) - BigInt(1)).toString(),
+        basis: "test",
+      },
+      trades24h: { status: "observed", value: 2, basis: "test" },
+    },
+  });
+  const higherVolumeAndChange = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(`0x${"2".repeat(40)}`),
+    metrics: {
+      ...liveToken().metrics,
+      lastPricePipedog: {
+        status: "observed",
+        value: {
+          pipedogAmount: UINT256_MAX,
+          tokenAmount: (BigInt(UINT256_MAX) - BigInt(2)).toString(),
+        },
+        basis: "test",
+      },
+      baselinePrice24hPipedog: {
+        status: "observed",
+        value: { pipedogAmount: "1", tokenAmount: "1" },
+        basis: "test",
+      },
+      volume24hPipedog: {
+        status: "observed",
+        value: UINT256_MAX,
+        basis: "test",
+      },
+      trades24h: { status: "observed", value: 2, basis: "test" },
+    },
+  });
+
+  assert.equal(
+    marketFormat.compareTokenVolumes(higherVolumeAndChange, lowerVolume),
+    1,
+  );
+  assert.equal(
+    marketFormat.compareTokenChanges(higherVolumeAndChange, lowerVolume),
+    1,
+  );
+  assert.equal(marketFormat.formatTokenChange(lowerVolume), "+<0.1%");
+});
+
+test("exact percentage formatting stays bounded at uint256 ratio extremes", () => {
+  const change = exactNumbers.exactPercentChange(
+    { pipedogAmount: UINT256_MAX, tokenAmount: "1" },
+    { pipedogAmount: "1", tokenAmount: UINT256_MAX },
+  );
+  assert.ok(change);
+  assert.equal(exactNumbers.exactPercentChangeDirection(change), 1);
+  assert.equal(exactNumbers.formatExactPercentChange(change), "+1.341e+156%");
+});
+
+test("zero price baseline makes live percentage change unavailable", () => {
+  const board = adapter.mapLiveTokenToBoardToken({
+    ...liveToken(),
+    metrics: {
+      ...liveToken().metrics,
+      baselinePrice24hPipedog: {
+        status: "observed",
+        value: { pipedogAmount: "0", tokenAmount: "1" },
+        basis: "test",
+      },
+      trades24h: { status: "observed", value: 2, basis: "test" },
+    },
+  });
+  assert.equal(board.change24h, null);
+  assert.equal(marketFormat.formatTokenChange(board), "Unavailable");
+  assert.equal(marketFormat.tokenChangeDirection(board), null);
+});
+
+test("fixture market formatting and numeric fields remain unchanged", () => {
+  const fixture = adapter.fixtureBoardSource.tokens[0];
+  assert.equal(typeof fixture.price, "number");
+  assert.equal(typeof fixture.volume24h, "number");
+  assert.equal(typeof fixture.change24h, "number");
+  assert.equal(marketFormat.formatTokenPrice(fixture), "$0.000184");
+  assert.equal(marketFormat.formatTokenVolume(fixture), "$42.6K");
+  assert.equal(marketFormat.formatTokenChange(fixture), "+38.4%");
+});
+
+test("live metric payloads reject out-of-range and malformed exact values", () => {
+  const aboveUint256 = (BigInt(UINT256_MAX) + BigInt(1)).toString();
+  assert.throws(
+    () => adapter.mapLiveTokenToBoardToken({
+      ...liveToken(),
+      metrics: {
+        ...liveToken().metrics,
+        volume24hPipedog: {
+          status: "observed",
+          value: aboveUint256,
+          basis: "test",
+        },
+      },
+    }),
+    /volume is invalid/i,
+  );
+  assert.throws(
+    () => adapter.mapLiveTokenToBoardToken({
+      ...liveToken(),
+      metrics: {
+        ...liveToken().metrics,
+        lastPricePipedog: {
+          status: "observed",
+          value: { pipedogAmount: "1", tokenAmount: "0" },
+          basis: "test",
+        },
+      },
+    }),
+    /token amount is invalid/i,
+  );
+  assert.throws(
+    () => adapter.mapLiveTokenToBoardToken({
+      ...liveToken(),
+      metrics: {
+        ...liveToken().metrics,
+        lastPricePipedog: {
+          status: "observed",
+          value: { pipedogAmount: "01", tokenAmount: "1" },
+          basis: "test",
+        },
+      },
+    }),
+    /PIPEDOG amount is invalid/i,
+  );
+  assert.throws(
+    () => adapter.mapLiveTokenToBoardToken({
+      ...liveToken(),
+      metrics: {
+        ...liveToken().metrics,
+        trades24h: {
+          status: "observed",
+          value: Number.MAX_SAFE_INTEGER + 1,
+          basis: "test",
+        },
+      },
+    }),
+    /trade count is invalid/i,
+  );
+});
+
+test("Board, marquee, and token detail render through exact live helpers", () => {
+  const board = readFileSync(resolve(root, "app/_components/MarketBoard.tsx"), "utf8");
+  const shell = readFileSync(resolve(root, "app/_components/SiteShell.tsx"), "utf8");
+  const detail = readFileSync(resolve(root, "app/token/[slug]/page.tsx"), "utf8");
+  const adapterSource = readFileSync(resolve(root, "app/_data/adapter.ts"), "utf8");
+
+  assert.match(board, /compareTokenVolumes\(b, a\)/);
+  assert.match(board, /compareTokenChanges\(b, a\)/);
+  assert.match(board, /formatTokenPrice\(token\)/);
+  assert.match(shell, /formatTokenChange\(token\)/);
+  assert.match(detail, /formatTokenVolume\(token\)/);
+  assert.doesNotMatch(adapterSource, /Number\(value\.pipedogAmount\)/);
+  assert.doesNotMatch(adapterSource, /Number\(value\.tokenAmount\)/);
+  assert.doesNotMatch(adapterSource, /Number\(token\.metrics\.volume24hPipedog/);
 });
 
 test("shared provider owns polling, visibility pause, and pagination", () => {

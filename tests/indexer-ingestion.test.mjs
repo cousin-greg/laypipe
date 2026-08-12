@@ -1018,10 +1018,7 @@ test("indexer observations persist the pinned safe head and terminal status", as
     },
   );
   assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /observed_safe_head = \$3::bigint/);
-  assert.match(calls[0].sql, /last_processed_block <= \$3::bigint/);
-  assert.match(calls[0].sql, /observed_safe_head <= \$3::bigint/);
-  assert.match(calls[0].sql, /observed_at <= \$4::timestamptz/);
+  assert.match(calls[0].sql, /laypipe_runtime_record_observation/);
   assert.deepEqual(calls[0].params, [
     4663,
     "laypipe",
@@ -1030,6 +1027,22 @@ test("indexer observations persist the pinned safe head and terminal status", as
     "caught-up",
   ]);
   assert.ok(calls[0].options.fetchOptions.signal instanceof AbortSignal);
+
+  for (const rejectedRows of [[], [{ updated: false }]]) {
+    await assert.rejects(
+      repository.recordIndexerObservation(
+        {
+          chainId: 4663,
+          stream: "laypipe",
+          safeHead: 128n,
+          status: "bounded",
+          observedAt: new Date("2026-08-11T12:00:01.000Z"),
+        },
+        { async query() { return rejectedRows; } },
+      ),
+      /missing or non-monotonic/,
+    );
+  }
 });
 
 test("catch-up runner stops at max batches, idle, and deadline without an unbounded loop", async () => {

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "kind": "laypipe-robinhood-deployment-inputs-v1",
+  "candidate": {
+    "sourceCommit": "38b9ddfd7d0cf245ce7911a9c7fd9f6a834ed548",
+    "abiBundleSha256": "0x7eb1deb726a26ebef047ff939613b7c8ac306c14e5ec303b7b01e860fb9b3ff4",
+    "artifactBundleSha256": "0x046884a6dfb0318e9ebc5f5805f425b6703c0529fca2c8df4a024dd216e95114",
+    "deployScriptRuntimeCodehash": "0x670d9e96ceb0d2e9c34581006c4db39b6853b63f6ce200cb91f91c613aec51b4",
+    "deploymentSourceBundleSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "curveReview": {
+    "configHash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "chain": {
+    "chainId": 4663,
+    "pipedog": "0x5cb6f181081301b44905f3ae15419112ecabd8a6",
+    "poolManager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+    "create2Deployer": "0x4e59b44847b379578588920ca78fbf26c0b4956c"
+  },
+  "addresses": {
+    "deployer": "0xe05fcc23807536bee418f142d19fa0d21bb0cff7",
+    "finalOwner": "0x1111111111111111111111111111111111111111",
+    "treasuryWallet": "0x2222222222222222222222222222222222222222",
+    "operationsWallet": "0x3333333333333333333333333333333333333333"
+  },
+  "economics": {
+    "supplyWei": "1000000000000000000000000000",
+    "tickSpacing": 200,
+    "startTick": 69000,
+    "launchFeePipedogWei": "1000000000000000000",
+    "maxSequesterPerCallPipedogWei": "1000000000000000000000",
+    "maxTreasuryRoutePerCallPipedogWei": "1000000000000000000000",
+    "maxSelfBurnPerCallPipedogWei": "100000000000000000000",
+    "routerBountyBps": 25,
+    "selfBurnBountyBps": 25
+  },
+  "stagedSafety": {
+    "globalLaunchEnabled": false,
+    "creatorConfigEnabled": true,
+    "selfBurnConfigEnabled": false
+  },
+  "approval": {
+    "status": "approved",
+    "deploymentInputsHash": "sha256:dbd2bd25f821d1b7afcfe730da0e8284b862a0a31fc66a53750efdc24abe9077",
+    "approver": "test fixture",
+    "approvedAt": "2000-01-01T00:00:00Z"
+  },
+  "test": {
+    "expectedDeploymentInputsHash": "0xdbd2bd25f821d1b7afcfe730da0e8284b862a0a31fc66a53750efdc24abe9077"
+  }
+}

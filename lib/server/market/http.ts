@@ -1,5 +1,5 @@
 import type { DbClient } from "../db/neon";
-import { getDatabase } from "../db/neon";
+import { getReadDatabase } from "../db/neon";
 import type { MarketApiError } from "../../market/live";
 import {
   assessIndexerFreshness,
@@ -88,7 +88,7 @@ export async function handleTokenListRequest(
   }
 
   try {
-    const database = await (dependencies.database ?? getDatabase)();
+    const database = await (dependencies.database ?? getReadDatabase)();
     const payload = await listLiveTokens(
       database,
       options,
@@ -120,7 +120,7 @@ export async function handleTokenDetailRequest(
   }
 
   try {
-    const database = await (dependencies.database ?? getDatabase)();
+    const database = await (dependencies.database ?? getReadDatabase)();
     const payload = await getLiveToken(
       database,
       normalizedSlug,
@@ -191,7 +191,7 @@ export async function handleMarketHealthRequest(
 
   try {
     (dependencies.marketCursorSecret ?? readMarketCursorSecret)();
-    const database = await (dependencies.database ?? getDatabase)();
+    const database = await (dependencies.database ?? getReadDatabase)();
     const indexer = await getMarketHealth(database);
     if (!indexer) {
       return json(

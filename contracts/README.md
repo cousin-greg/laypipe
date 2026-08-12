@@ -404,7 +404,7 @@ test suite checks two-step ownership, pending/old-owner rejection, EIP-1967
 slot identity, proxy/runtime codehash separation, invalid implementations,
 initializer closure, and storage preservation across an appended-state mock.
 
-## No-broadcast deployment rehearsal
+## Approved deployment inputs and no-broadcast rehearsal
 
 Copy `.env.example` to the ignored `.env` and fill every blank. Economic values
 are PIPEDOG base units or explicit curve parameters:
@@ -422,6 +422,44 @@ are PIPEDOG base units or explicit curve parameters:
 Keep `DEPLOYER_PRIVATE_KEY` only in ignored local configuration. Never print,
 commit, or pass it in the process list.
 
+An approved curve review alone is not enough: the release must bind the exact
+review to every address and economic value the Forge script consumes, plus the
+freshly compiled `DeployLaypipe` runtime codehash. From an immutable clean
+checkout, derive the public `DEPLOYER_ADDRESS`, then generate an ignored draft
+(the path is readable under Foundry's contracts-root permission):
+
+```powershell
+node --env-file=.env scripts/deployment-inputs.mjs `
+  --review .\curve-review.approved.json `
+  --draft .\.deployment-inputs.approved.json
+```
+
+Run the same command with `--check`, copy its exact
+`gate.computedDeploymentInputsHash` into the manifest approval after release
+review, add approver/time, and check again. Preserve the approved review,
+manifest, and passing report in external immutable release evidence; the local
+manifest is ignored because it contains deployment policy addresses.
+The digest is an unsigned integrity identifier, not a signature or proof of
+review. Retain separate written approval from the independent reviewer for the
+exact manifest, digest, and candidate.
+
+The clean wrapper rejects every `FOUNDRY_*` and `DAPP_*` environment override,
+builds from the contracts root with the default `foundry.toml` paths, and reads
+the canonical `out/DeployLaypipe.s.sol/DeployLaypipe.json` artifact. Together
+with the immutable audited checkout, it binds Git/source, curve review, and
+current artifacts.
+
+The reviewed, unmodified `DeployLaypipe.run()` reads that manifest, recomputes
+its ABI-encoded SHA-256 digest, compares `address(this).codehash` with the exact
+approved compiled runtime, and deep-matches the chain, curve hash,
+deployer/owner/revenue addresses, all nine economic inputs, and disabled-launch
+safety state before `startBroadcast`. Set:
+
+```text
+LAYPIPE_DEPLOYMENT_INPUTS_PATH=.deployment-inputs.approved.json
+LAYPIPE_APPROVED_DEPLOYMENT_INPUTS_HASH=0x<the approved 32-byte digest>
+```
+
 Run the read-only chain gate:
 
 ```powershell
@@ -431,18 +469,25 @@ forge script script/PreflightRobinhood.s.sol:PreflightRobinhood `
   --rpc-url robinhood -vv
 ```
 
-Simulate the complete deployment without broadcasting:
+Build, re-check, and simulate the complete deployment without broadcasting:
 
 ```powershell
-forge script script/DeployLaypipe.s.sol:DeployLaypipe `
-  --rpc-url robinhood -vvv
+node --env-file=.env scripts/rehearse-deployment.mjs `
+  --review .\curve-review.approved.json `
+  --manifest .\.deployment-inputs.approved.json `
+  --rpc-alias robinhood
 ```
 
 The script deploys and wires the PIPEDOG revenue router, UUPS factory proxy,
 token implementation, mined-address hook, self-burner, and swap router. It adds
 an enabled standard config and a disabled self-burn config, transfers ownership
 in two steps, prints the implied PIPEDOG FDV, and leaves global launch disabled.
-Do not enable the self-burn config until its permissionless execution has an
+The wrapper has no broadcast option and fails on unknown flags. The clean
+wrapper plus the immutable audited checkout establishes Git/source identity;
+the in-script gate establishes the values and exact executing runtime. A
+maliciously modified raw script can remove any in-script check, so raw Forge is
+not an approved release procedure. Do not
+enable the self-burn config until its permissionless execution has an
 independently audited, attacker-independent price-protection design.
 
 The final owner must accept ownership on the factory, hook, and revenue router

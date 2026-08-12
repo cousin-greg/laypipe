@@ -16,6 +16,9 @@ separate post-deployment verification evidence and cannot precede the audit.
 - Generated ABI bundle SHA-256: **required**
 - Compiled artifact bundle SHA-256: **required**
 - Approved curve-review file and config hash: **required**
+- Approved deployment-input manifest and ABI-SHA256 digest: **required**; it
+  must match every address/economic environment value consumed by the script
+  and the exact fresh `DeployLaypipe` runtime codehash
 - Target chain: Robinhood Chain, chain ID `4663`
 - Canonical PIPEDOG: `0x5Cb6F181081301b44905F3ae15419112ecaBd8A6`
 - Canonical Uniswap v4 PoolManager and runtime codehash: **required**
@@ -168,17 +171,26 @@ node scripts\check-source-fidelity.mjs
 node scripts\generate-abis.mjs
 git diff --exit-code -- abi
 node --test scripts\release-hashes.test.mjs
+node --test scripts\deployment-inputs.test.mjs
 node scripts\release-hashes.mjs
 node scripts\check-robinhood-eip1153.mjs
 forge script script/PreflightRobinhood.s.sol:PreflightRobinhood --rpc-url robinhood -vv
-forge script script/DeployLaypipe.s.sol:DeployLaypipe --rpc-url robinhood -vvv
+node --env-file=.env scripts\rehearse-deployment.mjs --review <approved-curve-review.json> --manifest .\.deployment-inputs.approved.json --rpc-alias robinhood
 forge script script/PreflightBaseSepolia.s.sol:PreflightBaseSepolia --rpc-url base_sepolia -vv
 forge script script/DeployLaypipeBaseSepolia.s.sol:DeployLaypipeBaseSepolia --rpc-url base_sepolia -vvv
 node scripts\simulate-curve.mjs --review <approved-curve-review.json>
 ```
 
-The deployment script command is a simulation only. No audit command or report
-authorizes adding `--broadcast`.
+The rehearsal command is a simulation only. It rejects all `FOUNDRY_*` and
+`DAPP_*` overrides, forces the canonical contracts root/default artifact path,
+and, with the clean audited checkout, binds Git/source, curve review, and
+current artifacts. The reviewed, unmodified deployment script independently
+recomputes and deep-matches the approved deployment-input digest, manifest
+values/constants, and its own `address(this).codehash` before its broadcast
+boundary. The digest is an unsigned integrity identifier and requires retained
+written independent approval; it is not a signature. A modified raw script can
+remove those checks, so raw Forge is outside the approved procedure. No audit
+command or report authorizes adding `--broadcast`.
 
 Copy the two aggregate values and all six per-contract ABI/artifact hashes from
 `release-hashes.mjs` into the retained candidate evidence. Then rerun the same

@@ -115,6 +115,19 @@ export default function DocsPage() {
               </p>
             </div>
             <div className="docs-note">
+              <strong>Trade quotes stay bounded on a fast L2</strong>
+              <p>
+                A trade quote has a 30-second browser countdown, a nonzero
+                slippage-protected minimum, and a router deadline 1,200 L2
+                blocks after its verified snapshot. The larger block budget
+                accounts for Robinhood&apos;s fast block cadence and wallet
+                signing time. Its wall-clock duration varies with chain
+                cadence; the browser still stops new submissions after 30
+                seconds, and a fresh protected simulation runs immediately
+                before every wallet submission.
+              </p>
+            </div>
+            <div className="docs-note">
               <strong>Dividend launches are closed</strong>
               <p>
                 The inherited enrollment-based dividend mode is intentionally

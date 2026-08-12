@@ -65,6 +65,8 @@ const abi = loadTypeScript("lib/web3/abi.ts");
 const launchClient = loadTypeScript("lib/web3/launch-client.ts");
 const launchMachine = loadTypeScript("lib/web3/launch-machine.ts");
 const web3Types = loadTypeScript("lib/web3/types.ts");
+const pinnedCache = loadTypeScript("app/launch/pinned-cache.ts");
+const walletOperation = loadTypeScript("app/launch/wallet-operation.ts");
 
 function pngBytes(width, height, trailingByte = 0) {
   const bytes = new Uint8Array(25);
@@ -83,6 +85,142 @@ function pngFile(width = 256, height = 256, trailingByte = 0) {
     lastModified: 1234,
   });
 }
+
+test("pinned launch assets are reusable only by the authorizing wallet", () => {
+  const walletA = `0x${"a".repeat(40)}`;
+  const walletAChecksummed = `0x${"A".repeat(40)}`;
+  const walletB = `0x${"b".repeat(40)}`;
+  const assets = Object.freeze({ marker: "wallet-a-pins" });
+  const cache = pinnedCache.createWalletBoundPinnedCache({
+    wallet: walletAChecksummed,
+    fingerprint: "same-draft",
+    assets,
+  });
+
+  assert.equal(cache.wallet, walletA);
+  assert.equal(
+    pinnedCache.readWalletBoundPinnedAssets(cache, walletA, "same-draft"),
+    assets,
+  );
+  assert.equal(
+    pinnedCache.readWalletBoundPinnedAssets(
+      cache,
+      walletAChecksummed,
+      "same-draft",
+    ),
+    assets,
+  );
+  assert.equal(
+    pinnedCache.readWalletBoundPinnedAssets(cache, walletB, "same-draft"),
+    null,
+  );
+  assert.equal(
+    pinnedCache.readWalletBoundPinnedAssets(cache, walletA, "changed-draft"),
+    null,
+  );
+  assert.equal(pinnedCache.retainPinnedCacheForWallet(cache, walletA), cache);
+  assert.equal(pinnedCache.retainPinnedCacheForWallet(cache, walletB), null);
+  assert.equal(pinnedCache.retainPinnedCacheForWallet(cache, null), null);
+});
+
+test("A-to-B wallet drift cancels a delayed prepare and cannot authorize B; the same wallet can commit", async () => {
+  const walletA = `0x${"a".repeat(40)}`;
+  const walletB = `0x${"b".repeat(40)}`;
+  const selected = {
+    account: walletA,
+    chainId: "0x1237",
+  };
+  const provider = {
+    async request({ method }) {
+      if (method === "eth_chainId") return selected.chainId;
+      if (method === "eth_accounts") return [selected.account];
+      throw new Error(`Unexpected wallet method ${method}`);
+    },
+  };
+  const guard = new walletOperation.LaunchPrepareOperationGuard();
+  let current = { provider, account: walletA, revision: 1 };
+  let releasePreparation;
+  const preparationGate = new Promise((resolveGate) => {
+    releasePreparation = resolveGate;
+  });
+  let prepared = null;
+  const approvalCalls = [];
+
+  async function delayedPrepare() {
+    const operation = guard.begin({
+      provider,
+      account: walletA,
+      walletRevision: current.revision,
+    });
+    try {
+      await preparationGate;
+      guard.assertCurrent(operation, current);
+      await walletOperation.assertExactLaunchWalletContext(provider, walletA);
+      guard.assertCurrent(operation, current);
+      prepared = { creator: walletA };
+    } finally {
+      guard.finish(operation);
+    }
+  }
+
+  const stalePreparation = delayedPrepare();
+  selected.account = walletB;
+  current = { provider, account: walletB, revision: 2 };
+  guard.invalidate();
+  releasePreparation();
+  await assert.rejects(
+    stalePreparation,
+    (error) => walletOperation.isStaleLaunchWalletOperation(error),
+  );
+  assert.equal(prepared, null);
+
+  function approve(candidate, account) {
+    walletOperation.assertPreparedLaunchCreator(candidate.creator, account);
+    approvalCalls.push(account);
+  }
+  assert.throws(
+    () => approve({ creator: walletA }, walletB),
+    (error) => walletOperation.isStaleLaunchWalletOperation(error),
+  );
+  assert.deepEqual(approvalCalls, []);
+
+  selected.account = walletA;
+  current = { provider, account: walletA, revision: 3 };
+  const sameWalletOperation = guard.begin({
+    provider,
+    account: walletA,
+    walletRevision: current.revision,
+  });
+  await walletOperation.assertExactLaunchWalletContext(provider, walletA);
+  guard.assertCurrent(sameWalletOperation, current);
+  prepared = { creator: walletA };
+  guard.finish(sameWalletOperation);
+  approve(prepared, walletA);
+  assert.deepEqual(approvalCalls, [walletA]);
+});
+
+test("launch form invalidates wallet drift before deciding whether to repin", () => {
+  const source = readFileSync(
+    resolve(repositoryRoot, "app/launch/LaunchForm.tsx"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /setPinnedCache\(\(cache\) => retainPinnedCacheForWallet\(cache, account\)\)/,
+  );
+  assert.match(
+    source,
+    /readWalletBoundPinnedAssets\(\s*pinnedCache,\s*account,\s*fingerprint,\s*\)/,
+  );
+  assert.match(
+    source,
+    /createWalletBoundPinnedCache\(\{\s*wallet: account,\s*fingerprint,\s*assets,\s*\}\)/,
+  );
+  assert.match(source, /signal: operation\.signal/);
+  assert.match(source, /assertExactCurrentOperation/);
+  assert.match(source, /assertPreparedLaunchCreator\(prepared\.params\.creator, account\)/);
+});
 
 test("artwork validation inspects bytes, dimensions, and content identity", async () => {
   const valid = await artwork.validateArtworkFile(pngFile());

@@ -2,7 +2,7 @@ import { HttpError } from "../auth/http";
 import {
   DATABASE_WRITE_TIMEOUT_MS,
   databaseFetchOptions,
-  getDatabase,
+  getWriteDatabase,
   type DbTransactionQuery,
 } from "../db/neon";
 import type { PromotionIdentity, PromotionPin } from "./promotion";
@@ -55,7 +55,7 @@ export interface CompletedPromotionRecord extends PromotionIdentity {
 
 export async function requirePromotionRegistryDatabase() {
   try {
-    return await getDatabase();
+    return await getWriteDatabase();
   } catch {
     throw new HttpError(
       503,

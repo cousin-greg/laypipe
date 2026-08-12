@@ -102,9 +102,11 @@ The client must deep-compare `metadataDocument` to its locally rebuilt document
 before requesting a PIPEDOG allowance.
 
 Live Board, detail, and portfolio SQL joins this registry by the exact
-`ipfs://<image-cid>` and `ipfs://<metadata-cid>` pair. Unregistered or mismatched
-on-chain URIs are never converted into gateway URLs and render as initials;
-public reads make no Pinata validation calls.
+`ipfs://<image-cid>` and `ipfs://<metadata-cid>` pair and requires the promotion
+wallet to equal the launch's original creator. A different creator cannot reuse
+someone else's approved CID pair. Unregistered, mismatched, or copied on-chain
+URIs are never converted into gateway URLs and render as initials; public reads
+make no Pinata validation calls.
 
 Permanent image and metadata uploads carry the same `laypipe_promotion`,
 `laypipe_pin_digest`, and `laypipe_stage_file` values plus a
@@ -130,8 +132,9 @@ omits `Content-Length` or uses a compressed/chunked transport.
 - `UPSTASH_REDIS_REST_KV_REST_API_TOKEN`
 - `NEXT_PUBLIC_SITE_URL=https://laypipe.fun`
 - `CRON_SECRET`: at least 32 random characters for the stale-stage cleanup route.
-- `DATABASE_URL`: server-only Neon connection; the runtime role needs bounded
-  `INSERT`/`SELECT` access to `ipfs_promotions`.
+- `DATABASE_WRITE_URL`: server-only Neon write-role connection; the runtime role needs bounded
+  `SELECT`/`INSERT`/`UPDATE` access to `ipfs_promotions`. `UPDATE` exists only for
+  the identical `ON CONFLICT` retry; the immutable trigger rejects changed data.
 
 For local portability, `UPSTASH_REDIS_REST_URL` and
 `UPSTASH_REDIS_REST_TOKEN` are accepted as fallbacks. Local development can run

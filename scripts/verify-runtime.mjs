@@ -76,7 +76,12 @@ const child = spawn(process.execPath, [nextBin, "start", "-H", "127.0.0.1", "-p"
   env: {
     ...process.env,
     CRON_SECRET: "",
-    DATABASE_URL: "",
+    DATABASE_MIGRATION_URL: "",
+    DATABASE_READ_URL: "",
+    DATABASE_WRITE_URL: "",
+    LAYPIPE_DB_READ_ROLE: "",
+    LAYPIPE_DB_WRITE_ROLE: "",
+    LAYPIPE_DB_SERVICE_ROLE: "",
     INDEXER_ENABLED: "false",
     IPFS_PINNING_ENABLED: "false",
     LAYPIPE_MARKET_MODE: "fixture",

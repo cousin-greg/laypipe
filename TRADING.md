@@ -32,10 +32,22 @@ only after that exact allowance is confirmed on-chain:
    block deadline derived from that verified snapshot. This call is read-only
    and cannot be submitted.
 4. Derive a nonzero minimum output from the selected bounded slippage (0.5% to
-   5%). Quotes expire after 30 seconds or three canonical chain blocks. The
-   router independently rejects both buys and sells after `deadlineBlock`; on
-   Robinhood it reads the L2 block from ArbSys, not Solidity's L1-estimate
-   `block.number`.
+   5%). The browser expires the quote after 30 wall-clock seconds. The router
+   deadline is the verified L2 block plus 1,200 blocks. That is a hard block
+   cap, not a fixed 60-second on-chain clock. It is sized from a release stress
+   assumption of 20 L2 blocks per second across a 30-second quote window plus
+   30 seconds of wallet-signing/network grace. A short 2026-08-12 release-review
+   `eth_blockNumber` sample advanced from 34,431,465 to 34,431,586: 121
+   blocks in 12.434 seconds (about 9.73 blocks per second), at which cadence
+   1,200 blocks lasts about 123 seconds. The sample did not retain block hashes
+   and is calibration context, not canonical-history proof. The extra
+   wall-clock headroom at slower cadence is intentional because
+   `deadlineBlock` cannot encode time. Robinhood advances many L2 blocks per
+   second, so a three-block deadline cannot represent the browser window. The
+   client still rejects a submission when either its wall-clock quote window
+   or its 1,200-block cap is exhausted. The router independently rejects both
+   buys and sells after `deadlineBlock`; on Robinhood it reads the L2 block
+   from ArbSys, not Solidity's L1-estimate `block.number`.
 5. Immediately before submission, repeat the full manifest, token, account,
    balance, and exact-allowance preflight. Validate quote ownership, pool,
    token, age, block drift, and minimum-output calculation.
@@ -43,6 +55,15 @@ only after that exact allowance is confirmed on-chain:
    gas, then immediately reread the wall clock, L2 head, selected chain, and
    selected account before asking the wallet to submit the exact deadline-bound
    calldata. No native `value` is attached.
+
+The block budget is transaction-expiry headroom, not permission to use a stale
+price. The 30-second client timer and the fresh protected simulation remain the
+pre-send freshness checks, while nonzero `minOut` remains the on-chain price
+bound if wallet signing or inclusion is delayed. Recalibrate the cadence budget
+from measured canonical L2 heads before production if Robinhood's block rate
+materially exceeds the 20-block-per-second stress assumption. Because the
+router has no wall-clock deadline, an L2 stall can extend the transaction's
+wall-clock validity; the exact `minOut` remains the execution-price bound.
 
 Receipt confirmation uses a direct read-only Robinhood RPC rather than trusting
 only the injected wallet provider. It requires two canonical blocks, binds the

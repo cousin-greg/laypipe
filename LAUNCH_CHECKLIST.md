@@ -14,8 +14,11 @@ on another gate.
 - [x] Vercel Preview builds the production-readiness branch with Node 24.
 - [x] Neon is attached to Production and Preview with Preview branching.
 - [-] The Neon schema is not applied. Vercel Query is waiting for Greg's 2FA.
-- [x] Production Upstash is attached for nonce replay and rate-limit state.
-- [-] Preview has no Redis resource, so upload and mutation routes fail closed.
+- [ ] Accept and verify Production Upstash for nonce replay and rate-limit
+  state; this session could not confirm the Marketplace attachment or injected
+  environment variables.
+- [ ] Attach a separate Preview Redis resource before testing upload or
+  mutation routes. Until then those routes must fail closed.
 - [x] `LAYPIPE_MARKET_MODE=fixture` and `IPFS_PINNING_ENABLED=false` are the
   deployed defaults.
 - [-] `INDEXER_ENABLED=false`; no scheduler or Alchemy webhook is active.
@@ -37,11 +40,20 @@ local `.env` file.
 - [ ] Confirm the selected target is an isolated **Preview** branch, not the
   Production branch.
 - [ ] Allow the reviewed migration in `db/migrations/` to run.
+- [ ] Create separate NOLOGIN read/write/service group roles. The service role's
+  sole member must be the migration owner with ADMIN, INHERIT, and SET options;
+  each rotatable
+  read/write LOGIN must inherit exactly its one matching group. Run
+  `npm run db:grant-runtime` as the migration owner,
+  then verify the runtime credentials with the PostgreSQL privilege test.
 - [ ] Keep `LAYPIPE_MARKET_MODE=fixture` until migration, backfill, and health
   evidence are all green.
 
-No database password or connection string needs to be sent to Codex; Vercel's
-integration injects `DATABASE_URL` server-side.
+No database password or connection string needs to be sent to Codex. Create
+separate read/write runtime credentials on the same primary Preview branch,
+apply grants with the operator-only migration credential, and add only
+`DATABASE_READ_URL` and `DATABASE_WRITE_URL` to Vercel. Never add
+`DATABASE_MIGRATION_URL` to Vercel.
 
 ### 2. Create Pinata credentials
 
@@ -53,8 +65,9 @@ integration injects `DATABASE_URL` server-side.
   used by LayPipe; do not grant account administration.
 - [ ] Add `PINATA_JWT` as a Sensitive, server-only Vercel variable.
 - [ ] Add the dedicated HTTPS gateway origin as `IPFS_GATEWAY_BASE_URL`.
-- [ ] Confirm the Preview/Production runtime role can insert and select only
-  the immutable `ipfs_promotions` registry needed by the pin and read routes.
+- [ ] Confirm the Preview/Production write role has only SELECT/INSERT/UPDATE
+  on immutable `ipfs_promotions`; UPDATE is limited by the immutable trigger to
+  identical `ON CONFLICT` retries.
 - [ ] Configure and rehearse backup/restore for `ipfs_promotions`; chain replay
   alone intentionally cannot re-authorize artwork after registry loss.
 - [ ] Keep `IPFS_PINNING_ENABLED=false` until the real stage, promote, verify,
@@ -154,12 +167,15 @@ independent audit.
 - [ ] Run the full Foundry suite without exclusions or archive-related skips.
 - [ ] Run source fidelity, ABI generation, ABI clean-diff, runtime size,
   Robinhood preflight, EIP-1153 semantic/control probe, approved curve review,
-  and no-broadcast deployment simulation.
+  approved deployment-input manifest/hash plus exact deploy-script runtime
+  deep-match, and no-broadcast deployment simulation from an immutable clean
+  checkout with no `FOUNDRY_*` or `DAPP_*` overrides.
 - [ ] Confirm the deploy script stages creator-fee config enabled, self-burn
   config disabled, global launches disabled, and pending Safe ownership.
-- [ ] Record the pre-deployment source/compiler/dependency/ABI/artifact and
-  approved-economics hashes. Receipt blocks, deployed addresses/codehashes, and
-  final reconciliation belong to the post-deployment verification gate below.
+- [ ] Record the pre-deployment source/compiler/dependency/ABI/artifact,
+  deploy-script runtime, and approved-economics hashes. Receipt blocks,
+  deployed addresses/codehashes, and final reconciliation belong to the
+  post-deployment verification gate below.
 
 ## Broadcast gates
 
@@ -181,6 +197,11 @@ Greg must explicitly authorize each broadcast after the independent audit.
   account/chain/head drift rejection, indeterminate-send retry locking, exact
   calldata/value receipt binding, canonical confirmation, and post-clear
   allowance rereads.
+- [ ] Retain timestamped Robinhood cadence evidence across multiple one-minute
+  samples, including observed peak blocks per second. Recalibrate and rerun the
+  trade safety suite if sustained cadence materially exceeds the 20-block-per-
+  second stress assumption; prove acceptance at `deadlineBlock` and rejection
+  at the next L2 block with a real wallet.
 - [ ] Verify self-burn remains disabled; do not enable it merely for the smoke
   test.
 

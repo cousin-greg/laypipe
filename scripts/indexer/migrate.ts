@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import {
   DATABASE_WRITE_TIMEOUT_MS,
   databaseFetchOptions,
-  getDatabase,
+  getMigrationDatabase,
 } from "../../lib/server/db/neon";
 import { buildMigrationCommand, migrationStatements } from "./migration-plan";
 
@@ -15,7 +15,7 @@ async function main() {
     .sort((left, right) => left.localeCompare(right));
   if (names.length === 0) throw new Error("No LayPipe database migrations found.");
 
-  const database = await getDatabase();
+  const database = await getMigrationDatabase();
   for (const name of names) {
     const source = await readFile(resolve(directory, name), "utf8");
     const sha256 = createHash("sha256").update(source).digest("hex");

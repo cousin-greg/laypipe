@@ -4,11 +4,13 @@ import {
   isHexData,
   isTransactionHash,
 } from "@/lib/web3/types";
+import {
+  TRADE_DEADLINE_BLOCK_BUDGET,
+  TRADE_QUOTE_TTL_MS,
+} from "@/lib/web3/trade-policy";
 
 const STORAGE_KEY = "laypipe.pending-trades.v1";
 const MAX_PENDING_TRADES = 20;
-const TRADE_QUOTE_TTL_MS = 30_000;
-const TRADE_QUOTE_BLOCK_DRIFT = BigInt(3);
 const BASIS_POINTS = BigInt(10_000);
 const ZERO_WORD = `0x${"00".repeat(32)}`;
 
@@ -178,7 +180,7 @@ function parseIntent(value: unknown, now: number): PendingTradeIntent | null {
       (trade.expiresAtMs as number) ===
         (trade.createdAtMs as number) + TRADE_QUOTE_TTL_MS &&
       BigInt(trade.deadlineBlock) ===
-        BigInt(trade.verifiedBlockNumber) + TRADE_QUOTE_BLOCK_DRIFT &&
+        BigInt(trade.verifiedBlockNumber) + TRADE_DEADLINE_BLOCK_BUDGET &&
       BigInt(trade.minimumOutput) ===
         (BigInt(trade.expectedOutput) *
           (BASIS_POINTS - BigInt(trade.slippageBps))) /

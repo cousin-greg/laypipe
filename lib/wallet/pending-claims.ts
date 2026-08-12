@@ -148,6 +148,17 @@ function sameIntent(intent: PendingClaimIntent, wallet: Address, poolId: Hex) {
   );
 }
 
+function exactIntent(
+  candidate: PendingClaimIntent,
+  expected: PendingClaimIntent,
+) {
+  return (
+    sameIntent(candidate, expected.wallet, expected.poolId) &&
+    candidate.hash?.toLowerCase() === expected.hash?.toLowerCase() &&
+    candidate.invokedAt === expected.invokedAt
+  );
+}
+
 export function pendingClaimRecoveryFromError(error: unknown): PendingClaimRecoveryState {
   return {
     status: "recovery-required",
@@ -224,6 +235,33 @@ export function removePendingClaim(
     storage,
     readAll(storage).filter((candidate) => !sameIntent(candidate, wallet, poolId)),
   );
+}
+
+export function removeExactPendingClaim(
+  storage: Storage,
+  expected: PendingClaimIntent,
+  now = Date.now(),
+) {
+  const validated = parseIntent(expected, now);
+  if (validated.hash === null) {
+    return persistenceError(
+      "corrupt",
+      "A canonically resolved claim must include its exact transaction hash.",
+    );
+  }
+  const current = readAll(storage, now);
+  const walletIndex = current.findIndex(
+    (candidate) =>
+      candidate.wallet.toLowerCase() === validated.wallet.toLowerCase(),
+  );
+  if (walletIndex < 0 || !exactIntent(current[walletIndex]!, validated)) {
+    return persistenceError(
+      "corrupt",
+      "The canonically resolved claim does not match the saved exact intent.",
+    );
+  }
+  current.splice(walletIndex, 1);
+  writeAll(storage, current);
 }
 
 export function resetPendingClaimStore(storage: Storage) {

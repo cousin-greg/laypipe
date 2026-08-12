@@ -32,8 +32,8 @@ permanent Pinata promotion tags.
 - `ipfs_promotions` is the immutable allowlist of image/metadata CID pairs
   completed by LayPipe's normalized, wallet-authorized promotion flow. Public
   market and portfolio SQL exposes an artwork CID only when both indexed URIs
-  exactly match one completed row; arbitrary on-chain URIs never become public
-  gateway requests.
+  exactly match one completed row and its wallet is the launch's original
+  creator; arbitrary or copied on-chain URIs never become public gateway requests.
 
 Back up/export `ipfs_promotions` before opening uploads and include restore
 verification in disaster-recovery rehearsal. The correlated permanent Pinata
@@ -55,21 +55,41 @@ environment file explicitly:
 npx dotenv -e .env.local -- npx tsx scripts/indexer/migrate.ts
 ```
 
-`DATABASE_URL` is server-only and required lazily when the data layer is first
-used. A missing or malformed value fails closed without breaking a frontend-only
+`DATABASE_READ_URL` and `DATABASE_WRITE_URL` are server-only and are attested as
+one pair before either live path runs. Both must target the same primary Neon
+branch; pooled and unpooled URLs for the same Neon endpoint are accepted, but a
+different endpoint or database is rejected even when it was cloned with the same
+LayPipe identity marker and migration ledger. Do not serve cursor-dependent reads
+from an asynchronous replica. A
+missing or malformed value fails closed without breaking a frontend-only
 `next build`. Runtime reads use a three-second HTTP deadline; cursor writes,
 canonical batch transactions, rollbacks, and migrations use a ten-second
 deadline. A timeout fails the request and never advances the canonical cursor.
 
 Production must not expose the migration-owner credential to request handlers.
-Use an operator-only connection for `db:migrate`; give the Vercel runtime role
-only the SELECT, canonical ingest/function, cursor, rollback, and reconciliation
-permissions required by deployed routes/workers. Rehearse grants in Preview,
-rotate both credentials independently, and retain the rebuild procedure because
-Postgres is a disposable read model. Until those roles are provisioned, keep
-live market and indexer switches disabled.
-The request role also needs `INSERT` and `SELECT` on `ipfs_promotions`; pinning
-must stay disabled if that grant or `DATABASE_URL` is unavailable.
+Keep `DATABASE_MIGRATION_URL` in an ignored operator environment only; never add
+it to Vercel. After `npm run db:migrate`, run `npm run db:grant-runtime` with
+validated `LAYPIPE_DB_READ_ROLE`, `LAYPIPE_DB_WRITE_ROLE`, and
+`LAYPIPE_DB_SERVICE_ROLE` names. All three roles must already exist as safe
+`NOLOGIN` groups. The service role's sole member is the migration owner with
+ADMIN, INHERIT, and SET options, as PostgreSQL requires for that non-superuser
+owner to maintain service-owned functions; no runtime identity may inherit it. It owns only the
+exact fixed-search-path functions that maintain projections, advance cursors,
+and perform validated rollback. The command revokes ambient PUBLIC/default privileges and
+applies the reviewed grants. Use separate LOGIN credentials, each inheriting
+exactly one read or write group, for `DATABASE_READ_URL` and
+`DATABASE_WRITE_URL`; rehearse them in Preview and rotate each independently.
+Runtime startup rejects unsafe LOGIN attributes, extra memberships, owned schema
+objects, destructive or derived-state DML, or a migration credential present in
+production. The write role includes UPDATE only where canonical `ON CONFLICT`
+replay needs it; immutable-row triggers reject changed replay data. The grant
+command also revokes runtime temporary-table creation and fixes every LayPipe
+function search path against object shadowing.
+The identity and capability handshake is cached for one warm Vercel instance;
+recycle active instances after changing a credential, membership, grant, or
+database branch so each instance re-attests before serving live data.
+Until those roles are provisioned, keep live market,
+pinning, and indexer switches disabled.
 
 The migration includes the exact composite ordering index used by launch
 keyset pagination and a partial covering swap index for positive-token market
@@ -86,9 +106,10 @@ Before live promotion, run `EXPLAIN (ANALYZE, BUFFERS)` on
 The selected-launch scan should use `launches_market_page_idx`, and per-pool
 latest/24-hour swap work should use `swaps_pool_market_metrics_idx` rather than
 sequentially scanning all swaps. Capture the plans and table cardinalities in
-the release evidence. Confirm the exact CID-pair lateral join uses
-`ipfs_promotions_completed_cids_idx` and that a one-URI mismatch returns no
-approved artwork. Also run `WALLET_POSITIONS_SQL` for a holder, an original
+the release evidence. Confirm the creator-bound CID-pair lateral join uses
+`ipfs_promotions_creator_completed_cids_idx` and that a one-URI mismatch or CID
+pair copied by a different creator returns no approved artwork. Also run
+`WALLET_POSITIONS_SQL` for a holder, an original
 creator, and a transferred current creator, plus a stale-watermark case; stale
 plans must not execute the holder or creator index scans. The disposable test
 proves index selection, projection replay, and cascade rollback, but do not
@@ -113,6 +134,11 @@ Remove-Item Env:LAYPIPE_RUN_POSTGRES_INTEGRATION
 The test publishes no host port, gives the container no network, and removes
 the container and its temporary data volume on completion. Override
 `LAYPIPE_POSTGRES_IMAGE` only when validating another supported PostgreSQL image.
+The same CI opt-in also runs `tests/postgres-privileges.test.mjs`, which proves
+NOLOGIN group-role inheritance through separate LOGIN credentials, exact
+read/write capability matrices, denied DDL/delete operations, idempotent IPFS
+registry retry, immutable-row rejection, and removal of ambient PUBLIC function
+execution.
 
 ## Reorg procedure
 

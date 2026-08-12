@@ -2,7 +2,7 @@ import {
   DATABASE_READ_TIMEOUT_MS,
   DATABASE_WRITE_TIMEOUT_MS,
   databaseFetchOptions,
-  getDatabase,
+  getWriteDatabase,
   type DbClient,
   type DbParameter,
   type DbQueryPromise,
@@ -423,8 +423,8 @@ export async function initializeIndexerCursor(options: {
   stream: string;
   startBlock: bigint | string;
 }) {
-  const database = await getDatabase();
-  await database.query("SELECT laypipe_initialize_cursor($1::bigint, $2::text, $3::bigint)", [
+  const database = await getWriteDatabase();
+  await database.query("SELECT laypipe_runtime_initialize_cursor($1::bigint, $2::text, $3::bigint)", [
     options.chainId,
     options.stream,
     normalizeUint256(options.startBlock, "Cursor start block"),
@@ -436,7 +436,7 @@ export async function ingestCanonicalBatch(
   databaseOverride?: DbClient,
 ) {
   const batch = normalizeCanonicalBatch(input);
-  const database = databaseOverride ?? await getDatabase();
+  const database = databaseOverride ?? await getWriteDatabase();
   const blockRows = batch.blocks.map((block) => ({
     block_number: block.number,
     block_hash: block.hash,
@@ -465,7 +465,7 @@ export async function ingestCanonicalBatch(
         : []),
       ...projectionStatements(transaction, batch.chainId, batch.projections),
       transaction.query(
-        "SELECT laypipe_advance_cursor($1::bigint, $2::text, $3::bigint, $4::bigint, $5::evm_bytes32)",
+        "SELECT laypipe_runtime_advance_cursor($1::bigint, $2::text, $3::bigint, $4::bigint, $5::evm_bytes32)",
         [batch.chainId, batch.stream, batch.expectedNextBlock, last.number, last.hash],
       ),
     ] as const,
@@ -512,7 +512,7 @@ export async function loadIndexedLaunchIdentities(options: {
   ) {
     throw new Error("Indexed launch identity limit must be between 1 and 20000.");
   }
-  const database = await getDatabase();
+  const database = await getWriteDatabase();
   const rows = await database.query<IndexedLaunchIdentityRow>(
     `SELECT token_address, pool_id, fee_mode
      FROM launches
@@ -549,7 +549,7 @@ export async function loadRecentStoredBlocks(options: {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2_048) {
     throw new Error("Reorg lookback must be between 1 and 2048 blocks.");
   }
-  const database = await getDatabase();
+  const database = await getWriteDatabase();
   const rows = await database.query<StoredBlockRow>(
     `SELECT block_number::text, block_hash
      FROM chain_blocks
@@ -570,9 +570,9 @@ export async function rollbackChainTo(options: {
   ancestorBlock: bigint | string;
   ancestorHash: string;
 }) {
-  const database = await getDatabase();
+  const database = await getWriteDatabase();
   const rows = await database.query<{ deleted_blocks: string | number | bigint }>(
-    `SELECT laypipe_rollback_chain($1::bigint, $2::bigint, $3::evm_bytes32)::text AS deleted_blocks`,
+    `SELECT laypipe_runtime_rollback_chain($1::bigint, $2::bigint, $3::evm_bytes32)::text AS deleted_blocks`,
     [
       options.chainId,
       normalizeUint256(options.ancestorBlock, "Rollback ancestor"),
@@ -584,7 +584,7 @@ export async function rollbackChainTo(options: {
 }
 
 export async function readIndexerHealth(chainId: number, stream: string) {
-  const database = await getDatabase();
+  const database = await getWriteDatabase();
   const rows = await database.query<DbRow>(
     `SELECT chain_id::text, stream, start_block::text, next_block::text,
             last_processed_block::text, last_processed_hash,
@@ -605,21 +605,15 @@ export async function recordIndexerObservation(options: {
   status: "caught-up" | "bounded" | "deadline";
   observedAt?: Date;
 }, databaseOverride?: DbClient) {
-  const database = databaseOverride ?? await getDatabase();
+  const database = databaseOverride ?? await getWriteDatabase();
   const observedAt = options.observedAt ?? new Date();
   if (!Number.isFinite(observedAt.getTime())) {
     throw new Error("Indexer observation time is invalid.");
   }
   const rows = await database.query<{ updated: boolean }>(
-    `UPDATE indexer_cursors
-     SET observed_safe_head = $3::bigint,
-         observed_at = $4::timestamptz,
-         last_run_status = $5::text
-     WHERE chain_id = $1::bigint AND stream = $2::text
-       AND (last_processed_block IS NULL OR last_processed_block <= $3::bigint)
-       AND (observed_safe_head IS NULL OR observed_safe_head <= $3::bigint)
-       AND (observed_at IS NULL OR observed_at <= $4::timestamptz)
-     RETURNING true AS updated`,
+    `SELECT laypipe_runtime_record_observation(
+       $1::bigint, $2::text, $3::bigint, $4::timestamptz, $5::text
+     ) AS updated`,
     [
       options.chainId,
       options.stream,
@@ -629,7 +623,7 @@ export async function recordIndexerObservation(options: {
     ],
     databaseFetchOptions(DATABASE_WRITE_TIMEOUT_MS),
   );
-  if (rows.length !== 1) {
+  if (rows.length !== 1 || rows[0]?.updated !== true) {
     throw new Error("Indexer observation was rejected as missing or non-monotonic.");
   }
 }

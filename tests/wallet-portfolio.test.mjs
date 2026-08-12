@@ -171,6 +171,7 @@ test("portfolio is a repeatable-read Neon snapshot with no server RPC fanout", a
   assert.match(db.calls[2].sql, /FROM token_holder_balance_state/);
   assert.match(db.calls[2].sql, /WITH watermark AS MATERIALIZED/);
   assert.match(db.calls[2].sql, /last_run_status = 'caught-up'/);
+  assert.match(db.calls[2].sql, /promotion\.wallet_address = c\.creator_address/);
   assert.doesNotMatch(db.calls[2].sql, /latest_creator_updates/);
   assert.doesNotMatch(db.calls[2].sql, /eth_|rpc/i);
   assert.deepEqual(db.calls[3].options, {

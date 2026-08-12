@@ -8,8 +8,13 @@ import {
   compactMoney,
   compactNumber,
   formatAge,
-  formatMoney,
 } from "../../_components/format";
+import {
+  formatTokenChange,
+  formatTokenPrice,
+  formatTokenVolume,
+  tokenChangeDirection,
+} from "../../_components/market-format";
 import { Sparkline } from "../../_components/Sparkline";
 import { TokenAvatar } from "../../_components/TokenAvatar";
 import { findDemoToken, marketSource } from "../../_data/market";
@@ -27,19 +32,6 @@ export function generateStaticParams() {
 }
 
 const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
-
-function tokenPrice(token: BoardToken) {
-  if (token.price === null) return "Unavailable";
-  if (token.priceUnit === "USD") return formatMoney(token.price);
-  return `${token.price.toLocaleString("en-US", {
-    maximumSignificantDigits: 6,
-  })} PIPEDOG`;
-}
-
-function tokenVolume(token: BoardToken) {
-  if (token.volumeUnit === "USD") return compactMoney(token.volume24h);
-  return `${compactNumber(token.volume24h)} PIPEDOG`;
-}
 
 type TokenResolution =
   | {
@@ -238,6 +230,7 @@ export default async function TokenPage({
     return <LiveTokenUnavailable slug={slug} />;
   }
   const token = resolution.token;
+  const changeDirection = tokenChangeDirection(token);
 
   return (
     <main className="inner-page content-width token-page token-market-page">
@@ -273,13 +266,12 @@ export default async function TokenPage({
         <p className="token-description">{token.description}</p>
         <div className="token-price">
           <span>{marketMode === "live" ? "Last indexed price" : "Illustrative price"}</span>
-          <strong>{tokenPrice(token)}</strong>
-          {token.change24h === null ? (
+          <strong>{formatTokenPrice(token)}</strong>
+          {changeDirection === null ? (
             <em>24h change unavailable</em>
           ) : (
-            <em className={token.change24h >= 0 ? "up" : "down"}>
-              {token.change24h >= 0 ? "+" : ""}
-              {token.change24h.toFixed(1)}% 24h
+            <em className={changeDirection >= 0 ? "up" : "down"}>
+              {formatTokenChange(token)} 24h
             </em>
           )}
         </div>
@@ -297,7 +289,7 @@ export default async function TokenPage({
           {token.chart.length > 1 ? (
             <Sparkline
               values={token.chart}
-              positive={(token.change24h ?? 0) >= 0}
+              positive={(changeDirection ?? 0) >= 0}
               label={`${token.name} illustrative 24 hour price trend`}
             />
           ) : (
@@ -328,7 +320,7 @@ export default async function TokenPage({
         </article>
         <article>
           <span>24h volume</span>
-          <strong>{tokenVolume(token)}</strong>
+          <strong>{formatTokenVolume(token)}</strong>
         </article>
         <article>
           <span>Liquidity</span>

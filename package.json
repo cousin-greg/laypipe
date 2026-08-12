@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "db:migrate": "tsx scripts/indexer/migrate.ts",
+    "db:grant-runtime": "tsx scripts/indexer/runtime-grants.ts",
     "db:reconcile": "tsx scripts/indexer/reconcile.ts",
     "test": "npm run build && node --test tests/*.test.mjs && npm run verify:runtime",
     "verify:runtime": "node scripts/verify-runtime.mjs",

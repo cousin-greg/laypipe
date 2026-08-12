@@ -12,6 +12,12 @@ import {
 } from "@/lib/market/pagination";
 import { LaunchMode, LaunchToken, marketSource } from "./market";
 import { trustedIpfsGatewayUrl } from "@/lib/ipfs/gateway";
+import {
+  exactPercentChange,
+  type ExactPercentChange,
+  requirePipedogPriceRatio,
+  requireUint256Decimal,
+} from "@/lib/market/exact-numbers";
 
 export type ProtocolConfig = {
   chainId: number;
@@ -60,8 +66,7 @@ export const laypipeApiRoutes = {
   protocolDistributions: "/api/protocol-distributions",
 } as const;
 
-export type BoardToken = {
-  source: "fixture" | "live";
+type BoardTokenBase = {
   slug: string;
   tokenAddress: string | null;
   name: string;
@@ -69,12 +74,7 @@ export type BoardToken = {
   description: string | null;
   artworkUrl: string | null;
   accent: string;
-  price: number | null;
-  priceUnit: "USD" | "PIPEDOG";
   marketCap: number | null;
-  volume24h: number;
-  volumeUnit: "USD" | "PIPEDOG";
-  change24h: number | null;
   liquidity: number | null;
   holders: number | null;
   trades: number;
@@ -83,6 +83,26 @@ export type BoardToken = {
   mode: LaunchMode;
   chart: number[];
 };
+
+export type FixtureBoardToken = BoardTokenBase & {
+  source: "fixture";
+  price: number;
+  priceUnit: "USD";
+  volume24h: number;
+  volumeUnit: "USD";
+  change24h: number;
+};
+
+export type LiveBoardToken = BoardTokenBase & {
+  source: "live";
+  price: PipedogPriceRatio | null;
+  priceUnit: "PIPEDOG";
+  volume24h: string;
+  volumeUnit: "PIPEDOG";
+  change24h: ExactPercentChange | null;
+};
+
+export type BoardToken = FixtureBoardToken | LiveBoardToken;
 
 export type BoardMarketSource = {
   mode: "fixture" | "live";
@@ -104,7 +124,7 @@ export interface MarketDataAdapter {
   getToken(slug: string, signal?: AbortSignal): Promise<BoardToken | null>;
 }
 
-function fixtureToken(token: LaunchToken): BoardToken {
+function fixtureToken(token: LaunchToken): FixtureBoardToken {
   return {
     ...token,
     source: "fixture",
@@ -162,19 +182,39 @@ function requireLiveToken(value: unknown): LiveMarketToken {
   return token as unknown as LiveMarketToken;
 }
 
-function exactRatioToNumber(value: PipedogPriceRatio) {
-  if (!/^\d+$/.test(value.pipedogAmount) || !/^[1-9]\d*$/.test(value.tokenAmount)) {
-    throw new Error("Indexed price ratio is invalid.");
+function readPriceMetric(
+  value: unknown,
+  label: string,
+): { status: "observed"; value: PipedogPriceRatio } | { status: "unavailable" } {
+  const metric = requireObject(value, label);
+  if (metric.status === "observed") {
+    return {
+      status: "observed",
+      value: requirePipedogPriceRatio(metric.value, label),
+    };
   }
-  const result = Number(value.pipedogAmount) / Number(value.tokenAmount);
-  return Number.isFinite(result) ? result : null;
+  if (metric.status === "unavailable" && metric.value === null) {
+    return { status: "unavailable" };
+  }
+  throw new Error(`${label} is invalid.`);
 }
 
-function baseUnitsToDisplay(value: string) {
-  if (!/^\d+$/.test(value)) throw new Error("Indexed base-unit amount is invalid.");
-  const result = Number(value) / 1e18;
-  if (!Number.isFinite(result)) throw new Error("Indexed amount is too large to display.");
-  return result;
+function readObservedCount(value: unknown, label: string) {
+  const metric = requireObject(value, label);
+  if (
+    metric.status !== "observed" ||
+    !Number.isSafeInteger(metric.value) ||
+    (metric.value as number) < 0
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return metric.value as number;
+}
+
+function readObservedUint256(value: unknown, label: string) {
+  const metric = requireObject(value, label);
+  if (metric.status !== "observed") throw new Error(`${label} is invalid.`);
+  return requireUint256Decimal(metric.value, label);
 }
 
 function elapsedHours(timestamp: string) {
@@ -189,21 +229,36 @@ function addressAccent(address: string) {
 }
 
 export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
-  const last = token.metrics.lastPricePipedog;
-  const baseline = token.metrics.baselinePrice24hPipedog;
-  const price = last.status === "observed" ? exactRatioToNumber(last.value) : null;
-  let change24h: number | null = null;
+  const last = readPriceMetric(
+    token.metrics.lastPricePipedog,
+    "Last indexed price ratio",
+  );
+  const baseline = readPriceMetric(
+    token.metrics.baselinePrice24hPipedog,
+    "Baseline indexed price ratio",
+  );
+  const price = last.status === "observed"
+    ? last.value
+    : null;
+  const trades24h = readObservedCount(
+    token.metrics.trades24h,
+    "Indexed 24-hour trade count",
+  );
+  const totalTrades = readObservedCount(
+    token.metrics.totalTrades,
+    "Indexed total trade count",
+  );
+  const volume24h = readObservedUint256(
+    token.metrics.volume24hPipedog,
+    "Indexed 24-hour PIPEDOG volume",
+  );
+  let change24h: ExactPercentChange | null = null;
   if (
-    token.metrics.trades24h.value >= 2 &&
+    trades24h >= 2 &&
     last.status === "observed" &&
     baseline.status === "observed"
   ) {
-    const baselinePrice = exactRatioToNumber(baseline.value);
-    const lastPrice = exactRatioToNumber(last.value);
-    if (baselinePrice && lastPrice !== null) {
-      const change = ((lastPrice / baselinePrice) - 1) * 100;
-      if (Number.isFinite(change)) change24h = change;
-    }
+    change24h = exactPercentChange(last.value, baseline.value);
   }
   const fallback = `${token.tokenAddress.slice(0, 6)}…${token.tokenAddress.slice(-4)}`;
   return {
@@ -220,12 +275,12 @@ export function mapLiveTokenToBoardToken(token: LiveMarketToken): BoardToken {
     price,
     priceUnit: "PIPEDOG",
     marketCap: null,
-    volume24h: baseUnitsToDisplay(token.metrics.volume24hPipedog.value),
+    volume24h,
     volumeUnit: "PIPEDOG",
     change24h,
     liquidity: null,
     holders: null,
-    trades: token.metrics.totalTrades.value,
+    trades: totalTrades,
     ageHours: elapsedHours(token.launchedAt),
     launchedAt: token.launchedAt,
     mode: token.feeMode,

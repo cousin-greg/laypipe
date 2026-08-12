@@ -14,8 +14,15 @@ import {
   compactMoney,
   compactNumber,
   formatAge,
-  formatMoney,
 } from "./format";
+import {
+  compareTokenChanges,
+  compareTokenVolumes,
+  formatTokenChange,
+  formatTokenPrice,
+  formatTokenVolume,
+  tokenChangeDirection,
+} from "./market-format";
 import { Sparkline } from "./Sparkline";
 import { TokenAvatar } from "./TokenAvatar";
 import { useMarketData } from "./MarketDataProvider";
@@ -60,39 +67,28 @@ function rankedToken(tab: FeatureTab, sourceTokens: BoardToken[]) {
   }
 
   if (tab === "mover") {
-    return tokens.sort((a, b) => metric(b.change24h) - metric(a.change24h))[0];
+    return tokens.sort((a, b) => compareTokenChanges(b, a))[0];
   }
 
   return tokens.sort((a, b) => {
-    if (a.source === "live" || b.source === "live") return b.trades - a.trades;
-    return (
-      b.volume24h * (1 + Math.max(b.change24h ?? 0, 0) / 100) -
-      a.volume24h * (1 + Math.max(a.change24h ?? 0, 0) / 100)
-    );
+    if (a.source === "fixture" && b.source === "fixture") {
+      return (
+        b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
+        a.volume24h * (1 + Math.max(a.change24h, 0) / 100)
+      );
+    }
+    return b.trades - a.trades;
   })[0];
 }
 
-function Change({ value }: { value: number | null }) {
-  if (value === null) return <span className="change">Unavailable</span>;
+function Change({ token }: { token: BoardToken }) {
+  const direction = tokenChangeDirection(token);
+  if (direction === null) return <span className="change">Unavailable</span>;
   return (
-    <span className={`change ${value >= 0 ? "up" : "down"}`}>
-      {value >= 0 ? "+" : ""}
-      {value.toFixed(1)}%
+    <span className={`change ${direction >= 0 ? "up" : "down"}`}>
+      {formatTokenChange(token)}
     </span>
   );
-}
-
-function formatTokenPrice(token: BoardToken) {
-  if (token.price === null) return "Unavailable";
-  if (token.priceUnit === "USD") return formatMoney(token.price);
-  return `${token.price.toLocaleString("en-US", {
-    maximumSignificantDigits: 6,
-  })} PIPEDOG`;
-}
-
-function formatTokenVolume(token: BoardToken) {
-  if (token.volumeUnit === "USD") return compactMoney(token.volume24h);
-  return `${compactNumber(token.volume24h)} PIPEDOG`;
 }
 
 function TokenCard({ token }: { token: BoardToken }) {
@@ -110,7 +106,7 @@ function TokenCard({ token }: { token: BoardToken }) {
       {token.chart.length > 1 ? (
         <Sparkline
           values={token.chart}
-          positive={(token.change24h ?? 0) >= 0}
+          positive={(tokenChangeDirection(token) ?? 0) >= 0}
           label={`${token.name} ${token.source === "live" ? "indexed" : "illustrative"} price trend`}
           compact
         />
@@ -120,7 +116,7 @@ function TokenCard({ token }: { token: BoardToken }) {
 
       <div className="token-price-line">
         <strong>{formatTokenPrice(token)}</strong>
-        <Change value={token.change24h} />
+        <Change token={token} />
       </div>
 
       <dl className="token-card-stats">
@@ -175,6 +171,7 @@ export function MarketBoard() {
         ? [
             { id: "hot" as const, label: "Most traded" },
             { id: "newest" as const, label: "Newest" },
+            { id: "mover" as const, label: "Biggest mover" },
           ]
         : featureTabs,
     [marketMode],
@@ -200,7 +197,7 @@ export function MarketBoard() {
         ) &&
         !(
           marketMode === "live" &&
-          (sortValue === "market-cap" || sortValue === "gainers")
+          sortValue === "market-cap"
         )
       ) {
         setSort(sortValue as SortMode);
@@ -288,13 +285,16 @@ export function MarketBoard() {
     return matchingTokens.sort((a, b) => {
       if (sort === "market-cap") return metric(b.marketCap) - metric(a.marketCap);
       if (sort === "newest") return a.ageHours - b.ageHours;
-      if (sort === "volume") return b.volume24h - a.volume24h;
-      if (sort === "gainers") return metric(b.change24h) - metric(a.change24h);
+      if (sort === "volume") return compareTokenVolumes(b, a);
+      if (sort === "gainers") return compareTokenChanges(b, a);
       if (marketMode === "live") return b.trades - a.trades;
-      return (
-        b.volume24h * (1 + Math.max(b.change24h ?? 0, 0) / 100) -
-        a.volume24h * (1 + Math.max(a.change24h ?? 0, 0) / 100)
-      );
+      if (a.source === "fixture" && b.source === "fixture") {
+        return (
+          b.volume24h * (1 + Math.max(b.change24h, 0) / 100) -
+          a.volume24h * (1 + Math.max(a.change24h, 0) / 100)
+        );
+      }
+      return b.trades - a.trades;
     });
   }, [cap, date, marketMode, mode, search, sort, tokens]);
 
@@ -443,12 +443,12 @@ export function MarketBoard() {
                   </span>
                   <strong>{formatTokenPrice(featured)}</strong>
                 </div>
-                <Change value={featured.change24h} />
+                <Change token={featured} />
               </div>
               {featured.chart.length > 1 ? (
                 <Sparkline
                   values={featured.chart}
-                  positive={(featured.change24h ?? 0) >= 0}
+                  positive={(tokenChangeDirection(featured) ?? 0) >= 0}
                   label={`${featured.name} illustrative 24 hour price trend`}
                 />
               ) : (
@@ -604,8 +604,8 @@ export function MarketBoard() {
               </option>
               <option value="newest">Newest</option>
               <option value="volume">24h volume</option>
-              <option value="gainers" disabled={marketMode === "live"}>
-                Biggest mover{marketMode === "live" ? " (unavailable)" : ""}
+              <option value="gainers">
+                Biggest mover
               </option>
             </select>
           </label>
@@ -778,7 +778,7 @@ export function MarketBoard() {
                     </td>
                     <td>{formatTokenPrice(token)}</td>
                     <td>
-                      <Change value={token.change24h} />
+                      <Change token={token} />
                     </td>
                     <td>
                       {token.marketCap === null

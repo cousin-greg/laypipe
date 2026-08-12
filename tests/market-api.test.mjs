@@ -210,6 +210,7 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   assert.equal(result.tokens[0].metrics.marketCapUsd.status, "unavailable");
   assert.equal(result.tokens[0].metrics.marketCapUsd.value, null);
   assert.match(tokenCall.sql, /WITH watermark AS MATERIALIZED/);
+  assert.match(tokenCall.sql, /promotion\.wallet_address = p\.creator_address/);
   assert.match(tokenCall.sql, /s\.block_number <= w\.last_processed_block/);
   assert.match(tokenCall.sql, /w\.last_processed_at - interval '24 hours'/);
   assert.doesNotMatch(tokenCall.sql, /now\(\) - interval '24 hours'/);
@@ -219,6 +220,17 @@ test("list queries use fixed SQL placeholders and keyset parameters", async () =
   assert.equal(transactionCall.transactionOptions.isolationLevel, "RepeatableRead");
   assert.equal(transactionCall.transactionOptions.readOnly, true);
   assert.equal(transactionCall.transactionOptions.deferrable, true);
+});
+
+test("approved artwork is bound to the original launch creator", () => {
+  assert.match(
+    readModel.TOKEN_LIST_SQL,
+    /promotion\.wallet_address = p\.creator_address/,
+  );
+  assert.match(
+    readModel.TOKEN_DETAIL_SQL,
+    /promotion\.wallet_address = p\.creator_address/,
+  );
 });
 
 test("stale market precheck never opens a token snapshot", async () => {
@@ -349,9 +361,9 @@ test("token detail is address-parameterized and distinguishes not found", async 
   assert.equal(missing.headers.get("cache-control"), "no-store");
 });
 
-test("missing DATABASE_URL fails closed through the production route boundary", async () => {
-  const previous = process.env.DATABASE_URL;
-  delete process.env.DATABASE_URL;
+test("missing DATABASE_READ_URL fails closed through the production route boundary", async () => {
+  const previous = process.env.DATABASE_READ_URL;
+  delete process.env.DATABASE_READ_URL;
   try {
     const response = await http.handleTokenListRequest(
       new Request("https://laypipe.fun/api/tokens"),
@@ -365,8 +377,8 @@ test("missing DATABASE_URL fails closed through the production route boundary", 
       },
     });
   } finally {
-    if (previous === undefined) delete process.env.DATABASE_URL;
-    else process.env.DATABASE_URL = previous;
+    if (previous === undefined) delete process.env.DATABASE_READ_URL;
+    else process.env.DATABASE_READ_URL = previous;
   }
 });
 

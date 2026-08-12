@@ -1,4 +1,4 @@
-import { getDatabase } from "../../lib/server/db/neon";
+import { getReadDatabase } from "../../lib/server/db/neon";
 import {
   readReconciliationConfig,
   ReconciliationGateError,
@@ -16,7 +16,7 @@ async function main() {
   const manifest = parseRobinhoodProductionManifest(
     process.env as PublicDeploymentEnvironment,
   );
-  const database = await getDatabase();
+  const database = await getReadDatabase();
   const rpc = createHttpIndexerRpc({
     url: process.env.ROBINHOOD_RPC_HTTP_URL,
     deadlineAt: Date.now() + config.timeoutMs,
