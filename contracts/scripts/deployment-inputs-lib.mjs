@@ -46,12 +46,15 @@ const RELEASE_RELEVANT_PATHS = Object.freeze([
   "contracts/.env.example",
   "contracts/foundry.toml",
   "contracts/remappings.txt",
+  "contracts/reference",
   "contracts/src",
   "contracts/script",
   "contracts/scripts",
+  "contracts/test",
   "contracts/abi",
   "contracts/AUDIT_HANDOFF.md",
   "contracts/CURVE_REVIEW.md",
+  "contracts/KEEPERS.md",
   "contracts/README.md",
   "contracts/SECURITY.md",
 ]);
@@ -253,9 +256,12 @@ function releaseWorktreeChanges(repositoryRoot) {
       encoding: "utf8",
       windowsHide: true,
     },
-  ).trim();
+  );
   if (output.length === 0) return [];
-  return output.split(/\r?\n/).map((line) => line.slice(3));
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .map((line) => line.slice(3));
 }
 
 function parseManifest(manifest) {

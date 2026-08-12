@@ -88,13 +88,8 @@ function promotionRegistryResponse(init) {
       database_name: "laypipe_test",
       session_user: `laypipe_${access}_login`,
       current_user: `laypipe_${access}_login`,
-      migration_fingerprint: [
-        `0000_production_read_model.sql:${"a".repeat(64)}`,
-        `0001_runtime_security.sql:${"b".repeat(64)}`,
-        `0002_market_leader_snapshot.sql:${"c".repeat(64)}`,
-        `0003_market_baseline_semantics.sql:${"d".repeat(64)}`,
-      ].join(","),
-      migration_count: "4",
+      migration_fingerprint: databaseModule.EXPECTED_DATABASE_MIGRATION_FINGERPRINT,
+      migration_count: databaseModule.EXPECTED_DATABASE_MIGRATION_COUNT,
       expected_group: group,
       direct_memberships: group,
       in_expected_group: true,
@@ -221,8 +216,13 @@ function createRedisMock() {
   return { values, commands, fetcher };
 }
 
-test("origin guard accepts the active Vercel Preview and canonical site only", () => {
+test("origin guards preserve headerless server calls and validate browser origins", () => {
   configureEnvironment();
+  assert.doesNotThrow(() =>
+    httpModule.sameOriginRequest(
+      new Request("https://laypipe.fun/api/ipfs/cleanup"),
+    ),
+  );
   assert.doesNotThrow(() =>
     httpModule.sameOriginRequest(
       new Request("https://laypipe-git-demo.vercel.app/api/ipfs/stage", {
@@ -257,6 +257,33 @@ test("origin guard accepts the active Vercel Preview and canonical site only", (
     ),
     "203.0.113.20",
   );
+});
+
+test("browser IPFS mutation routes reject requests without an Origin header", async () => {
+  configureEnvironment();
+  const routes = [
+    ["/api/auth/challenge", challengeRoute.POST],
+    ["/api/ipfs/stage", stageRoute.POST],
+    ["/api/ipfs/pin", pinRoute.POST],
+  ];
+
+  for (const [path, post] of routes) {
+    const response = await post(
+      new Request(`https://laypipe.fun${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "203.0.113.9",
+        },
+        body: "{}",
+      }),
+    );
+    assert.equal(response.status, 403, path);
+    assert.deepEqual(await response.json(), {
+      error: "Browser origin is required.",
+      code: "ORIGIN",
+    });
+  }
 });
 
 test("completed promotion registry writes are exact, bounded, and fail closed on identity drift", async () => {

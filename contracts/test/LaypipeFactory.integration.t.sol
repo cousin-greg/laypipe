@@ -98,7 +98,7 @@ contract LaypipeFactoryIntegrationTest is Test {
                 (
                     manager,
                     pipedog,
-                    address(revenueRouter),
+                    PROTOCOL_TREASURY,
                     address(this),
                     LAUNCH_FEE
                 )

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { CONTRACTS_ROOT, evaluateCurveReview, MODEL_ID } from "./curve-model.mjs";
@@ -309,6 +317,71 @@ test("Foundry and Dapp overrides cannot redirect the hashed build or rehearsal",
   assert.equal(attempt.status, 1);
   assert.match(attempt.stderr, /Foundry\/Dapp configuration overrides are forbidden: FOUNDRY_OUT/);
   assert.doesNotMatch(attempt.stderr, /Cannot read curve review/);
+});
+
+test("the clean-candidate gate rejects dirty tests, provenance, and keeper policy", () => {
+  assert.ok(__test.RELEASE_RELEVANT_PATHS.includes("contracts/test"));
+  assert.ok(__test.RELEASE_RELEVANT_PATHS.includes("contracts/reference"));
+  assert.ok(__test.RELEASE_RELEVANT_PATHS.includes("contracts/KEEPERS.md"));
+
+  const repositoryRoot = mkdtempSync(join(tmpdir(), "laypipe-release-gate-"));
+  const testPath = join(repositoryRoot, "contracts", "test", "Candidate.t.sol");
+  const referencePath = join(
+    repositoryRoot,
+    "contracts",
+    "reference",
+    "adaptation-deltas.json",
+  );
+  const keepersPath = join(repositoryRoot, "contracts", "KEEPERS.md");
+  const runGit = (args) => {
+    const result = spawnSync("git", args, {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(
+      result.status,
+      0,
+      `git ${args.join(" ")} failed: ${result.stderr || result.error?.message}`,
+    );
+  };
+
+  try {
+    mkdirSync(join(repositoryRoot, "contracts", "test"), { recursive: true });
+    mkdirSync(join(repositoryRoot, "contracts", "reference"), { recursive: true });
+    writeFileSync(testPath, "contract CandidateTest {}\n", "utf8");
+    writeFileSync(referencePath, "{\"status\":\"reviewed\"}\n", "utf8");
+    writeFileSync(keepersPath, "# Keeper policy\n", "utf8");
+    runGit(["init", "--quiet"]);
+    runGit(["config", "user.email", "release-gate@example.invalid"]);
+    runGit(["config", "user.name", "Release Gate"]);
+    runGit([
+      "add",
+      "contracts/test/Candidate.t.sol",
+      "contracts/reference/adaptation-deltas.json",
+      "contracts/KEEPERS.md",
+    ]);
+    runGit(["commit", "--quiet", "-m", "fixture"]);
+
+    writeFileSync(testPath, "contract WeakenedCandidateTest {}\n", "utf8");
+    assert.deepEqual(__test.releaseWorktreeChanges(repositoryRoot), [
+      "contracts/test/Candidate.t.sol",
+    ]);
+
+    writeFileSync(testPath, "contract CandidateTest {}\n", "utf8");
+    writeFileSync(referencePath, "{\"status\":\"unreviewed\"}\n", "utf8");
+    assert.deepEqual(__test.releaseWorktreeChanges(repositoryRoot), [
+      "contracts/reference/adaptation-deltas.json",
+    ]);
+
+    writeFileSync(referencePath, "{\"status\":\"reviewed\"}\n", "utf8");
+    writeFileSync(keepersPath, "# Altered keeper policy\n", "utf8");
+    assert.deepEqual(__test.releaseWorktreeChanges(repositoryRoot), [
+      "contracts/KEEPERS.md",
+    ]);
+  } finally {
+    rmSync(repositoryRoot, { recursive: true, force: true });
+  }
 });
 
 test("deployment evidence binds its verifier and the raw Forge path has an in-script gate", () => {

@@ -13,11 +13,14 @@ immutable external-review package; this runbook remains the detailed authority.
 - The `laypipe-production` Neon integration is attached to Production and
   Preview. Preview database branching is enabled, so preview migrations and
   data do not touch the production branch.
-- The `laypipe-production-rate-limits` Upstash database still needs to be
-  accepted and verified in the Vercel Marketplace for Production. Until its
-  injected REST URL/token are confirmed by a fail-closed smoke test, upload
-  and mutation routes must remain disabled. Preview must use a separate Redis
-  resource and must never share Production nonce or rate-limit state.
+- The free `laypipe-production-rate-limits` Upstash database is Available in
+  Vercel Marketplace, attached to the LayPipe project for Production only, and
+  exposes masked `UPSTASH_REDIS_REST_KV_REST_API_URL` and
+  `UPSTASH_REDIS_REST_KV_REST_API_TOKEN` variables. No secret values were
+  copied out. Upload and mutation routes remain disabled
+  until the release smoke proves nonce replay, lease, and rate-limit behavior
+  fail closed. Preview must use a separate Redis resource and must never share
+  Production nonce or rate-limit state.
 - `NEXT_PUBLIC_SITE_URL`, `LAYPIPE_MARKET_MODE=fixture`, a production
   wallet-challenge secret, a production cron secret, and the
   `IPFS_PINNING_ENABLED=false` kill switch are configured in Vercel. Pinata
@@ -87,6 +90,13 @@ pinning credentials. Use a separate `MARKET_CURSOR_SECRET` for live read
 pagination; reserve `WALLET_CHALLENGE_SECRET` for mutation profiles. Until a
 separate Preview Redis resource exists, keep its upload and mutation APIs
 disabled. Mark every server-only credential as Sensitive in Vercel.
+
+The current Preview is protected by Vercel SSO. Before calling any webhook,
+scheduler, or uptime-monitor rehearsal complete, create a narrowly scoped
+Deployment Protection automation bypass for those callers and retain evidence
+that unauthenticated requests with the bypass reached the intended Preview API
+rather than receiving the SSO redirect. Do not remove Production protection to
+make Preview automation work.
 Restrict the Pinata key to only the file and JSON pinning permissions this app
 uses. Database clients must initialize lazily so an intentionally unconfigured
 Preview build fails at request time rather than during `next build`.
@@ -142,7 +152,12 @@ owner, with the INHERIT and SET options required to maintain those functions,
 never a runtime identity. Keep
 `DATABASE_MIGRATION_URL` operator-local and out of Vercel. After every migration,
 run `npm run db:grant-runtime` as the owner and rerun the PostgreSQL privilege
-integration before either runtime URL is enabled.
+integration before either runtime URL is enabled. The application build pins
+the exact ordered migration names and SHA-256 digests in
+`lib/server/db/neon.ts`; both runtime credentials reject a well-formed ledger
+that differs from that reviewed build evidence. When a migration is added or
+changed, update the pinned evidence only in the same reviewed candidate and
+retain the file-derived test output.
 
 The complete public configured release manifest is the canonical contract
 configuration for both the browser and indexer. A factory address alone never

@@ -14,9 +14,14 @@ on another gate.
 - [x] Vercel Preview builds the production-readiness branch with Node 24.
 - [x] Neon is attached to Production and Preview with Preview branching.
 - [-] The Neon schema is not applied. Vercel Query is waiting for Greg's 2FA.
-- [ ] Accept and verify Production Upstash for nonce replay and rate-limit
-  state; this session could not confirm the Marketplace attachment or injected
-  environment variables.
+- [x] The free `laypipe-production-rate-limits` Upstash database is Available
+  and attached to the LayPipe project's Production environment only. Vercel
+  shows masked `UPSTASH_REDIS_REST_KV_REST_API_URL` and
+  `UPSTASH_REDIS_REST_KV_REST_API_TOKEN` variables; no secret values were
+  copied out.
+- [-] Production upload and mutation routes remain disabled until their
+  nonce-replay, lease, and rate-limit behavior receives the checklist's
+  fail-closed release smoke.
 - [ ] Attach a separate Preview Redis resource before testing upload or
   mutation routes. Until then those routes must fail closed.
 - [x] `LAYPIPE_MARKET_MODE=fixture` and `IPFS_PINNING_ENABLED=false` are the
@@ -31,8 +36,9 @@ Do not paste credentials into chat, GitHub, or any `NEXT_PUBLIC_` variable. Add
 server credentials directly to the named Vercel environment or an ignored
 local `.env` file.
 
-- [ ] In GitHub branch protection for `main`, require both `Release gates`
-  checks (`Application and data` and `Protocol local invariants`) before merge.
+- [x] GitHub branch protection for `main` strictly requires both `Release
+  gates` checks (`Application and data` and `Protocol local invariants`), with
+  force pushes and branch deletion disabled.
 
 ### 1. Finish Neon Preview setup
 
@@ -91,8 +97,10 @@ apply grants with the operator-only migration credential, and add only
 - [ ] Confirm quotas can sustain finalized blocks faster than Robinhood
   produces them with ten-block `eth_getLogs` windows.
 
-The archive endpoint is required to execute the currently blocked historical
-CREATE2/factory integration suite. A public RPC failure is not a passing test.
+The archive endpoint is required for 18 currently blocked historical tests:
+all 17 CREATE2/factory integration bodies plus one Robinhood direct-routing
+preflight test. The final full suite contains 77 tests; a public RPC failure is
+not a passing test.
 
 ### 4. Choose control and revenue addresses
 
@@ -137,6 +145,11 @@ independent audit.
 
 ## Operator: Preview rehearsal
 
+- [ ] Configure a Vercel Deployment Protection automation bypass for the
+  isolated Preview rehearsal and give only that bypass to the Alchemy webhook,
+  scheduler, and uptime monitor. The current Preview redirects unauthenticated
+  `/api/health`, `/api/ready`, and `/api/tokens` requests to Vercel SSO, so
+  external-route rehearsal has not happened yet.
 - [ ] Set Preview to `LAYPIPE_CONFIG_PROFILE=preview-indexer`, retain the
   Vercel build's secret-free `prebuild` output, and rehearse indexing while the
   Board remains fixture-only. Advance to `preview-readonly` only after backfill
@@ -206,8 +219,9 @@ Greg must explicitly authorize each broadcast after the independent audit.
   head.
 - [ ] With explicit authorization, deploy the test-only mock-PIPEDOG stack with
   launches disabled and self-burn config disabled.
-- [ ] Accept ownership from the reviewed Safe/test owners before enabling the
-  creator-fee rehearsal config.
+- [ ] Accept ownership from the reviewed Safe/test owners before opening the
+  global launch gate or allowing creator-mode rehearsal launches. The creator
+  config may already be staged while that global gate remains closed.
 - [ ] Test exact approval, creator-mode launch, buy, sell, fee sweep, creator
    claim, deferred platform payout/retry, and 25/25/50 protocol routing.
 - [ ] For buy and sell, prove ArbSys/native-chain deadline expiry, last-moment

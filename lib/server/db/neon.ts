@@ -32,6 +32,34 @@ export interface DbClient extends DbTransactionQuery {
 export const DATABASE_READ_TIMEOUT_MS = 3_000;
 export const DATABASE_WRITE_TIMEOUT_MS = 10_000;
 
+/**
+ * The exact, ordered migration ledger reviewed for this application build.
+ * Adding or changing a migration requires updating this evidence only after
+ * review; runtime credentials fail closed against any other valid ledger.
+ */
+export const EXPECTED_DATABASE_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    name: "0000_production_read_model.sql",
+    sha256: "9d3ac3a65381e5dbbf282241077ac19066f61331fa08e3b2a4540ae43eeb9768",
+  }),
+  Object.freeze({
+    name: "0001_runtime_security.sql",
+    sha256: "011aa1e6ebcb4254bdb6e7d7607df68aedfd99018c606811e6c921903ab22bfe",
+  }),
+  Object.freeze({
+    name: "0002_market_leader_snapshot.sql",
+    sha256: "213b8e5fc700989f437227337c6918f34f7eb68e21cee23f41949a9f592da726",
+  }),
+  Object.freeze({
+    name: "0003_market_baseline_semantics.sql",
+    sha256: "99d236277d48835c50e4cefbf886a07564c7322d6f6cb434de16dcf4f1fc2501",
+  }),
+] as const);
+export const EXPECTED_DATABASE_MIGRATION_FINGERPRINT = EXPECTED_DATABASE_MIGRATIONS
+  .map(({ name, sha256 }) => `${name}:${sha256}`)
+  .join(",");
+export const EXPECTED_DATABASE_MIGRATION_COUNT = String(EXPECTED_DATABASE_MIGRATIONS.length);
+
 export function databaseFetchOptions(timeoutMs: number): DbFetchOptions {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) {
     throw new Error("Database timeout is outside the supported range.");
@@ -340,6 +368,10 @@ export function attestRuntimeDatabaseIdentity(
       || !/^[a-z_][a-z0-9_]{0,62}$/.test(row.expected_group)
       || typeof row.direct_memberships !== "string") {
     throw new Error(`LayPipe ${access} database identity attestation failed.`);
+  }
+  if (row.migration_count !== EXPECTED_DATABASE_MIGRATION_COUNT
+      || row.migration_fingerprint !== EXPECTED_DATABASE_MIGRATION_FINGERPRINT) {
+    throw new Error(`LayPipe ${access} database migration ledger attestation failed.`);
   }
   const commonDenied = [row.can_create_database, row.can_create_schema, row.can_create_temp,
     row.can_modify_identity, row.can_modify_migration_ledger,

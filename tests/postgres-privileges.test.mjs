@@ -213,10 +213,9 @@ CREATE TABLE laypipe_schema_migrations (
   applied_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO laypipe_schema_migrations (name, sha256) VALUES
-  ('0000_production_read_model.sql', '${"a".repeat(64)}'),
-  ('0001_runtime_security.sql', '${"b".repeat(64)}'),
-  ('0002_market_leader_snapshot.sql', '${"c".repeat(64)}'),
-  ('0003_market_baseline_semantics.sql', '${"d".repeat(64)}');
+  ${databaseSecurity.EXPECTED_DATABASE_MIGRATIONS
+    .map(({ name, sha256 }) => `('${name}', '${sha256}')`)
+    .join(",\n  ")};
 `, { role: "laypipe_migration_owner" });
     await psql(container, `
 CREATE ROLE laypipe_runtime_read NOLOGIN;

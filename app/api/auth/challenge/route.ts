@@ -6,7 +6,7 @@ import {
   readJsonObject,
   requireAddress,
   requireString,
-  sameOriginRequest,
+  sameOriginBrowserRequest,
 } from "@/lib/server/auth/http";
 import { enforceRateLimit } from "@/lib/server/auth/redis";
 import { requireIpfsPinningEnabled } from "@/lib/server/ipfs/pinata";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    sameOriginRequest(request);
+    sameOriginBrowserRequest(request);
     requireIpfsPinningEnabled();
     const body = await readJsonObject(request);
     const wallet = requireAddress(body.wallet);

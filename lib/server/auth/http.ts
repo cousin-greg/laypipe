@@ -165,3 +165,10 @@ export function sameOriginRequest(request: Request) {
     throw new HttpError(403, "ORIGIN", "Cross-origin requests are not allowed.");
   }
 }
+
+export function sameOriginBrowserRequest(request: Request) {
+  if (!request.headers.get("origin")) {
+    throw new HttpError(403, "ORIGIN", "Browser origin is required.");
+  }
+  sameOriginRequest(request);
+}

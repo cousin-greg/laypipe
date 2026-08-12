@@ -8,7 +8,7 @@ import {
   readJsonObject,
   requireAddress,
   requireString,
-  sameOriginRequest,
+  sameOriginBrowserRequest,
 } from "@/lib/server/auth/http";
 import { consumeNonce, enforceRateLimit } from "@/lib/server/auth/redis";
 import {
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
     return promotionDatabase;
   };
   try {
-    sameOriginRequest(request);
+    sameOriginBrowserRequest(request);
     requireIpfsPinningEnabled();
     const ip = getRequestIp(request);
     await enforceRateLimit({

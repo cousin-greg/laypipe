@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -23,12 +24,7 @@ function loadTypeScript(relativePath) {
 }
 
 const database = loadTypeScript("lib/server/db/neon.ts");
-const fingerprint = [
-  `0000_production_read_model.sql:${"a".repeat(64)}`,
-  `0001_runtime_security.sql:${"b".repeat(64)}`,
-  `0002_market_leader_snapshot.sql:${"c".repeat(64)}`,
-  `0003_market_baseline_semantics.sql:${"d".repeat(64)}`,
-].join(",");
+const fingerprint = database.EXPECTED_DATABASE_MIGRATION_FINGERPRINT;
 
 function identity(access) {
   const write = access === "write";
@@ -157,6 +153,39 @@ test("runtime identity helpers accept only exact safe read/write identities", ()
   }
 });
 
+test("runtime identity pins the exact ordered repository migration ledger", () => {
+  const directory = resolve(root, "db/migrations");
+  const migrations = readdirSync(directory)
+    .filter((name) => /^\d+.*\.sql$/.test(name))
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => ({
+      name,
+      sha256: createHash("sha256")
+        .update(readFileSync(resolve(directory, name)))
+        .digest("hex"),
+    }));
+
+  assert.deepEqual(migrations, database.EXPECTED_DATABASE_MIGRATIONS);
+  assert.equal(
+    migrations.map(({ name, sha256 }) => `${name}:${sha256}`).join(","),
+    database.EXPECTED_DATABASE_MIGRATION_FINGERPRINT,
+  );
+  assert.equal(String(migrations.length), database.EXPECTED_DATABASE_MIGRATION_COUNT);
+
+  const validButDifferent = fingerprint.replace(
+    migrations[0].sha256,
+    "f".repeat(64),
+  );
+  assert.match(validButDifferent, /0000_production_read_model\.sql:[0-9a-f]{64}/);
+  assert.throws(
+    () => database.attestRuntimeDatabaseIdentity({
+      ...identity("read"),
+      migration_fingerprint: validButDifferent,
+    }, "read"),
+    /migration ledger attestation/,
+  );
+});
+
 test("runtime pair matching rejects reused credentials, marker, database, and ledger drift", () => {
   const read = identity("read");
   const write = identity("write");
@@ -164,7 +193,10 @@ test("runtime pair matching rejects reused credentials, marker, database, and le
     { session_user: read.session_user },
     { database_id: "22222222-2222-4222-8222-222222222222" },
     { database_name: "laypipe_clone" },
-    { migration_fingerprint: fingerprint.replace("b".repeat(64), "d".repeat(64)) },
+    { migration_fingerprint: fingerprint.replace(
+      database.EXPECTED_DATABASE_MIGRATIONS[1].sha256,
+      "f".repeat(64),
+    ) },
     { migration_count: "5" },
   ]) {
     assert.throws(
