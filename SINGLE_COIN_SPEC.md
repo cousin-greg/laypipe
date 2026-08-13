@@ -117,7 +117,7 @@ Primary navigation and pages become:
   the next 100,000-token threshold, owned PipeDog cards, and traits.
 - **Rewards:** claimable PIPEDOG, claimed history, total distributed, and claim
   action.
-- **Collection:** the 10,000-piece trait set and provenance.
+- **Lore:** the 10,000-piece collection, source lineage, and found-image ethos.
 - **Docs:** the automatic conversion and 1% fee mechanics.
 
 The public multi-token board, permissionless launch form, creator controls,
@@ -129,7 +129,11 @@ part of this product.
 `public/brand/pipedog.png` remains the exact canonical PIPEDOG reference and is
 never redrawn or regenerated. PipeDog NFTs use a separately authored layer set
 for backgrounds, clothing, hats, eyes, mouths, and props, with deterministic
-trait assembly and a committed provenance manifest.
+trait assembly and a committed provenance manifest. Source dates, URLs,
+dimensions, hashes, and confidence status remain public. Found-object traits
+retain their recognizable packaging and logos; uncertainty is labeled rather
+than replaced with a convenient guess. Generated concepts can guide layout but
+cannot replace the exact dog or become unverified production source layers.
 
 ## Worktree boundary
 

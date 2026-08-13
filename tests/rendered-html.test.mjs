@@ -168,6 +168,16 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         /100,000 LAYPIPE held by a wallet/i,
       ],
     ],
+    [
+      "/lore",
+      [
+        /The dog was already here/i,
+        /Lineage without possession/i,
+        /Domge PNG/i,
+        /Keep the marks on the objects/i,
+        /05450b2360b7591058bb19bc050b6c84546851d75d6623e1867e0e96b0a3f9b2/i,
+      ],
+    ],
   ];
 
   for (const [path, patterns] of routes) {

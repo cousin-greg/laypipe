@@ -5,6 +5,7 @@ const pages = [
   { path: "/my", changeFrequency: "daily", priority: 0.85 },
   { path: "/rewards", changeFrequency: "daily", priority: 0.8 },
   { path: "/tokenomics", changeFrequency: "monthly", priority: 0.7 },
+  { path: "/lore", changeFrequency: "monthly", priority: 0.72 },
   { path: "/docs", changeFrequency: "monthly", priority: 0.65 },
 ] as const;
 

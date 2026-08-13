@@ -117,6 +117,7 @@ test("primary product surface is singleton-only and exposes no wallet mutation a
   assert.doesNotMatch(shell, /Launch a coin|Latest indexed launches|Fixture feed/);
   assert.doesNotMatch(shell, /href="\/launch"|label: "Board"/);
   assert.match(shell, /label: "My PipeDogs"/);
+  assert.match(shell, /label: "Lore"/);
   assert.match(shell, /1%<\/strong> PIPEDOG fee to NFT holders/);
   assert.match(retiredLaunch, /redirect\("\/#trade"\)/);
   assert.match(retiredToken, /redirect\("\/#trade"\)/);

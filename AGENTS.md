@@ -13,6 +13,15 @@
   `pipedog.xyz`. Preserve the dog exactly; never redraw, beautify, smooth,
   cartoonize, or reinterpret it with image generation. Composite the exact
   cutout with separately generated supporting scenery when needed.
+- PipeDog is inherited net art, not a blank mascot. Preserve its documented
+  lineage from Balltze/Cheems through the exact Domge PNG and later detective
+  composite. Record source URLs, dates, dimensions, file hashes, and whether a
+  link is confirmed, probable, or unresolved.
+- Final PipeDogs use deterministic found-image layers around the unchanged dog.
+  Keep crude cut edges, mismatched flash, compression, and recognizable marks
+  on real objects. Do not strip cigarette-package logos or replace them with
+  generic boxes. Generated images may explore composition, but they are not
+  provenance masters or replacements for the canonical dog layer.
 
 ## Protocol
 

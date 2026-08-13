@@ -13,6 +13,7 @@ const navigation = [
   { href: "/my", currentPath: "/my", label: "My PipeDogs" },
   { href: "/rewards", currentPath: "/rewards", label: "Rewards" },
   { href: "/tokenomics", currentPath: "/tokenomics", label: "Mechanics" },
+  { href: "/lore", currentPath: "/lore", label: "Lore" },
   { href: "/docs", currentPath: "/docs", label: "Docs" },
 ];
 
@@ -200,6 +201,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
           <Link href="/my">My PipeDogs</Link>
           <Link href="/rewards">Rewards</Link>
           <Link href="/tokenomics">Mechanics</Link>
+          <Link href="/lore">Lore</Link>
           <a href="https://pipedog.xyz" target="_blank" rel="noreferrer">
             pipedog.xyz
           </a>

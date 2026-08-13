@@ -178,6 +178,7 @@ export default function DocsPage() {
                 PIPEDOG on Blockscout
               </a>
               <Link href="/tokenomics">LayPipe mechanics</Link>
+              <Link href="/lore">PipeDog provenance and ethos</Link>
               <Link href="/#trade">Trade preview</Link>
             </div>
           </section>
