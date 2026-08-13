@@ -18,17 +18,31 @@
 
 - Canonical PIPEDOG:
   `0x5Cb6F181081301b44905F3ae15419112ecaBd8A6` on Robinhood Chain.
-- PIPEDOG is the quote, payment, fee, and paired asset for LayPipe launches.
-  Trading paths must not use native ETH or WETH as the launch-token quote.
+- LayPipe is one fixed-supply coin, not a public launchpad. `LAYPIPE` has an
+  exact supply of 1,000,000,000 tokens and a linked automatic PipeDogs ERC-721
+  mirror capped at 10,000 NFTs. Every whole 100,000 LAYPIPE held by an ordinary
+  wallet equals one PipeDog and one reward unit; smaller balances earn nothing.
+- PIPEDOG is the quote, payment, paired, reward, and fee asset for the one
+  official PIPEDOG/LAYPIPE market. Trading paths must not use native ETH or
+  WETH as the quote.
+- The singleton Uniswap v4 hook charges 1% of the PIPEDOG side of each official
+  pool buy or sell. 100% is assigned to automatic PipeDog holders by whole NFT
+  count. There is no developer, creator, treasury, self-burn, or operations
+  share.
 - Treat PIPEDOG as an exact-transfer, 18-decimal ERC-20 without permit. Wallet
-  flows require an exact, single-use allowance before launch or buy. Never ask
-  for an unlimited approval to the upgradeable factory.
-- Treat each launch as a permanent one-sided Uniswap v4 bonding pool unless a
-  separately audited graduation state machine is designed before mainnet.
-- Start tick and launch sizing need explicit PIPEDOG-denominated economic
-  calibration. Do not silently reuse ETH-denominated defaults.
+  flows require an exact, single-use allowance before a buy or sell. Never ask
+  for an unlimited approval.
+- The market is a permanent one-sided Uniswap v4 bonding pool. The starting
+  tick and launch depth need explicit PIPEDOG-denominated calibration. Do not
+  silently reuse ETH-denominated defaults.
 - Never broadcast a contract deployment without explicit authorization and an
   independent audit.
+
+## Workspace
+
+- Active work happens only in `C:\Users\cousi\Projects\LayPipe`.
+- `C:\Users\cousi\OneDrive\Documents\Laypipedotfun` is an untouched archive of
+  the pre-pivot worktree. Do not edit, build, or install dependencies there.
 
 ## Hosting and verification
 

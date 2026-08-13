@@ -111,8 +111,10 @@ try {
 
   const home = await readResponse(origin, "/");
   assert.equal(home.response.status, 200);
-  assert.match(home.text, /LAY SOME PIPE, DOG\./);
-  assert.match(home.text, /Fixture launches/);
+  assert.match(home.text, /One coin\. One pipe\./);
+  assert.match(home.text, /100,000/);
+  assert.match(home.text, /1%/);
+  assert.match(home.text, /Trading opens when contracts are wired/);
   assert.equal(home.response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(home.response.headers.get("x-frame-options"), "DENY");
   assert.equal(home.response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
@@ -124,12 +126,15 @@ try {
   const docs = await readResponse(origin, "/docs");
   assert.equal(docs.response.status, 200);
   assert.match(docs.text, /0x5Cb6F181081301b44905F3ae15419112ecaBd8A6/);
-  assert.match(docs.text, /No demo coin shown on the Board/);
+  assert.match(docs.text, /single market for LAYPIPE/);
+  assert.match(docs.text, /automatic PipeDogs/);
 
   const tokenomics = await readResponse(origin, "/tokenomics");
   assert.equal(tokenomics.response.status, 200);
-  assert.match(tokenomics.text, /Self-burn \(disabled\)/);
-  assert.match(tokenomics.text, /25% to 0xdead/);
+  assert.match(tokenomics.text, /1,000,000,000 LAYPIPE/);
+  assert.match(tokenomics.text, /10,000/);
+  assert.match(tokenomics.text, /PipeDog holder lane/);
+  assert.match(tokenomics.text, /No developer cut/);
 
   const health = await readResponse(origin, "/api/health", {
     headers: { Accept: "application/json" },

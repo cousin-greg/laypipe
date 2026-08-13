@@ -457,7 +457,7 @@ test("live metric payloads allow bounded aggregates above uint256 and reject mal
   );
 });
 
-test("Board, marquee, and token detail render through exact live helpers", () => {
+test("legacy Board retains exact helpers while token detail redirects to the singleton market", () => {
   const board = readFileSync(resolve(root, "app/_components/MarketBoard.tsx"), "utf8");
   const shell = readFileSync(resolve(root, "app/_components/SiteShell.tsx"), "utf8");
   const detail = readFileSync(resolve(root, "app/token/[slug]/page.tsx"), "utf8");
@@ -466,14 +466,15 @@ test("Board, marquee, and token detail render through exact live helpers", () =>
   assert.match(board, /compareTokenVolumes\(b, a\)/);
   assert.match(board, /compareTokenChanges\(b, a\)/);
   assert.match(board, /formatTokenPrice\(token\)/);
-  assert.match(shell, /formatTokenChange\(token\)/);
-  assert.match(detail, /formatTokenVolume\(token\)/);
+  assert.doesNotMatch(shell, /formatTokenChange\(token\)|useMarketData\(\)/);
+  assert.match(detail, /redirect\("\/#trade"\)/);
+  assert.doesNotMatch(detail, /formatTokenVolume|TokenAvatar|TradePanel/);
   assert.doesNotMatch(adapterSource, /Number\(value\.pipedogAmount\)/);
   assert.doesNotMatch(adapterSource, /Number\(value\.tokenAmount\)/);
   assert.doesNotMatch(adapterSource, /Number\(token\.metrics\.volume24hPipedog/);
 });
 
-test("shared provider owns polling, visibility pause, and pagination", () => {
+test("legacy market provider still owns polling but is detached from singleton layout", () => {
   const provider = readFileSync(
     resolve(root, "app/_components/MarketDataProvider.tsx"),
     "utf8",
@@ -482,8 +483,8 @@ test("shared provider owns polling, visibility pause, and pagination", () => {
   const board = readFileSync(resolve(root, "app/_components/MarketBoard.tsx"), "utf8");
   const layout = readFileSync(resolve(root, "app/layout.tsx"), "utf8");
 
-  assert.match(layout, /<MarketDataProvider marketMode=\{marketMode\}>/);
-  assert.match(shell, /useMarketData\(\)/);
+  assert.doesNotMatch(layout, /MarketDataProvider|readMarketDataMode/);
+  assert.doesNotMatch(shell, /useMarketData\(\)/);
   assert.match(board, /useMarketData\(\)/);
   assert.doesNotMatch(shell, /listTokens\(|setInterval\(/);
   assert.doesNotMatch(board, /listTokens\(/);

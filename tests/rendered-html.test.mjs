@@ -87,10 +87,11 @@ async function expectPage(path, patterns) {
   const html = await response.text();
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
-  assert.match(html, /Fixture feed/i);
+  assert.match(html, /100,000[\s\S]*LAYPIPE per PipeDog/i);
   assert.match(html, /pipedog-pipe-mark\.png/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
   assert.doesNotMatch(html, /buybacks?/i);
+  assert.doesNotMatch(html, /Launch a coin|Latest indexed launches|Fixture feed/i);
 
   for (const pattern of patterns) {
     assert.match(html, pattern, `${path} should contain ${pattern}`);
@@ -116,57 +117,55 @@ async function expectCanonicalFontAssets(html) {
   assert.match(css, /PPMori[_-]Regular[^"')]*\.woff2/i);
 }
 
-test("server-renders the board with explicitly labeled fixture data", async () => {
+test("server-renders the singleton LayPipe product surface", async () => {
   const html = await expectPage("/", [
-    /LAY SOME PIPE, DOG\./i,
-    /Fixture launches/i,
-    /THE BOARD/i,
-    /Hot/i,
-    /Largest/i,
-    /Biggest mover/i,
-    /0\.3% protocol lane routes 25% to 0xdead/i,
+    /One coin\. One pipe\./i,
+    /1,000,000,000/i,
+    /10,000/i,
+    /Automatic threshold/i,
+    /One clean percent/i,
+    /My PipeDogs/i,
+    /51,750[\s\S]*LAYPIPE to go/i,
+    /Trading opens when contracts are wired/i,
   ]);
 
   await expectCanonicalFontAssets(html);
 
-  assert.doesNotMatch(html, /Preview market/i);
-  assert.match(html, /Cards/i);
-  assert.match(html, /Table/i);
-  assert.match(html, /Search name or ticker/i);
+  assert.match(html, /Contract preview/i);
+  assert.match(html, /src="\/brand\/pipedog\.png"/i);
+  assert.doesNotMatch(html, /href="\/launch"|label: "Board"/i);
 });
 
-test("server-renders all product routes", async () => {
+test("server-renders singleton wallet, reward, mechanics, and docs routes", async () => {
   const routes = [
     [
-      "/launch",
-      [
-        /configured release factory is unavailable/i,
-        /IPFS pinning happens before wallet transactions/i,
-        /Native ETH is used only for Robinhood Chain gas/i,
-      ],
-    ],
-    [
       "/my",
-      [/Live wallet data is disabled/i, /No balances or reward values are being substituted/i],
+      [/My PipeDogs/i, /Preview position/i, /51,750[\s\S]*LAYPIPE to go/i],
     ],
     [
       "/rewards",
       [
-        /Live wallet data is disabled/i,
-        /Claim creator PIPEDOG from the configured release hook/i,
+        /Claim from the pipe/i,
+        /Claimable PIPEDOG/i,
+        /Claim PIPEDOG/i,
       ],
     ],
     [
       "/tokenomics",
-      [/Every trade feeds a visible pipe/i, /Collected in PIPEDOG/i],
+      [
+        /Every official-pool trade fills the PipeDog pool/i,
+        /Collected in PIPEDOG/i,
+        /No developer cut/i,
+      ],
     ],
     [
       "/docs",
       [
+        /One product/i,
+        /Very large buys may need to be split/i,
         /Contract registry/i,
-        /initialize its PIPEDOG pair/i,
-        /Native ETH pays network gas only/i,
-        /Not production-calibrated/i,
+        /One percent to holders/i,
+        /100,000 LAYPIPE held by a wallet/i,
       ],
     ],
   ];
@@ -176,26 +175,9 @@ test("server-renders all product routes", async () => {
   }
 });
 
-test("server-renders demo and live protocol token detail routes", async () => {
-  await expectPage("/token/pipe-dream", [
-    /interface fixture/i,
-    /Pool not deployed/i,
-    /Self-burn/i,
-    /Fixture data never activates approval, trade, or router mutations/i,
-  ]);
-
-  await expectPage("/token/pipedog", [
-    /LayPipe protocol token/i,
-    /PIPEDOG is live on Robinhood Chain/i,
-    /Pending contract deployment/i,
-    /verified direct distributions/i,
-    /0x5Cb6F181081301b44905F3ae15419112ecaBd8A6/i,
-  ]);
-});
-
 test("metadata uses the canonical PIPEDOG social-card dimensions", async () => {
   const html = await expectPage("/", []);
   assert.match(html, /property="og:image:width" content="1200"/i);
   assert.match(html, /property="og:image:height" content="630"/i);
-  assert.match(html, /The original PIPEDOG beside a green pipe and burn furnace/i);
+  assert.match(html, /The original PIPEDOG beside the LayPipe/i);
 });

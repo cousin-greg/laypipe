@@ -3,31 +3,25 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useEffect, useMemo, useState } from "react";
-import { useMarketData } from "./MarketDataProvider";
+import { type ReactNode, useEffect, useState } from "react";
 import { useWallet } from "./WalletProvider";
-import { compactMoney } from "./format";
-import { formatTokenChange, tokenChangeDirection } from "./market-format";
 
 type Theme = "light" | "dark";
 
 const navigation = [
-  { href: "/", label: "Board" },
-  { href: "/my", label: "My tokens" },
-  { href: "/rewards", label: "Rewards" },
-  { href: "/tokenomics", label: "Tokenomics" },
-  { href: "/docs", label: "Docs" },
+  { href: "/#trade", currentPath: "/", label: "Trade" },
+  { href: "/my", currentPath: "/my", label: "My PipeDogs" },
+  { href: "/rewards", currentPath: "/rewards", label: "Rewards" },
+  { href: "/tokenomics", currentPath: "/tokenomics", label: "Mechanics" },
+  { href: "/docs", currentPath: "/docs", label: "Docs" },
 ];
 
 function shortAddress(address: string) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { marketMode, refreshState, tokens } = useMarketData();
-  const latestTokens = useMemo(() => tokens.slice(0, 16), [tokens]);
-  const feedState = refreshState === "error" ? "error" : "ready";
   const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const { account, status: walletStatus, connect: connectWallet } = useWallet();
@@ -37,10 +31,10 @@ export function SiteShell({ children }: { children: ReactNode }) {
     : account
       ? shortAddress(account)
       : walletStatus === "connecting"
-      ? "Connecting..."
-      : walletStatus === "missing"
-        ? "Wallet needed"
-        : walletStatus === "error"
+        ? "Connecting..."
+        : walletStatus === "missing"
+          ? "Wallet needed"
+          : walletStatus === "error"
             ? "Try again"
             : "Connect wallet";
 
@@ -71,7 +65,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
               width={512}
               height={512}
               priority
-              unoptimized
             />
             <span className="brand-type">
               laypipe<span>.fun</span>
@@ -88,7 +81,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                aria-current={pathname === item.href ? "page" : undefined}
+                aria-current={pathname === item.currentPath ? "page" : undefined}
               >
                 {item.label}
               </Link>
@@ -112,11 +105,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 Dark
               </button>
             </div>
-            <Link className="button button-accent button-small" href="/launch">
-              Launch a coin
-            </Link>
             <button
-              className="button button-quiet button-small"
+              className="button button-accent button-small"
               type="button"
               onClick={() => void connectWallet()}
               disabled={walletBusy}
@@ -148,22 +138,19 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        {menuOpen && (
+        {menuOpen ? (
           <div className="mobile-menu">
             <nav aria-label="Mobile navigation">
               {navigation.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
-                  aria-current={pathname === item.href ? "page" : undefined}
+                  aria-current={pathname === item.currentPath ? "page" : undefined}
                   onClick={() => setMenuOpen(false)}
                 >
                   {item.label}
                 </Link>
               ))}
-              <Link href="/launch" onClick={() => setMenuOpen(false)}>
-                Launch a coin
-              </Link>
             </nav>
             <div className="theme-switcher" aria-label="Color scheme">
               <button
@@ -182,54 +169,14 @@ export function SiteShell({ children }: { children: ReactNode }) {
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
-        <div
-          className="launch-marquee"
-          aria-label={marketMode === "live" ? "Latest indexed launches" : "Latest fixture launches"}
-        >
-          <span className="marquee-label">Latest</span>
-          <div className="marquee-window">
-            <div className={`marquee-track ${latestTokens.length === 0 ? "empty" : ""}`}>
-              {latestTokens.length === 0 ? (
-                <span className="marquee-empty">
-                  {feedState === "error" ? "Live feed unavailable" : "Waiting for indexed launches"}
-                </span>
-              ) : [...latestTokens, ...latestTokens].map((token, index) => {
-                const changeDirection = tokenChangeDirection(token);
-                return (
-                  <Link
-                    href={`/token/${token.slug}`}
-                    key={`${token.slug}-${index}`}
-                    aria-hidden={index >= latestTokens.length}
-                    tabIndex={index >= latestTokens.length ? -1 : undefined}
-                  >
-                    <i style={{ background: token.accent }} aria-hidden="true" />
-                    <strong>${token.symbol}</strong>
-                    <span>
-                      {token.marketCap === null ? "Market cap unavailable" : compactMoney(token.marketCap)}
-                    </span>
-                    <em
-                      className={
-                        changeDirection === null
-                          ? undefined
-                          : changeDirection >= 0
-                            ? "up"
-                            : "down"
-                      }
-                    >
-                      {changeDirection === null
-                        ? "24h unavailable"
-                        : formatTokenChange(token)}
-                    </em>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-          <span className="preview-tag">
-            {marketMode === "live" ? "Live index" : "Fixture feed"}
-          </span>
+        <div className="singleton-bar" aria-label="LayPipe protocol constants">
+          <span><strong>1B</strong> fixed LAYPIPE</span>
+          <i aria-hidden="true" />
+          <span><strong>100,000</strong> LAYPIPE per PipeDog</span>
+          <i aria-hidden="true" />
+          <span><strong>1%</strong> PIPEDOG fee to NFT holders</span>
         </div>
       </header>
 
@@ -242,26 +189,24 @@ export function SiteShell({ children }: { children: ReactNode }) {
             alt=""
             width={512}
             height={512}
-            unoptimized
           />
           <div>
             <strong>laypipe.fun</strong>
-            <p>Launches trade in PIPEDOG. The protocol route is direct.</p>
+            <p>LayPipe. Get PipeDog. Claim PIPEDOG.</p>
           </div>
         </div>
         <nav aria-label="Footer navigation">
-          <Link href="/">Board</Link>
-          <Link href="/launch">Launch</Link>
-          <Link href="/tokenomics">Tokenomics</Link>
-          <Link href="/docs">Docs</Link>
+          <Link href="/#trade">Trade</Link>
+          <Link href="/my">My PipeDogs</Link>
+          <Link href="/rewards">Rewards</Link>
+          <Link href="/tokenomics">Mechanics</Link>
           <a href="https://pipedog.xyz" target="_blank" rel="noreferrer">
-            pipedog.xyz ↗
+            pipedog.xyz
           </a>
         </nav>
         <p className="footer-risk">
-          {marketMode === "live"
-            ? "Live indexed markets. Verify contracts before trading. Memecoins can go to zero."
-            : "Fixture interface. Sample coins are not deployed. Memecoins can go to zero."}
+          Contract preview. LAYPIPE trading, NFT mirroring, and PIPEDOG claims
+          remain disabled until the singleton deployment is configured.
         </p>
       </footer>
     </div>

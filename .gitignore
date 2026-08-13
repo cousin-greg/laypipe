@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Codex local preview logs
 /.codex-dev.*.log
+
+# Machine-specific checkout notes
+/HOST.local.md

@@ -1248,12 +1248,12 @@ test("public confirmation RPC attaches a per-request abort signal", async () => 
   assert.ok(signal instanceof AbortSignal);
 });
 
-test("token detail preserves fixture fail-closed gating and shared TokenAvatar", () => {
+test("retired token detail redirects while its detached legacy panel stays fail closed", () => {
   const page = readFileSync(resolve(root, "app/token/[slug]/page.tsx"), "utf8");
   const panel = readFileSync(resolve(root, "app/token/[slug]/TradePanel.tsx"), "utf8");
   const clientSource = readFileSync(resolve(root, "lib/web3/trade-client.ts"), "utf8");
-  assert.match(page, /<TokenAvatar token=\{token\}/);
-  assert.match(page, /enabled=\{marketMode === "live"\}/);
+  assert.match(page, /redirect\("\/#trade"\)/);
+  assert.doesNotMatch(page, /TokenAvatar|TradePanel|marketMode/);
   assert.match(panel, /data-trading-state="fixture-disabled"/);
   assert.match(panel, /Fixture data never activates approval, trade, or router mutations/);
   assert.match(panel, /isTradeSubmissionIndeterminate/);

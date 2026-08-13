@@ -346,6 +346,35 @@ dd {
   display: none;
 }
 
+.singleton-bar {
+  display: flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  overflow-x: auto;
+  padding: 8px 18px;
+  border-top: 1px solid var(--rule);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--muted);
+  font-size: 0.61rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.singleton-bar strong {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.singleton-bar i {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--green);
+}
+
 .launch-marquee {
   display: grid;
   min-height: 39px;
@@ -3345,6 +3374,10 @@ dd {
     display: none;
   }
 
+  .singleton-bar {
+    justify-content: flex-start;
+  }
+
   .board-intro {
     grid-template-columns: 1fr;
     gap: 30px;
@@ -3643,6 +3676,11 @@ dd {
 
   .mobile-menu .theme-switcher {
     width: max-content;
+  }
+
+  .singleton-bar {
+    gap: 12px;
+    padding-inline: 12px;
   }
 
   .marquee-label {

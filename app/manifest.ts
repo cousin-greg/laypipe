@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "laypipe.fun",
     short_name: "LayPipe",
     description:
-      "Launch and trade PIPEDOG-paired coins on Robinhood Chain.",
+      "Trade LAYPIPE against PIPEDOG and unlock automatic PipeDog NFTs.",
     start_url: "/",
     display: "standalone",
     background_color: "#fff7dc",

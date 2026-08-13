@@ -860,7 +860,7 @@ test("market mode is explicit, fixture-default, and invalid values fail closed",
   assert.throws(() => mode.readMarketDataMode("demo"), /fixture or live/);
 });
 
-test("MarketBoard has a guarded live-empty state and no demo fallback", () => {
+test("legacy MarketBoard stays fail-closed but is not mounted by the singleton surface", () => {
   const board = readFileSync(resolve(root, "app/_components/MarketBoard.tsx"), "utf8");
   const page = readFileSync(resolve(root, "app/page.tsx"), "utf8");
   const layout = readFileSync(resolve(root, "app/layout.tsx"), "utf8");
@@ -871,15 +871,14 @@ test("MarketBoard has a guarded live-empty state and no demo fallback", () => {
   assert.match(board, /featured \? \(/);
   assert.match(board, /Fixture data was not substituted/);
   assert.match(board, /No fixture coins are shown in live mode/);
-  assert.match(page, /<MarketBoard \/>/);
-  assert.match(layout, /const marketMode = readMarketDataMode\(\)/);
-  assert.match(layout, /<MarketDataProvider marketMode=\{marketMode\}>/);
+  assert.match(page, /readLaypipePageData/);
+  assert.match(page, /<LaypipeProduct data=\{data\}/);
+  assert.doesNotMatch(layout, /readMarketDataMode|MarketDataProvider/);
   assert.match(provider, /marketMode === "fixture" \? fixtureBoardSource : null/);
-  assert.match(shell, /tokens\.slice\(0, 16\)/);
-  assert.match(shell, /Live feed unavailable/);
+  assert.doesNotMatch(shell, /useMarketData|tokens\.slice\(0, 16\)|Live feed unavailable/);
+  assert.match(shell, /label: "My PipeDogs"/);
   assert.match(adapter, /mode === "live" \? createApiMarketAdapter\(\) : fixtureMarketAdapter/);
   assert.doesNotMatch(adapter, /catch[\s\S]{0,200}fixtureMarketAdapter/);
-  assert.match(tokenPage, /export const dynamic = "force-dynamic"/);
-  assert.match(tokenPage, /LiveTokenUnavailable/);
-  assert.match(tokenPage, /No fixture token or estimated metric has been substituted/);
+  assert.match(tokenPage, /redirect\("\/#trade"\)/);
+  assert.doesNotMatch(tokenPage, /LiveTokenUnavailable|TradePanel|TokenAvatar/);
 });

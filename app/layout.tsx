@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import Script from "next/script";
-import { readMarketDataMode } from "@/lib/server/market/mode";
-import { MarketDataProvider } from "./_components/MarketDataProvider";
 import { SiteShell } from "./_components/SiteShell";
 import { WalletProvider } from "./_components/WalletProvider";
 import "./globals.css";
@@ -88,9 +86,9 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://laypipe.fun"),
-  title: "laypipe.fun — Launch and trade with PIPEDOG",
+  title: "laypipe.fun - LayPipe, PipeDogs, and PIPEDOG",
   description:
-    "A Robinhood Chain launch board where every coin pairs and trades with PIPEDOG and protocol fees route directly to 0xdead, treasury, and operations.",
+    "The single LAYPIPE bonding market: trade against PIPEDOG, automatically unlock PipeDog NFTs, and claim PIPEDOG fees by NFT count.",
   applicationName: "laypipe.fun",
   icons: {
     icon: "/brand/favicon.png",
@@ -98,9 +96,9 @@ export const metadata: Metadata = {
     apple: "/brand/favicon.png",
   },
   openGraph: {
-    title: "laypipe.fun — The Robinhood Chain coin pipeline",
+    title: "laypipe.fun - Every official-pool trade fills the pipe",
     description:
-      "Launch a coin against PIPEDOG, lock its liquidity, and route the protocol fee lane directly to 0xdead, treasury, and operations.",
+      "Buy LAYPIPE with PIPEDOG. Every 100,000 LAYPIPE automatically maps to one PipeDog and one share of official-pool PIPEDOG fees.",
     url: "https://laypipe.fun",
     siteName: "laypipe.fun",
     type: "website",
@@ -109,15 +107,15 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "The original PIPEDOG beside a green pipe and burn furnace for laypipe.fun",
+        alt: "The original PIPEDOG beside the LayPipe",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "laypipe.fun — The Robinhood Chain coin pipeline",
+    title: "laypipe.fun - Every official-pool trade fills the pipe",
     description:
-      "Sunshine launch infrastructure where every coin trades in PIPEDOG and protocol fees route directly.",
+      "Trade LAYPIPE against PIPEDOG, unlock automatic PipeDogs, and claim PIPEDOG by NFT count.",
     images: ["/og.png"],
   },
 };
@@ -127,8 +125,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const marketMode = readMarketDataMode();
-
   return (
     <html
       lang="en"
@@ -140,11 +136,9 @@ export default function RootLayout({
         <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
       <body>
-        <MarketDataProvider marketMode={marketMode}>
-          <WalletProvider>
-            <SiteShell>{children}</SiteShell>
-          </WalletProvider>
-        </MarketDataProvider>
+        <WalletProvider>
+          <SiteShell>{children}</SiteShell>
+        </WalletProvider>
       </body>
     </html>
   );

@@ -1,111 +1,101 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 
 const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
+
+export const metadata: Metadata = {
+  title: "Mechanics | laypipe.fun",
+  description:
+    "One billion LAYPIPE, 10,000 automatic PipeDogs, and a 1% PIPEDOG holder fee.",
+};
 
 export default function TokenomicsPage() {
   return (
     <main className="inner-page content-width">
       <section className="page-heading tokenomics-heading">
         <div>
-          <p className="eyebrow">ONE PERCENT. FULLY ROUTED.</p>
-          <h1>Every trade feeds a visible pipe.</h1>
+          <p className="eyebrow">ONE COIN. ONE CLEAN PERCENT.</p>
+          <h1>Every official-pool trade fills the PipeDog pool.</h1>
           <p>
-            Every LayPipe launch pairs and trades against PIPEDOG. The launch
-            mode controls 70% of each PIPEDOG fee; the remaining 30% enters the
-            direct protocol router.
+            LAYPIPE has a fixed one-billion-token supply and a maximum of 10,000
+            automatic PipeDog NFTs. Every complete 100,000 LAYPIPE balance is
+            one NFT and one unit of the PIPEDOG fee allocation.
           </p>
         </div>
         <Image
           src="/brand/pipedog.png"
-          alt="PIPEDOG detective"
+          alt="The canonical PIPEDOG artwork"
           width={386}
           height={351}
-          unoptimized
+          sizes="(max-width: 800px) 60vw, 360px"
         />
       </section>
 
-      <section className="fee-diagram" aria-label="One percent trading fee flow">
+      <section className="fee-diagram" aria-label="One percent PIPEDOG fee flow">
         <div className="fee-source">
-          <span>Every buy + sell</span>
+          <span>Every official-pool buy + sell</span>
           <strong>1.00%</strong>
-          <small>Collected in PIPEDOG by the v4 hook</small>
+          <small>Collected in PIPEDOG by the Uniswap v4 hook</small>
         </div>
         <div className="fee-pipe" aria-hidden="true">
           <i />
         </div>
         <div className="fee-branches">
           <article>
-            <span>Creator lane</span>
-            <strong>0.70%</strong>
+            <span>PipeDog holder lane</span>
+            <strong>100%</strong>
             <p>
-              Paid as claimable PIPEDOG or used to buy and burn the launched
-              token.
+              The full hook fee enters the reward accumulator. A wallet&apos;s share
+              is proportional to its whole automatic PipeDog count.
             </p>
             <div className="branch-choice">
-              <span>Creator fees</span>
-              <span>Self-burn (disabled)</span>
+              <span>1 NFT = 1 unit</span>
+              <span>0 NFTs = 0 share</span>
             </div>
           </article>
           <article className="protocol-branch">
-            <span>Protocol lane</span>
-            <strong>0.30%</strong>
+            <span>Claim model</span>
+            <strong>Pull</strong>
             <p>
-              The gross PIPEDOG share splits directly: 25% to 0xdead, 25% to
-              treasury, and 50% to operations. Eligible keeper bounties are
-              deducted from the permissionless lanes.
+              Fees accrue to a per-NFT index. Holders claim PIPEDOG themselves;
+              trades never loop over every holder.
             </p>
-            <div className="protocol-mini-split">
-              <span style={{ width: "25%" }}>25% → 0xdead</span>
-              <span style={{ width: "25%" }}>25% treasury</span>
-              <span style={{ width: "50%" }}>50% ops</span>
+            <div className="branch-choice">
+              <span>No developer cut</span>
+              <span>No holder loop</span>
             </div>
           </article>
         </div>
       </section>
 
-      <aside className="readiness-banner">
-        <span>Safety gate</span>
-        <div>
-          <strong>Creator-fee launches are the only selectable mode.</strong>
-          <p>
-            The self-burn contract path is implemented but its launch config
-            remains disabled until permissionless buys have independently
-            audited, attacker-independent price protection.
-          </p>
-        </div>
-      </aside>
-
       <section className="tokenomics-notes">
         <article>
-          <span>Fixed at launch</span>
-          <h2>One fixed supply.</h2>
+          <span>Fixed supply</span>
+          <h2>1,000,000,000 LAYPIPE.</h2>
           <p>
-            The intended factory issues the full fixed supply once and deposits
-            it into the launch pool. No admin mint path.
+            Ten thousand equal NFT units fit exactly into the full token supply.
           </p>
         </article>
         <article>
-          <span>Locked forever</span>
-          <h2>No liquidity removal.</h2>
+          <span>Automatic threshold</span>
+          <h2>100,000 per PipeDog.</h2>
           <p>
-            The hook rejects removal, making the initial liquidity position a
-            permanent part of the market.
+            The mirror count follows the whole-unit portion of a wallet balance.
           </p>
         </article>
         <article>
-          <span>Permissionless</span>
-          <h2>Anyone can sweep.</h2>
+          <span>Single market</span>
+          <h2>PIPEDOG / LAYPIPE.</h2>
           <p>
-            Public keepers can move accrued PIPEDOG. Eligible route and
-            self-burn actions pay configured PIPEDOG bounties; unbountied hook
-            sweeps require production monitoring.
+            A permanent one-sided v4 bonding pool is the only intended trading
+            route exposed by the website.
           </p>
         </article>
       </section>
 
       <section className="contract-callout">
         <div>
-          <span>PIPEDOG protocol asset</span>
+          <span>Canonical PIPEDOG</span>
           <strong>{PIPEDOG_CA}</strong>
         </div>
         <a
@@ -114,21 +104,17 @@ export default function TokenomicsPage() {
           target="_blank"
           rel="noreferrer"
         >
-          Verify token ↗
+          Verify token
         </a>
       </section>
 
       <aside className="readiness-banner">
-        <span>Design target</span>
+        <span>Contract preview</span>
         <div>
-          <strong>This describes the intended LayPipe contracts.</strong>
+          <strong>The singleton ABIs and addresses are not wired yet.</strong>
           <p>
-            PIPEDOG does not expose a native burn method. The 0xdead lane
-            permanently sequesters directly routed tokens but does not
-            decrement ERC-20 totalSupply. The contracts are not deployed or
-            audited, and the curve economics are not production-calibrated.
-            Final addresses and permissions must match the reviewed deployment
-            before the interface is marked live.
+            The website keeps buy, sell, mirror, and claim mutations disabled
+            until the reviewed singleton deployment is configured.
           </p>
         </div>
       </aside>
