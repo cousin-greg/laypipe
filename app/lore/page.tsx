@@ -10,6 +10,125 @@ const BALLTZE_SHA =
 const PIPEDOG_SHA =
   "63aff55aee85927751388adb21375f04cb6c02718494778937ade49fae1e880a";
 
+const sourceImageTimeline = [
+  {
+    year: "2010",
+    dateTime: "2010-02-13",
+    title: "Doge / Kabosu",
+    image: "/lore/doge-2010.jpg",
+    width: 959,
+    height: 540,
+    alt: "Kabosu in the 2010 family-blog photograph that became Doge",
+    copy: "The cultural ancestor. Kabosu opened the image language, but her pixels are not used in PipeDog.",
+    href: "https://kabosu112.exblog.jp/9944144/",
+    source: "Atsuko Sato's original blog post",
+    status: "primary source",
+  },
+  {
+    year: "2017",
+    dateTime: "2017-09-04",
+    title: "Balltze / Cheems",
+    image: "/lore/cheems-2017.jpg",
+    width: 1080,
+    height: 1080,
+    alt: "Balltze sitting on the floor in the source photograph later used for Cheems",
+    copy: "The exact photograph behind Cheems and the dog layer that later becomes Domge.",
+    href: "https://www.instagram.com/p/BYntbPTF1_f/",
+    source: "@balltze on Instagram",
+    status: "primary source",
+  },
+  {
+    year: "2018",
+    dateTime: "2018-09-30",
+    title: "Walter / Nelson",
+    image: "/lore/walter-2018.png",
+    width: 799,
+    height: 450,
+    alt: "Nelson the bull terrier in the source photograph later known as Walter",
+    copy: "A parallel dog-meme source later gathered into pipedog.xyz's Rushmore image.",
+    href: "https://twitter.com/PupperNelson/status/1046428179618045952",
+    source: "@PupperNelson source post",
+    status: "primary source",
+  },
+  {
+    year: "2018",
+    dateTime: "2018-11-17",
+    title: "Dogwifhat / Achi",
+    image: "/lore/dogwifhat-2018.jpg",
+    width: 1920,
+    height: 1080,
+    alt: "Achi the Shiba Inu wearing the pink knitted hat used for dogwifhat",
+    copy: "Another source photograph later assembled into the official Rushmore image.",
+    href: "https://www.instagram.com/p/BqRvWYiHoKl/",
+    source: "@bangdddd on Instagram",
+    status: "primary source",
+  },
+  {
+    year: "2020",
+    dateTime: "2020-03-01",
+    title: "Domge PNG",
+    image: "/brand/pipedog-domge-source.png",
+    width: 1139,
+    height: 1138,
+    alt: "The transparent distorted Domge PNG used beneath PipeDog",
+    copy: "The exact distorted Balltze cutout beneath canonical PipeDog. The uploader did not claim to have made the edit.",
+    href: "https://www.reddit.com/r/dogelore/comments/fbzzbg/domge_png/",
+    source: "earliest located public post",
+    status: "exact file",
+  },
+  {
+    year: "2020",
+    dateTime: "2020-10-22",
+    title: "Detective Cheems",
+    image: "/lore/detective-cheems-2020.png",
+    width: 360,
+    height: 450,
+    alt: "Cheems wearing a detective hat and holding a curved pipe",
+    copy: "The earliest located appearance of this detective cutout. The post's comments call it a repost, so its maker remains unknown.",
+    href: "https://www.reddit.com/r/cheemsburbgerlore/comments/jg7sg7/detective_cheems_looks_around_for_clues/",
+    source: "earliest located appearance",
+    status: "creator unverified",
+  },
+  {
+    year: "2021",
+    dateTime: "2021-03-18",
+    title: "Literally all Balkan grandpa's",
+    image: "/lore/balkan-grandpa-2021.jpg",
+    width: 710,
+    height: 1180,
+    alt: "Captioned meme reading literally all Balkan grandpa's above detective Cheems",
+    copy: "The exact Memes.com post briefly cited below, now shown in the sequence. It is adjacent evidence, not the canonical PipeDog file.",
+    href: "https://api.memes.com/m/literally-all-balkan-grandpa-s-0mWw61GeqW3",
+    source: "@leviaxpetra_aot on Memes.com",
+    status: "exact post",
+  },
+  {
+    year: "2026",
+    dateTime: "2026",
+    title: "The great dogs on the mountain",
+    image: "/lore/dog-rushmore-2026-display.webp",
+    width: 1536,
+    height: 1024,
+    alt: "The official pipedog.xyz collage of four meme dogs carved into a mountain",
+    copy: "The current pipedog.xyz collage brings Doge, Cheems, Walter, and dogwifhat into one official site image.",
+    href: "https://pipedog.xyz/dog_rushmore_wut.png",
+    source: "pipedog.xyz",
+    status: "current site snapshot",
+  },
+  {
+    year: "date unknown",
+    title: "Canonical PipeDog",
+    image: "/brand/pipedog.png",
+    width: 386,
+    height: 351,
+    alt: "The canonical PipeDog detective composite from pipedog.xyz",
+    copy: "The exact project canonical. Its first publication date and the assembler of the costume remain unresolved.",
+    href: "https://pipedog.xyz/pipedog.png",
+    source: "pipedog.xyz",
+    status: "exact file / date unresolved",
+  },
+] as const;
+
 export const metadata: Metadata = {
   title: "The Dog Was Already Here | PipeDog Lore",
   description:
@@ -100,7 +219,10 @@ export default function LorePage() {
           </p>
         </section>
 
-        <section className={styles.section} id="lineage">
+        <section
+          className={`${styles.section} ${styles.lineageSection}`}
+          id="lineage"
+        >
           <p className={styles.sectionLabel}>01 / THE LINEAGE</p>
           <h2>PipeDog is Doge lore. PipeDog is not the Doge photograph.</h2>
           <p>
@@ -119,134 +241,49 @@ export default function LorePage() {
             shared cast of dogs whose identities were built collectively,
             inconsistently, and in public.
           </p>
+          <div className={styles.timelineIntro}>
+            <p>
+              The cultural history is wider than any one file. This strip stays
+              narrower: the source images themselves, ordered by the year each
+              exact post or earliest located appearance entered the record.
+            </p>
+            <span>Scroll the images, then open every receipt.</span>
+          </div>
 
-          <ol className={styles.timeline} aria-label="PipeDog image lineage">
-            <li>
-              <time dateTime="2005-06-24">2005</time>
-              <div>
-                <strong>The word precedes the picture.</strong>
-                <p>
-                  Homestar Runner uses the misspelling &ldquo;doge&rdquo; in
-                  <a
-                    href="https://homestarrunner.com/toons/biz-cas-fri-1"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Biz Cas Fri 1
-                  </a>
-                  . The word and the famous Shiba photograph meet later.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2010-02-13">2010</time>
-              <div>
-                <strong>Kabosu establishes the Doge image language.</strong>
-                <p>
-                  The official source is
-                  <a
-                    href="https://kabosu112.exblog.jp/9944144/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Atsuko Sato&apos;s original family-blog post
-                  </a>
-                  . Kabosu is the ancestor of the culture, not the dog layer
-                  used by PipeDog.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2013">2013</time>
-              <div>
-                <strong>An informal image becomes monetary language.</strong>
-                <p>
-                  Dogecoin turns the collectively circulated Kabosu image into
-                  a symbol for coordination and exchange. The conversion of
-                  Doge lore into economic behavior predates LayPipe by more
-                  than a decade.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2017-09-04">2017</time>
-              <div>
-                <strong>Balltze sits for the photograph.</strong>
-                <p>
-                  The exact frame later used for Cheems appears on
-                  <a
-                    href="https://www.instagram.com/p/BYntbPTF1_f/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Balltze&apos;s Instagram account
-                  </a>
-                  .
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2018-08-15">2018</time>
-              <div>
-                <strong>Dogelore becomes a shared stage.</strong>
-                <p>
-                  <a
-                    href="https://knowyourmeme.com/memes/sites/dogelore"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    r/dogelore
-                  </a>
-                  gathers downloadable dog cutouts into a cast whose
-                  relationships and canon are made collectively, contradicted,
-                  and remade.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2019-06-08">2019</time>
-              <div>
-                <strong>Cheems enters dogelore.</strong>
-                <p>
-                  The earliest currently documented Cheems meme,
-                  <a
-                    href="https://www.reddit.com/r/dogelore/comments/by7cwr/doge_has_lunch/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    doge has lunch
-                  </a>
-                  , turns the photograph into a reusable character. Cropping
-                  and deliberate language mutation give Balltze another name
-                  and another life.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2020-03-01">2020</time>
-              <div>
-                <strong>Domge PNG arrives.</strong>
-                <p>
-                  Reddit user Gary-Oto is the earliest confirmed public
-                  uploader of a transparent, aggressively distorted Balltze
-                  cutout, posted to r/dogelore under the complete title
-                  &ldquo;Domge PNG.&rdquo; The post makes no claim that Gary-Oto
-                  created the edit. This is the exact dog beneath PipeDog.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span>Later</span>
-              <div>
-                <strong>The detective is assembled.</strong>
-                <p>
-                  An unknown assembler pastes a stock-photo deerstalker, plaid
-                  pet cape, and bent pipe onto Domge. The resulting composite
-                  is served by pipedog.xyz and becomes canonical PIPEDOG; its
-                  first publication date remains unproven.
-                </p>
-              </div>
-            </li>
+          <ol
+            className={styles.sourceTimeline}
+            aria-label="PipeDog source images by year"
+          >
+            {sourceImageTimeline.map((entry) => (
+              <li key={`${entry.year}-${entry.title}`}>
+                <div className={styles.timelineYear}>
+                  {"dateTime" in entry ? (
+                    <time dateTime={entry.dateTime}>{entry.year}</time>
+                  ) : (
+                    <span>{entry.year}</span>
+                  )}
+                </div>
+                <figure className={styles.timelineFigure}>
+                  <div className={styles.timelineImage}>
+                    <Image
+                      src={entry.image}
+                      alt={entry.alt}
+                      width={entry.width}
+                      height={entry.height}
+                      sizes="(max-width: 720px) calc(100vw - 48px), 560px"
+                    />
+                  </div>
+                  <figcaption>
+                    <span>{entry.status}</span>
+                    <h3>{entry.title}</h3>
+                    <p>{entry.copy}</p>
+                    <a href={entry.href} target="_blank" rel="noreferrer">
+                      {entry.source} ↗
+                    </a>
+                  </figcaption>
+                </figure>
+              </li>
+            ))}
           </ol>
         </section>
 
@@ -472,7 +509,7 @@ export default function LorePage() {
               <thead>
                 <tr>
                   <th>Artifact</th>
-                  <th>Earliest verified source</th>
+                  <th>Earliest located source</th>
                   <th>Local record</th>
                   <th>Status</th>
                 </tr>
@@ -504,7 +541,7 @@ export default function LorePage() {
                     </a>
                   </td>
                   <td>
-                    <code>balltze-cheems-original-instagram-2017.jpg</code>
+                    <code>public/lore/cheems-2017.jpg</code>
                     <small>SHA-256 {BALLTZE_SHA}</small>
                   </td>
                   <td>Confirmed</td>
@@ -524,11 +561,11 @@ export default function LorePage() {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Independent KYM archive
+                      Same-day KYM archive
                     </a>
                   </td>
                   <td>
-                    <code>domge-exact-pipedog-base.png</code>
+                    <code>public/brand/pipedog-domge-source.png</code>
                     <small>SHA-256 {DOMGE_SHA}</small>
                   </td>
                   <td>Exact, byte-matched</td>

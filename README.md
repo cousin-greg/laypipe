@@ -14,9 +14,9 @@ Native ETH is used for network gas only.
   implemented;
 - responsive 1–5-column Board with card/table views and URL-backed filters;
 - Board, My Tokens, Rewards, Tokenomics, Docs, Launch, and token-detail routes;
-- persistent light/dark themes, injected-wallet connection, and Robinhood
-  Chain switching;
-- local PP Mori and Dragon webfonts;
+- a clean light theme, injected-wallet connection, and Robinhood Chain
+  switching;
+- local PP Mori webfonts;
 - canonical PIPEDOG artwork composited with separately generated pipe and
   furnace scenery, plus the favicon and social card;
 - fixture and live market adapters behind an explicit fail-closed deployment

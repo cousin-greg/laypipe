@@ -3,10 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useWallet } from "./WalletProvider";
-
-type Theme = "light" | "dark";
 
 const navigation = [
   { href: "/#trade", currentPath: "/", label: "Trade" },
@@ -23,7 +21,6 @@ function shortAddress(address: string) {
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const { account, status: walletStatus, connect: connectWallet } = useWallet();
   const walletBusy = walletStatus === "connecting";
@@ -38,22 +35,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
           : walletStatus === "error"
             ? "Try again"
             : "Connect wallet";
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setTheme(
-        document.documentElement.dataset.theme === "dark" ? "dark" : "light",
-      );
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  function applyTheme(nextTheme: Theme) {
-    document.documentElement.dataset.theme = nextTheme;
-    localStorage.setItem("laypipe-theme", nextTheme);
-    setTheme(nextTheme);
-  }
 
   return (
     <div className="site-frame">
@@ -90,22 +71,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="header-tools">
-            <div className="theme-switcher" aria-label="Color scheme">
-              <button
-                type="button"
-                aria-pressed={theme === "light"}
-                onClick={() => applyTheme("light")}
-              >
-                Light
-              </button>
-              <button
-                type="button"
-                aria-pressed={theme === "dark"}
-                onClick={() => applyTheme("dark")}
-              >
-                Dark
-              </button>
-            </div>
             <button
               className="button button-accent button-small"
               type="button"
@@ -153,22 +118,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 </Link>
               ))}
             </nav>
-            <div className="theme-switcher" aria-label="Color scheme">
-              <button
-                type="button"
-                aria-pressed={theme === "light"}
-                onClick={() => applyTheme("light")}
-              >
-                Light
-              </button>
-              <button
-                type="button"
-                aria-pressed={theme === "dark"}
-                onClick={() => applyTheme("dark")}
-              >
-                Dark
-              </button>
-            </div>
           </div>
         ) : null}
 

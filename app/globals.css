@@ -1,51 +1,26 @@
 :root {
-  --bg: #fff8df;
-  --surface: #fffdf4;
-  --surface-2: #f1ead2;
-  --surface-3: #e8dfc1;
-  --ink: #28281f;
-  --muted: #6e6c5e;
-  --faint: #969181;
-  --rule: rgba(40, 40, 31, 0.17);
-  --border: #303027;
-  --sun: #f4c84b;
-  --sun-soft: #ffe89b;
-  --sky: #98d6e5;
-  --green: #2e9159;
-  --green-deep: #135d38;
-  --green-ink: #07150c;
-  --grass: #7caf53;
-  --orange: #ef6b47;
-  --positive: #238254;
-  --negative: #c94e38;
-  --shadow: rgba(40, 40, 31, 0.14);
-  --header: rgba(255, 248, 223, 0.94);
+  --bg: #fff;
+  --surface: #fff;
+  --surface-2: #f5f5f1;
+  --surface-3: #ecece7;
+  --ink: #050505;
+  --muted: #5f5f59;
+  --faint: #8c8c84;
+  --rule: rgba(5, 5, 5, 0.16);
+  --border: #050505;
+  --sun: #f1df82;
+  --sun-soft: #faf4d5;
+  --sky: #dceef3;
+  --green: #39b54a;
+  --green-deep: #006837;
+  --green-ink: #001b06;
+  --grass: #39b54a;
+  --orange: #39b54a;
+  --positive: #178b30;
+  --negative: #c83b31;
+  --shadow: rgba(5, 5, 5, 0.11);
+  --header: rgba(255, 255, 255, 0.96);
   --mori: var(--font-mori), "PP Mori", "Mori", sans-serif;
-  --dragon: var(--font-dragon), "Dragon", system-ui, sans-serif;
-}
-
-:root[data-theme="dark"] {
-  --bg: #07150c;
-  --surface: #0d1e13;
-  --surface-2: #14291b;
-  --surface-3: #1b3524;
-  --ink: #f4f8ef;
-  --muted: #b2c5b5;
-  --faint: #738879;
-  --rule: rgba(226, 255, 232, 0.15);
-  --border: #536d59;
-  --sun: #f6cf52;
-  --sun-soft: #5e5429;
-  --sky: #4797a5;
-  --green: #00c805;
-  --green-deep: #006b32;
-  --green-ink: #051208;
-  --grass: #2d9344;
-  --orange: #f27654;
-  --positive: #31df79;
-  --negative: #ff846d;
-  --shadow: rgba(0, 0, 0, 0.3);
-  --header: rgba(7, 21, 12, 0.94);
 }
 
 * {
@@ -62,23 +37,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(
-      circle at 88% 7rem,
-      color-mix(in srgb, var(--sun) 22%, transparent) 0 8rem,
-      transparent 24rem
-    ),
-    radial-gradient(
-      circle at 8% 34rem,
-      color-mix(in srgb, var(--sky) 13%, transparent) 0,
-      transparent 28rem
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--sky) 6%, var(--bg)) 0,
-      var(--bg) 36rem,
-      color-mix(in srgb, var(--sun) 3%, var(--bg)) 100%
-    );
+  background: var(--bg);
   color: var(--ink);
   font-family: var(--mori);
   font-synthesis: none;
@@ -112,7 +71,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 3px solid var(--sky);
+  outline: 3px dashed #ff1493;
   outline-offset: 3px;
 }
 
@@ -150,7 +109,7 @@ dd {
 }
 
 .content-width {
-  width: min(100% - 48px, 1720px);
+  width: min(100% - 48px, 1280px);
   margin-inline: auto;
 }
 
@@ -174,27 +133,33 @@ dd {
   justify-content: center;
   gap: 8px;
   padding: 0 20px;
-  border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border: 2px solid var(--border);
+  border-radius: 999px;
   background: var(--surface);
   color: var(--ink);
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 800;
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
+  transition: transform 120ms ease, background 120ms ease;
 }
 
 .button:hover:not(:disabled) {
-  box-shadow: 4px 4px 0 var(--border);
-  transform: translate(-2px, -2px);
+  background: var(--surface-2);
 }
 
 .button-accent {
-  background: var(--orange);
-  color: #fffaf0;
+  background: var(--green);
+  box-shadow: inset 0 0 0 2px #fff, 0 4px 0 var(--green-deep);
+  color: #000;
+}
+
+.button-accent:hover:not(:disabled) {
+  background: var(--green);
+}
+
+.button-accent:active:not(:disabled) {
+  box-shadow: inset 0 0 0 2px #fff, 0 2px 0 var(--green-deep);
+  transform: translateY(2px);
 }
 
 .button-quiet {
@@ -211,7 +176,7 @@ dd {
 .button-small {
   min-height: 36px;
   padding-inline: 13px;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 0.7rem;
 }
 
@@ -221,13 +186,12 @@ dd {
   top: 0;
   border-bottom: 1px solid var(--rule);
   background: var(--header);
-  backdrop-filter: blur(18px);
 }
 
 .header-main {
   display: flex;
-  width: min(100% - 40px, 1510px);
-  min-height: 68px;
+  width: min(100% - 40px, 1280px);
+  min-height: 64px;
   align-items: center;
   gap: 16px;
   margin-inline: auto;
@@ -247,10 +211,10 @@ dd {
 }
 
 .brand-type {
-  font-family: var(--dragon);
-  font-size: 1.66rem;
-  font-weight: 700;
-  letter-spacing: 0.035em;
+  font-family: var(--mori);
+  font-size: 1.48rem;
+  font-weight: 800;
+  letter-spacing: -0.045em;
   line-height: 1;
 }
 
@@ -278,7 +242,6 @@ dd {
   height: 8px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent);
 }
 
 .primary-nav {
@@ -298,6 +261,7 @@ dd {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 750;
+  text-transform: lowercase;
 }
 
 .primary-nav a:hover,
@@ -311,34 +275,6 @@ dd {
   flex: none;
   align-items: center;
   gap: 8px;
-}
-
-.theme-switcher {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border: 1px solid var(--rule);
-  border-radius: 7px;
-  background: var(--surface-2);
-}
-
-.theme-switcher button {
-  min-height: 28px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.theme-switcher button[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--bg);
 }
 
 .mobile-tools,
@@ -355,7 +291,7 @@ dd {
   overflow-x: auto;
   padding: 8px 18px;
   border-top: 1px solid var(--rule);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  background: #fff;
   color: var(--muted);
   font-size: 0.61rem;
   font-weight: 750;
@@ -520,7 +456,7 @@ dd {
 .page-heading h1,
 .token-hero h1 {
   margin-bottom: 22px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: clamp(4.8rem, 7.4vw, 8rem);
   font-weight: 700;
   letter-spacing: 0.025em;
@@ -1062,7 +998,7 @@ dd {
 .docs-content h2,
 .token-route-card h2 {
   margin-bottom: 7px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: clamp(2.5rem, 4.4vw, 4.4rem);
   font-weight: 700;
   letter-spacing: 0.015em;
@@ -1436,9 +1372,9 @@ dd {
   grid-template-columns: 1.2fr auto;
   gap: 35px;
   padding: 52px max(24px, calc((100vw - 1440px) / 2));
-  border-top: 2px solid var(--border);
-  background: var(--sun);
-  color: #28281f;
+  border-top: 1px solid var(--rule);
+  background: #fff;
+  color: var(--ink);
 }
 
 .footer-brand {
@@ -1455,9 +1391,10 @@ dd {
 
 .footer-brand strong {
   display: block;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: 1.65rem;
-  letter-spacing: 0.035em;
+  font-weight: 800;
+  letter-spacing: -0.04em;
 }
 
 .footer-brand p {
@@ -1473,6 +1410,7 @@ dd {
   gap: 18px;
   font-size: 0.68rem;
   font-weight: 800;
+  text-transform: lowercase;
 }
 
 .app-footer nav a:hover {
@@ -1484,8 +1422,8 @@ dd {
   grid-column: 1 / -1;
   margin: 0;
   padding-top: 22px;
-  border-top: 1px solid rgba(40, 40, 31, 0.22);
-  color: rgba(40, 40, 31, 0.7);
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
   font-size: 0.58rem;
 }
 
@@ -1924,10 +1862,6 @@ dd {
   background: var(--sun-soft);
 }
 
-:root[data-theme="dark"] .review-complete {
-  color: var(--ink);
-}
-
 .review-complete > strong {
   font-size: 0.72rem;
 }
@@ -2349,10 +2283,6 @@ dd {
   width: min(100%, 390px);
   height: auto;
   mix-blend-mode: multiply;
-}
-
-:root[data-theme="dark"] .tokenomics-heading > img {
-  mix-blend-mode: normal;
 }
 
 .fee-diagram {
@@ -3099,7 +3029,7 @@ dd {
 
 .pipedog-profile h1 {
   margin: 22px 0 18px;
-  font-family: var(--dragon);
+  font-family: var(--mori);
   font-size: clamp(5rem, 9vw, 8rem);
   letter-spacing: 0.02em;
   line-height: 0.9;
@@ -3672,10 +3602,6 @@ dd {
 
   .mobile-menu nav {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .mobile-menu .theme-switcher {
-    width: max-content;
   }
 
   .singleton-bar {
