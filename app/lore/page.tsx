@@ -13,9 +13,11 @@ const DOGE_SHA =
   "0e073bf5219341a6901235a5ce163981b4c26a7873c14331d03fd2ce90c8d8f3";
 const DETECTIVE_CHEEMS_SHA =
   "a4d481d7aaad833e0b14db876844368817a092f75d57cb273e8c1c40b58328ce";
+const RUSHMORE_LIVE_SHA =
+  "df0d96640ddf31dc1bedf8fa6d64a931329396fc75522ef4b50d0b86507652bf";
 const LIVE_SITE_CHECKED = "2026-08-14";
 
-const sourceImageTimeline = [
+const mainLineageTimeline = [
   {
     year: "2010",
     dateTime: "2010-02-13",
@@ -117,6 +119,63 @@ const sourceImageTimeline = [
     relevance:
       "PipeDog turns Domge into a singular character through found costume fragments. The exact file is confirmed; its first publication date and assembler remain open questions.",
     localHash: PIPEDOG_SHA,
+  },
+] as const;
+
+const officialContextTimeline = [
+  {
+    year: "2018",
+    dateTime: "2018-09-30",
+    title: "Walter / Nelson",
+    image: "/lore/walter-2018.png",
+    width: 799,
+    height: 450,
+    alt: "Nelson the bull terrier in the source photograph later known as Walter",
+    copy: "A parallel dog-meme source later gathered into pipedog.xyz's Rushmore image.",
+    href: "https://twitter.com/PupperNelson/status/1046428179618045952",
+    source: "@PupperNelson source post",
+    status: "primary source",
+    role: "official cultural context / no shared pixels",
+    relevance:
+      "Walter belongs here because pipedog.xyz places him on its dog Rushmore, not because PipeDog uses Nelson's photograph.",
+    localHash:
+      "2ba39e9932e4dc3556f685bdc45fadd69bfc0a1d19f1769d2057a23262005fbc",
+  },
+  {
+    year: "2018",
+    dateTime: "2018-11-17",
+    title: "Dogwifhat / Achi",
+    image: "/lore/dogwifhat-2018.jpg",
+    width: 1920,
+    height: 1080,
+    alt: "Achi the Shiba Inu wearing the pink knitted hat used for dogwifhat",
+    copy: "Another source photograph later assembled into the official Rushmore image.",
+    href: "https://www.instagram.com/p/BqRvWYiHoKl/",
+    source: "@bangdddd on Instagram",
+    status: "primary source",
+    role: "official cultural context / no shared pixels",
+    relevance:
+      "Dogwifhat's place on the official Rushmore locates PipeDog in a wider dog-meme constellation. Achi's photograph is not part of PipeDog's body.",
+    localHash:
+      "1b56048ffc0545fbda3ca8b3c6e62a30a35b63a39386fea3dc597442ccfcff84",
+  },
+  {
+    year: "2026",
+    dateTime: "2026",
+    title: "The great dogs on the mountain",
+    image: "/lore/dog-rushmore-2026-display.webp",
+    width: 1536,
+    height: 1024,
+    alt: "The official pipedog.xyz collage of four meme dogs carved into a mountain",
+    copy: "The current pipedog.xyz collage brings Doge, Cheems, Walter, and dogwifhat into one official site image.",
+    href: "https://pipedog.xyz/dog_rushmore_wut.png",
+    source: "pipedog.xyz",
+    status: "current official-site snapshot",
+    role: "official project context / no body pixels",
+    relevance:
+      "The grouping is evidence of pipedog.xyz's wider cultural canon. It is not evidence that all four source photographs form PipeDog's direct pixel lineage.",
+    localHash:
+      "321c76db5691ac4497de9885c5e7f238f19f93a10bf500cb6c3ad05262a68163",
   },
 ] as const;
 
@@ -421,7 +480,7 @@ export default function LorePage() {
             className={styles.sourceTimeline}
             aria-label="PipeDog source images by year"
           >
-            {sourceImageTimeline.map((entry) => (
+            {mainLineageTimeline.map((entry) => (
               <li key={`${entry.year}-${entry.title}`}>
                 <div className={styles.timelineYear}>
                   {"dateTime" in entry ? (
@@ -524,6 +583,73 @@ export default function LorePage() {
               from a single official author.
             </p>
           </div>
+
+          <aside aria-labelledby="official-context-title">
+            <div className={styles.timelineIntro}>
+              <p>
+                <strong id="official-context-title">
+                  Broader cultural context, not direct pixels.
+                </strong>{" "}
+                pipedog.xyz places Walter and dogwifhat beside Doge and Cheems
+                on its official dog Rushmore. That makes all of them relevant
+                to the project&apos;s cultural frame. It does not make Nelson or
+                Achi source images for PipeDog&apos;s body, hat, cape, or pipe.
+              </p>
+              <span>THE OFFICIAL PIPEDOG.XYZ CONSTELLATION</span>
+            </div>
+            <ol
+              className={styles.sourceTimeline}
+              aria-label="Official PipeDog cultural context by year"
+            >
+              {officialContextTimeline.map((entry) => (
+                <li key={`${entry.year}-${entry.title}`}>
+                  <div className={styles.timelineYear}>
+                    <time dateTime={entry.dateTime}>{entry.year}</time>
+                  </div>
+                  <figure className={styles.timelineFigure}>
+                    <div className={styles.timelineImage}>
+                      <Image
+                        src={entry.image}
+                        alt={entry.alt}
+                        width={entry.width}
+                        height={entry.height}
+                        sizes="(max-width: 720px) calc(100vw - 48px), 560px"
+                      />
+                    </div>
+                    <figcaption>
+                      <div className={styles.receiptFlags}>
+                        <span>{entry.status}</span>
+                        <em>{entry.role}</em>
+                      </div>
+                      <h3>{entry.title}</h3>
+                      <p>{entry.copy}</p>
+                      <p className={styles.relevance}>
+                        <strong>Why it mattered:</strong> {entry.relevance}
+                      </p>
+                      <dl className={styles.sourceMeta}>
+                        <div>
+                          <dt>Source</dt>
+                          <dd>
+                            <a href={entry.href} target="_blank" rel="noreferrer">
+                              {entry.source} ↗
+                            </a>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Local file</dt>
+                          <dd>
+                            <code title={entry.localHash}>
+                              sha256:{entry.localHash.slice(0, 12)}…
+                            </code>
+                          </dd>
+                        </div>
+                      </dl>
+                    </figcaption>
+                  </figure>
+                </li>
+              ))}
+            </ol>
+          </aside>
 
         </section>
 
@@ -886,6 +1012,25 @@ export default function LorePage() {
                   <td>
                     Exact project canonical; byte-matched to the live asset on
                     {` ${LIVE_SITE_CHECKED}`}
+                  </td>
+                </tr>
+                <tr>
+                  <td>pipedog.xyz dog Rushmore</td>
+                  <td>
+                    <a
+                      href="https://pipedog.xyz/dog_rushmore_wut.png"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Current official-site asset, checked {LIVE_SITE_CHECKED}
+                    </a>
+                  </td>
+                  <td>
+                    Original live PNG snapshot
+                    <small>SHA-256 {RUSHMORE_LIVE_SHA}</small>
+                  </td>
+                  <td>
+                    Official site context; not part of PipeDog&apos;s body lineage
                   </td>
                 </tr>
                 <tr>

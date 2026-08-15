@@ -36,8 +36,11 @@ test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art 
   );
   assert.match(page, /balkan-grandpa-2021\.jpg/);
   assert.match(page, /detective-cheems-2020\.png/);
-  assert.doesNotMatch(page, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
-  assert.doesNotMatch(page, /dog-rushmore(?:-2026-display)?/i);
+  assert.match(page, /dog-rushmore-2026-display\.webp/);
+  assert.match(page, /Walter \/ Nelson/);
+  assert.match(page, /Dogwifhat \/ Achi/);
+  assert.match(page, /Broader cultural context, not direct pixels/);
+  assert.match(page, /official cultural context \/ no shared pixels/);
   assert.match(page, /Keep the marks on the objects/);
   assert.match(page, /Lay Pipedogs is LayPipe&apos;s planned\s+collection/);
   assert.match(page, /same exact Domge\s+cutout/);
@@ -50,18 +53,34 @@ test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art 
   assert.match(css, /\.masthead h1[\s\S]*font-family: var\(--mori\)/);
 });
 
-test("lore visual timeline follows the relevant lineage before interpretation", () => {
+test("lore keeps the six-card lineage separate from official cultural context", () => {
   const page = readFileSync(resolve(root, "app/lore/page.tsx"), "utf8");
+  const mainStart = page.indexOf("const mainLineageTimeline");
+  const contextStart = page.indexOf("const officialContextTimeline");
+  const collectionStart = page.indexOf("const collectionBuildGroups");
   const definition = page.indexOf("Here are the names we use");
   const timeline = page.indexOf("<div className={styles.timelineIntro}>");
+  const timelineRender = page.indexOf("{mainLineageTimeline.map");
   const interpretation = page.indexOf("<aside className={styles.twoTrees}");
+  const contextRender = page.indexOf("{officialContextTimeline.map");
 
+  assert.ok(mainStart >= 0);
+  assert.ok(contextStart > mainStart);
+  assert.ok(collectionStart > contextStart);
   assert.ok(definition >= 0, "the PipeDog and Lay Pipedogs definition should exist");
   assert.ok(timeline > definition, "the image timeline should follow the definition");
+  assert.ok(timelineRender > timeline, "the six-card lineage should follow its intro");
   assert.ok(
-    interpretation > timeline,
+    interpretation > timelineRender,
     "ancestry interpretation should follow the image timeline",
   );
+  assert.ok(
+    contextRender > interpretation,
+    "official cultural context should render as a separate later branch",
+  );
+
+  const mainTimeline = page.slice(mainStart, contextStart);
+  const officialContext = page.slice(contextStart, collectionStart);
 
   const orderedImages = [
     "/lore/doge-2010.jpg",
@@ -73,10 +92,18 @@ test("lore visual timeline follows the relevant lineage before interpretation", 
   ];
   let previous = -1;
   for (const image of orderedImages) {
-    const position = page.indexOf(`image: "${image}"`);
+    const position = mainTimeline.indexOf(`image: "${image}"`);
     assert.ok(position > previous, `${image} should follow the previous entry`);
     previous = position;
   }
+
+  assert.doesNotMatch(mainTimeline, /Walter \/ Nelson/);
+  assert.doesNotMatch(mainTimeline, /Dogwifhat \/ Achi/);
+  assert.doesNotMatch(mainTimeline, /great dogs on the mountain/i);
+  assert.match(officialContext, /Walter \/ Nelson/);
+  assert.match(officialContext, /Dogwifhat \/ Achi/);
+  assert.match(officialContext, /great dogs on the mountain/i);
+  assert.match(officialContext, /not evidence that all four source photographs/);
 });
 
 test("published timeline preserves the exact captioned Balkan artifact", () => {
