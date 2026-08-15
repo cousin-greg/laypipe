@@ -19,17 +19,70 @@ test("published Domge artifact is pinned to the documented source hash", () => {
   assert.equal(sha256(published), expected);
 });
 
-test("lore page records sources, uncertainty, and the permanent image ethos", () => {
+test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art ethos", () => {
   const page = readFileSync(resolve(root, "app/lore/page.tsx"), "utf8");
+  const css = readFileSync(resolve(root, "app/lore/lore.module.css"), "utf8");
 
   assert.match(page, /kabosu112\.exblog\.jp\/9944144/);
   assert.match(page, /instagram\.com\/p\/BYntbPTF1_f/);
   assert.match(page, /reddit\.com\/r\/dogelore\/comments\/fbzzbg\/domge_png/);
   assert.match(page, /knowyourmeme\.com\/photos\/1767872-ironic-doge-memes/);
   assert.match(page, /Shutterstock 1527641588/);
-  assert.match(page, /earliest confirmed public\s+uploader/i);
+  assert.match(page, /earliest located public post/i);
+  assert.doesNotMatch(page, /earliest confirmed public\s+uploader/i);
+  assert.match(
+    page,
+    /api\.memes\.com\/m\/literally-all-balkan-grandpa-s-0mWw61GeqW3/,
+  );
+  assert.match(page, /balkan-grandpa-2021\.jpg/);
+  assert.match(page, /detective-cheems-2020\.png/);
+  assert.doesNotMatch(page, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
+  assert.doesNotMatch(page, /dog-rushmore(?:-2026-display)?/i);
   assert.match(page, /Keep the marks on the objects/);
-  assert.match(page, /We add context; we do not regenerate the ancestor/);
+  assert.match(page, /Lay Pipedogs is LayPipe&apos;s planned\s+collection/);
+  assert.match(page, /same exact Domge\s+cutout/);
+  assert.match(page, /common visual substrate/);
+  assert.match(page, /distributed\s+anthology rather than ten thousand claims/);
+  assert.match(page, /Marlboro, Newport, Lucky Strike/);
   assert.match(page, /exact frames not found/i);
   assert.match(page, /does not itself grant a license/i);
+  assert.doesNotMatch(css, /var\(--dragon\)/);
+  assert.match(css, /\.masthead h1[\s\S]*font-family: var\(--mori\)/);
+});
+
+test("lore visual timeline follows the relevant lineage before interpretation", () => {
+  const page = readFileSync(resolve(root, "app/lore/page.tsx"), "utf8");
+  const definition = page.indexOf("Here are the names we use");
+  const timeline = page.indexOf("<div className={styles.timelineIntro}>");
+  const interpretation = page.indexOf("<aside className={styles.twoTrees}");
+
+  assert.ok(definition >= 0, "the PipeDog and Lay Pipedogs definition should exist");
+  assert.ok(timeline > definition, "the image timeline should follow the definition");
+  assert.ok(
+    interpretation > timeline,
+    "ancestry interpretation should follow the image timeline",
+  );
+
+  const orderedImages = [
+    "/lore/doge-2010.jpg",
+    "/lore/cheems-2017.jpg",
+    "/brand/pipedog-domge-source.png",
+    "/lore/detective-cheems-2020.png",
+    "/lore/balkan-grandpa-2021.jpg",
+    "/brand/pipedog.png",
+  ];
+  let previous = -1;
+  for (const image of orderedImages) {
+    const position = page.indexOf(`image: "${image}"`);
+    assert.ok(position > previous, `${image} should follow the previous entry`);
+    previous = position;
+  }
+});
+
+test("published timeline preserves the exact captioned Balkan artifact", () => {
+  const published = resolve(root, "public/lore/balkan-grandpa-2021.jpg");
+  const expected =
+    "7595ade529ad0d8d92de6df5db0df2bbe111905df897fcb8814260033305f3a8";
+
+  assert.equal(sha256(published), expected);
 });

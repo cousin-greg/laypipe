@@ -137,23 +137,17 @@ async function generatePipedogPipeAssets() {
 
 await generatePipedogPipeAssets();
 
-const [browser, hero, mori, dragon] = await Promise.all([
+const [browser, hero, mori] = await Promise.all([
   findBrowser(),
   dataUrl(heroPath, "image/png"),
-  dataUrl(path.join(root, "app", "fonts", "PPMori-Bold.woff2"), "font/woff2"),
-  dataUrl(path.join(root, "app", "fonts", "Dragon-Black.woff2"), "font/woff2"),
+  dataUrl(path.join(root, "app", "fonts", "PPMori-ExtraBold.woff2"), "font/woff2"),
 ]);
 
 const sharedStyles = `
   @font-face {
     font-family: "PP Mori";
     src: url("${mori}") format("woff2");
-    font-weight: 700;
-  }
-  @font-face {
-    font-family: "Dragon";
-    src: url("${dragon}") format("woff2");
-    font-weight: 900;
+    font-weight: 800;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
@@ -166,18 +160,16 @@ const openGraphHtml = `<!doctype html>
     <style>
       ${sharedStyles}
       body {
-        background: #fff1a8;
-        color: #172016;
+        background: #fff;
+        color: #050505;
       }
       .card {
         position: relative;
         width: 1200px;
         height: 630px;
         overflow: hidden;
-        border: 14px solid #172016;
-        background:
-          radial-gradient(circle at 85% 14%, rgba(255, 177, 31, 0.62), transparent 25%),
-          linear-gradient(180deg, #fff8d7 0 68%, #bee879 68% 100%);
+        border: 14px solid #050505;
+        background: #fff;
       }
       .copy {
         position: absolute;
@@ -194,7 +186,7 @@ const openGraphHtml = `<!doctype html>
         border: 3px solid #172016;
         border-radius: 999px;
         background: rgba(255, 253, 235, 0.84);
-        font: 700 18px/1 "PP Mori", sans-serif;
+        font: 800 18px/1 "PP Mori", sans-serif;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
@@ -207,10 +199,10 @@ const openGraphHtml = `<!doctype html>
       }
       h1 {
         margin: 34px 0 10px;
-        font: 900 112px/0.82 "Dragon", sans-serif;
-        letter-spacing: 0.035em;
+        font: 800 112px/0.86 "PP Mori", sans-serif;
+        letter-spacing: -0.055em;
       }
-      h1 span { color: #ed5a1b; }
+      h1 span { color: #39b54a; }
       .tagline {
         margin: 0;
         font: 700 31px/1.16 "PP Mori", sans-serif;
@@ -258,11 +250,11 @@ const openGraphHtml = `<!doctype html>
       <section class="copy">
         <div class="chain">Robinhood Chain</div>
         <h1>LAYPIPE<span>.FUN</span></h1>
-        <p class="tagline">Launch and trade in PIPEDOG.</p>
-        <div class="route">Protocol lane: 25% to 0xdead</div>
+        <p class="tagline">Trade LAYPIPE against native ETH.</p>
+        <div class="route">1% ETH-side fee buys PIPEDOG</div>
       </section>
       <img class="hero-art" src="${hero}" alt="" />
-      <div class="burn">Fees to the furnace</div>
+      <div class="burn">Periodic rewards to Lay Pipedogs</div>
     </main>
   </body>
 </html>`;

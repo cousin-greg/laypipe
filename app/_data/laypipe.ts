@@ -12,7 +12,7 @@ export type LaypipeProtocolSnapshot = {
   maxPipeDogs: number;
   laypipePerPipeDog: string;
   tradeFeeBps: number;
-  quoteSymbol: "PIPEDOG";
+  quoteSymbol: "ETH";
   baseSymbol: "LAYPIPE";
   tradingEnabled: boolean;
   claimEnabled: boolean;
@@ -77,7 +77,7 @@ const protocolPreview: LaypipeProtocolSnapshot = {
   maxPipeDogs: LAYPIPE_MAX_PIPE_DOGS,
   laypipePerPipeDog: String(LAYPIPE_PER_PIPE_DOG),
   tradeFeeBps: LAYPIPE_TRADE_FEE_BPS,
-  quoteSymbol: "PIPEDOG",
+  quoteSymbol: "ETH",
   baseSymbol: "LAYPIPE",
   tradingEnabled: false,
   claimEnabled: false,
@@ -91,13 +91,13 @@ const walletPreview: LaypipeWalletSnapshot = {
   pipeDogs: [
     {
       id: "preview-0001",
-      name: "PipeDog #0001",
+      name: "Lay Pipedog #0001",
       imagePath: "/brand/pipedog.png",
       status: "automatic preview",
     },
     {
       id: "preview-0002",
-      name: "PipeDog #0002",
+      name: "Lay Pipedog #0002",
       imagePath: "/brand/pipedog.png",
       status: "automatic preview",
     },

@@ -9,6 +9,257 @@ const BALLTZE_SHA =
   "6dafce84d7e7bbc8648aee1c796951af441f399069e88d24f5af2609326fe0fd";
 const PIPEDOG_SHA =
   "63aff55aee85927751388adb21375f04cb6c02718494778937ade49fae1e880a";
+const DOGE_SHA =
+  "0e073bf5219341a6901235a5ce163981b4c26a7873c14331d03fd2ce90c8d8f3";
+const DETECTIVE_CHEEMS_SHA =
+  "a4d481d7aaad833e0b14db876844368817a092f75d57cb273e8c1c40b58328ce";
+const LIVE_SITE_CHECKED = "2026-08-14";
+
+const sourceImageTimeline = [
+  {
+    year: "2010",
+    dateTime: "2010-02-13",
+    title: "Doge / Kabosu",
+    image: "/lore/doge-2010.jpg",
+    width: 959,
+    height: 540,
+    alt: "Kabosu in the 2010 family-blog photograph that became Doge",
+    copy: "The cultural ancestor. Kabosu opened the image language, but her pixels are not used in PipeDog.",
+    href: "https://kabosu112.exblog.jp/9944144/",
+    source: "Atsuko Sato's original blog post",
+    status: "primary source",
+    role: "cultural ancestry / no shared pixels",
+    relevance:
+      "Doge established a reusable Shiba image-language: detached captions, deliberate grammatical wrongness, and recognition strong enough to survive endless edits.",
+    localHash: DOGE_SHA,
+  },
+  {
+    year: "2017",
+    dateTime: "2017-09-04",
+    title: "Balltze / Cheems",
+    image: "/lore/cheems-2017.jpg",
+    width: 1080,
+    height: 1080,
+    alt: "Balltze sitting on the floor in the source photograph later used for Cheems",
+    copy: "The exact photograph behind Cheems and the dog layer that later becomes Domge.",
+    href: "https://www.instagram.com/p/BYntbPTF1_f/",
+    source: "@balltze on Instagram",
+    status: "primary source",
+    role: "pixel ancestry",
+    relevance:
+      "Cheems turned one family photograph into a recurring network character. The same photograph is the material later distorted into Domge.",
+    localHash: BALLTZE_SHA,
+  },
+  {
+    year: "2020",
+    dateTime: "2020-03-01",
+    title: "Domge PNG",
+    image: "/brand/pipedog-domge-source.png",
+    width: 1139,
+    height: 1138,
+    alt: "The transparent distorted Domge PNG used beneath PipeDog",
+    copy: "The exact distorted Balltze cutout beneath canonical PipeDog. The uploader did not claim to have made the edit.",
+    href: "https://www.reddit.com/r/dogelore/comments/fbzzbg/domge_png/",
+    source: "earliest located public post",
+    status: "exact file",
+    role: "direct pixel lineage",
+    relevance:
+      "Domge is the decisive mutation: the Balltze photograph becomes a reusable transparent body whose wrong geometry is stable enough to identify across later composites.",
+    localHash: DOMGE_SHA,
+  },
+  {
+    year: "2020",
+    dateTime: "2020-10-22",
+    title: "Detective Cheems",
+    image: "/lore/detective-cheems-2020.png",
+    width: 360,
+    height: 450,
+    alt: "Cheems wearing a detective hat and holding a curved pipe",
+    copy: "The earliest located appearance of this detective cutout. The post's comments call it a repost, so its maker remains unknown.",
+    href: "https://www.reddit.com/r/cheemsburbgerlore/comments/jg7sg7/detective_cheems_looks_around_for_clues/",
+    source: "earliest located appearance",
+    status: "creator unverified",
+    role: "composition precedent / direct source unproven",
+    relevance:
+      "The detective costume shows the culture independently converging on Cheems-as-investigator. It is useful context, but there is no evidence that this post supplied PipeDog's costume layers.",
+    localHash: DETECTIVE_CHEEMS_SHA,
+  },
+  {
+    year: "2021",
+    dateTime: "2021-03-18",
+    title: "Literally all Balkan grandpa's",
+    image: "/lore/balkan-grandpa-2021.jpg",
+    width: 710,
+    height: 1180,
+    alt: "Captioned meme reading literally all Balkan grandpa's above detective Cheems",
+    copy: "The exact Memes.com post briefly cited below, now shown in the sequence. It is adjacent evidence, not the canonical PipeDog file.",
+    href: "https://api.memes.com/m/literally-all-balkan-grandpa-s-0mWw61GeqW3",
+    source: "@leviaxpetra_aot on Memes.com",
+    status: "exact post",
+    role: "circulation evidence / direct source unproven",
+    relevance:
+      "The post proves that a pipe-smoking detective Cheems was already circulating before LayPipe. It does not prove who assembled canonical PipeDog.",
+    localHash:
+      "7595ade529ad0d8d92de6df5db0df2bbe111905df897fcb8814260033305f3a8",
+  },
+  {
+    year: "date unknown",
+    title: "Canonical PipeDog",
+    image: "/brand/pipedog.png",
+    width: 386,
+    height: 351,
+    alt: "The canonical PipeDog detective composite from pipedog.xyz",
+    copy: "The exact project canonical. Its first publication date and the assembler of the costume remain unresolved.",
+    href: "https://pipedog.xyz/pipedog.png",
+    source: "pipedog.xyz",
+    status: "exact file / date unresolved",
+    role: "canonical flattened work",
+    relevance:
+      "PipeDog turns Domge into a singular character through found costume fragments. The exact file is confirmed; its first publication date and assembler remain open questions.",
+    localHash: PIPEDOG_SHA,
+  },
+] as const;
+
+const collectionBuildGroups = [
+  {
+    name: "Backgrounds",
+    note: "Square found-world scenes with room for the unchanged Domge cutout.",
+    items: [
+      "Nicotine-stained motel room",
+      "Roadside motel exterior at blue hour",
+      "Night corner store",
+      "Pawnshop back room",
+      "Fluorescent laundromat",
+      "Red-vinyl diner booth",
+      "Wood-paneled CRT den",
+      "Wet service alley",
+      "Cluttered garage workbench",
+      "Municipal pipe and valve room",
+      "Rain-soaked smoking patio",
+      "Late-night LayPipe trading desk",
+    ],
+  },
+  {
+    name: "Clothing and neck",
+    note: "Photographed garments and separate chest accessories.",
+    items: [
+      "Navy thrift-store track jacket",
+      "Tan trench coat",
+      "Green raincoat",
+      "Orange hi-vis vest",
+      "Mechanic coveralls",
+      "Wrinkled shirt and tie",
+      "Plaid bathrobe",
+      "Pipefitter work shirt",
+      "Thrifted leather jacket",
+      "Chunky gold chain",
+      "Thin motel-key chain",
+      "Red bandana",
+    ],
+  },
+  {
+    name: "Headwear and eyewear",
+    note: "Additive cutouts only; the inherited Domge face stays untouched.",
+    items: [
+      "Canonical deerstalker",
+      "Red trucker cap",
+      "Tinfoil cone",
+      "Green accountant visor",
+      "Scuffed hard hat",
+      "Fisherman bucket hat",
+      "Worn knit beanie",
+      "Amber wraparound glasses",
+      "Tiny oval sunglasses",
+      "Scratched aviators",
+      "Yellow safety glasses",
+      "Cardboard 3D glasses",
+    ],
+  },
+  {
+    name: "Mouth, smoke, and steam",
+    note: "One mouth object and one physically compatible effect at most.",
+    items: [
+      "Straight briar pipe",
+      "Corn-cob pipe",
+      "Small bent pipe",
+      "Lit or unlit cigarette",
+      "Wooden toothpick",
+      "Dog biscuit",
+      "Vintage cigarette holder",
+      "Single smoke curl",
+      "Heavy sideways smoke",
+      "Coffee steam",
+      "Cold breath",
+      "Cigarette ember",
+    ],
+  },
+  {
+    name: "Found cigarette packs",
+    note: "Photographed found objects with their real logos left visible.",
+    items: [
+      "Marlboro Red",
+      "Newport",
+      "Lucky Strike",
+      "Camel Filters",
+      "Kool",
+      "Salem",
+      "Parliament",
+      "American Spirit turquoise",
+      "Winston",
+      "Djarum Black",
+    ],
+  },
+  {
+    name: "Props and trinkets",
+    note: "Oversized physical evidence, shot with direct flash and honest wear.",
+    items: [
+      "Heavy glass ashtray",
+      "Motel key tag 207",
+      "Translucent flip phone",
+      "Numeric pager",
+      "Disposable camera",
+      "Portable CRT television",
+      "Magnifying glass",
+      "Red pipe wrench",
+      "Pawn ticket",
+      "VHS tape marked EVIDENCE",
+      "Pressure gauge",
+      "100,000 LAYPIPE receipt",
+    ],
+  },
+  {
+    name: "Friends",
+    note: "Original or cleared supporting characters, never borrowed NFT cutouts.",
+    items: [
+      "Side-eye pigeon",
+      "Trash-can raccoon",
+      "Nighttime opossum",
+      "Snail on a motel key",
+      "Skeptical crow",
+      "Moth at a fluorescent light",
+      "Frog on a pipe valve",
+      "Cockroach by the ashtray",
+      "Parking-lot goose",
+      "Original sentient valve",
+    ],
+  },
+  {
+    name: "Overlays",
+    note: "One full-frame treatment, kept outside protected Domge pixels.",
+    items: [
+      "Camera-flash bloom",
+      "Scanner dust and hair",
+      "VHS scanlines",
+      "Orange date stamp",
+      "No Vacancy reflection",
+      "Black redaction tape",
+      "Sticker residue",
+      "CCTV timestamp",
+      "Greasy fingerprints",
+      "Original SELL ONLY interface",
+    ],
+  },
+] as const;
 
 export const metadata: Metadata = {
   title: "The Dog Was Already Here | PipeDog Lore",
@@ -32,7 +283,7 @@ export const metadata: Metadata = {
 
 export default function LorePage() {
   return (
-    <main className={styles.page}>
+    <main className={styles.page} id="top">
       <article>
         <header className={styles.masthead}>
           <p className={styles.kicker}>PIPE DOG PROVENANCE / FILE 001</p>
@@ -45,8 +296,18 @@ export default function LorePage() {
           <div className={styles.byline}>
             <span>Published by LayPipe</span>
             <time dateTime="2026-08-13">August 13, 2026</time>
-            <span>Living document</span>
+            <span>Updated August 15, 2026</span>
+            <span>Living document / sources can change</span>
           </div>
+          <nav className={styles.articleIndex} aria-label="Lore article index">
+            <a href="#lineage">01 lineage</a>
+            <a href="#domge">02 mutation</a>
+            <a href="#detective">03 detective</a>
+            <a href="#ethos">04 ethos</a>
+            <a href="#collection">05 collection</a>
+            <a href="#build-list">06 build list</a>
+            <a href="#ledger">07 receipts</a>
+          </nav>
         </header>
 
         <figure className={styles.heroArtifact}>
@@ -59,6 +320,7 @@ export default function LorePage() {
               height={1138}
               sizes="(max-width: 820px) calc(100vw - 68px), 45vw"
               priority
+              loading="eager"
             />
             <code>SHA-256 {DOMGE_SHA}</code>
           </div>
@@ -72,6 +334,7 @@ export default function LorePage() {
                 height={351}
                 sizes="(max-width: 820px) calc(100vw - 68px), 45vw"
                 priority
+                loading="eager"
               />
             </div>
             <code>SHA-256 {PIPEDOG_SHA}</code>
@@ -85,10 +348,10 @@ export default function LorePage() {
         <section className={styles.prologue}>
           <p className={styles.dropcap}>
             LayPipe did not invent this dog. The contract came later. The coin
-            came later. The 10,000 PipeDogs came later. Before any of that,
-            there was a photograph, then a character, then a transparent PNG
-            dropped into a subreddit and released into the weather system of
-            the internet.
+            came later. The plan for 10,000 Lay Pipedogs came later. Before
+            any of that, there was a photograph, then a character, then a
+            transparent PNG dropped into a subreddit and released into the
+            weather system of the internet.
           </p>
           <p>
             We begin with that admission because it is the point. A meme is
@@ -100,7 +363,10 @@ export default function LorePage() {
           </p>
         </section>
 
-        <section className={styles.section} id="lineage">
+        <section
+          className={`${styles.section} ${styles.lineageSection}`}
+          id="lineage"
+        >
           <p className={styles.sectionLabel}>01 / THE LINEAGE</p>
           <h2>PipeDog is Doge lore. PipeDog is not the Doge photograph.</h2>
           <p>
@@ -119,135 +385,146 @@ export default function LorePage() {
             shared cast of dogs whose identities were built collectively,
             inconsistently, and in public.
           </p>
+          <p>
+            Here are the names we use. PipeDog, singular, is that inherited
+            detective composite: the exact Domge PNG beneath a deerstalker,
+            plaid cape, and bent pipe. Lay Pipedogs is LayPipe&apos;s planned
+            collection. Every Lay Pipedog begins with that same exact Domge
+            cutout, then applies PipeDog&apos;s found-image construction and
+            net-art ideals through new rooms, clothes, objects, and collisions.
+            It is not 10,000 copies of the flattened detective composite.
+          </p>
+          <p>
+            Kabosu and the Doge photograph are cultural ancestors, not pixel
+            sources for PipeDog or Lay Pipedogs. Domge, derived from the
+            Balltze/Cheems image, is the consistent dog layer in both.
+            The collection is not official r/dogelore canon, and LayPipe does
+            not claim to have created Balltze, Cheems, Domge, or any earlier
+            image in the lineage.
+          </p>
 
-          <ol className={styles.timeline} aria-label="PipeDog image lineage">
-            <li>
-              <time dateTime="2005-06-24">2005</time>
-              <div>
-                <strong>The word precedes the picture.</strong>
-                <p>
-                  Homestar Runner uses the misspelling &ldquo;doge&rdquo; in
-                  <a
-                    href="https://homestarrunner.com/toons/biz-cas-fri-1"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Biz Cas Fri 1
-                  </a>
-                  . The word and the famous Shiba photograph meet later.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2010-02-13">2010</time>
-              <div>
-                <strong>Kabosu establishes the Doge image language.</strong>
-                <p>
-                  The official source is
-                  <a
-                    href="https://kabosu112.exblog.jp/9944144/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Atsuko Sato&apos;s original family-blog post
-                  </a>
-                  . Kabosu is the ancestor of the culture, not the dog layer
-                  used by PipeDog.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2013">2013</time>
-              <div>
-                <strong>An informal image becomes monetary language.</strong>
-                <p>
-                  Dogecoin turns the collectively circulated Kabosu image into
-                  a symbol for coordination and exchange. The conversion of
-                  Doge lore into economic behavior predates LayPipe by more
-                  than a decade.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2017-09-04">2017</time>
-              <div>
-                <strong>Balltze sits for the photograph.</strong>
-                <p>
-                  The exact frame later used for Cheems appears on
-                  <a
-                    href="https://www.instagram.com/p/BYntbPTF1_f/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Balltze&apos;s Instagram account
-                  </a>
-                  .
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2018-08-15">2018</time>
-              <div>
-                <strong>Dogelore becomes a shared stage.</strong>
-                <p>
-                  <a
-                    href="https://knowyourmeme.com/memes/sites/dogelore"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    r/dogelore
-                  </a>
-                  gathers downloadable dog cutouts into a cast whose
-                  relationships and canon are made collectively, contradicted,
-                  and remade.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2019-06-08">2019</time>
-              <div>
-                <strong>Cheems enters dogelore.</strong>
-                <p>
-                  The earliest currently documented Cheems meme,
-                  <a
-                    href="https://www.reddit.com/r/dogelore/comments/by7cwr/doge_has_lunch/"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    doge has lunch
-                  </a>
-                  , turns the photograph into a reusable character. Cropping
-                  and deliberate language mutation give Balltze another name
-                  and another life.
-                </p>
-              </div>
-            </li>
-            <li>
-              <time dateTime="2020-03-01">2020</time>
-              <div>
-                <strong>Domge PNG arrives.</strong>
-                <p>
-                  Reddit user Gary-Oto is the earliest confirmed public
-                  uploader of a transparent, aggressively distorted Balltze
-                  cutout, posted to r/dogelore under the complete title
-                  &ldquo;Domge PNG.&rdquo; The post makes no claim that Gary-Oto
-                  created the edit. This is the exact dog beneath PipeDog.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span>Later</span>
-              <div>
-                <strong>The detective is assembled.</strong>
-                <p>
-                  An unknown assembler pastes a stock-photo deerstalker, plaid
-                  pet cape, and bent pipe onto Domge. The resulting composite
-                  is served by pipedog.xyz and becomes canonical PIPEDOG; its
-                  first publication date remains unproven.
-                </p>
-              </div>
-            </li>
+          <div className={styles.timelineIntro}>
+            <p>
+              The visual timeline starts here, immediately after the names and
+              relationships are clear. The documented appearances run in year
+              order; the undated canonical PipeDog is shown last as the
+              destination.
+            </p>
+            <span>
+              Doge / Kabosu → Balltze / Cheems → Domge → detective circulation
+              → canonical PipeDog. Status labels keep direct sources separate
+              from adjacent evidence.
+            </span>
+          </div>
+
+          <ol
+            className={styles.sourceTimeline}
+            aria-label="PipeDog source images by year"
+          >
+            {sourceImageTimeline.map((entry) => (
+              <li key={`${entry.year}-${entry.title}`}>
+                <div className={styles.timelineYear}>
+                  {"dateTime" in entry ? (
+                    <time dateTime={entry.dateTime}>{entry.year}</time>
+                  ) : (
+                    <span>{entry.year}</span>
+                  )}
+                </div>
+                <figure className={styles.timelineFigure}>
+                  <div className={styles.timelineImage}>
+                    <Image
+                      src={entry.image}
+                      alt={entry.alt}
+                      width={entry.width}
+                      height={entry.height}
+                      sizes="(max-width: 720px) calc(100vw - 48px), 560px"
+                    />
+                  </div>
+                  <figcaption>
+                    <div className={styles.receiptFlags}>
+                      <span>{entry.status}</span>
+                      <em>{entry.role}</em>
+                    </div>
+                    <h3>{entry.title}</h3>
+                    <p>{entry.copy}</p>
+                    <p className={styles.relevance}>
+                      <strong>Why it mattered:</strong> {entry.relevance}
+                    </p>
+                    <dl className={styles.sourceMeta}>
+                      <div>
+                        <dt>Source</dt>
+                        <dd>
+                          <a href={entry.href} target="_blank" rel="noreferrer">
+                            {entry.source} ↗
+                          </a>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Local file</dt>
+                        <dd>
+                          <code title={entry.localHash}>
+                            sha256:{entry.localHash.slice(0, 12)}…
+                          </code>
+                        </dd>
+                      </div>
+                    </dl>
+                  </figcaption>
+                </figure>
+              </li>
+            ))}
           </ol>
+
+          <aside className={styles.twoTrees} aria-label="Cultural ancestry and pixel lineage">
+            <div>
+              <strong>Cultural ancestry</strong>
+              <p>
+                Doge / Kabosu → the dog-meme grammar → dogelore&apos;s shared cast
+                → the visual conditions in which PipeDog can be read instantly.
+              </p>
+            </div>
+            <div>
+              <strong>Direct pixel lineage</strong>
+              <p>
+                Balltze source photograph → Cheems character → exact Domge PNG
+                → canonical flattened PipeDog → exact Domge body in Lay Pipedogs.
+              </p>
+            </div>
+          </aside>
+
+          <div className={styles.culturalChronology}>
+            <p>
+              <strong>2005 / the word.</strong> Homestar Runner&apos;s
+              <a
+                href="https://homestarrunner.com/toons/biz-cas-fri-1"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Biz Cas Fri 1
+              </a>
+              records the misspelling &ldquo;doge&rdquo; before the famous photograph
+              carried it.
+            </p>
+            <p>
+              <strong>2013 / the grammar becomes infrastructure.</strong>
+              <a
+                href="https://dogecoin.com/dogepedia/articles/history-of-dogecoin/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Dogecoin launches on December 6
+              </a>
+              and Doge moves from caption language into a payment token and
+              tipping culture: evidence that internet vernacular can organize
+              an economy without becoming visually respectable first.
+            </p>
+            <p>
+              <strong>2018–2020 / the cast becomes modular.</strong> Dogelore
+              treats transparent dog cutouts as reusable actors. Names,
+              personalities, and relationships emerge from posting rather than
+              from a single official author.
+            </p>
+          </div>
+
         </section>
 
         <section className={styles.section} id="domge">
@@ -379,10 +656,12 @@ export default function LorePage() {
             <div>
               <h3>Mutation belongs around the core.</h3>
               <p>
-                PipeDogs can accumulate hats, rooms, chains, motel keys,
-                cameras, cigarette boxes, and a thousand pieces of commercial
-                debris. The exact Domge dog remains unchanged beneath them.
-                We add context; we do not regenerate the ancestor.
+                PipeDog is inherited; Lay Pipedogs is the mutation LayPipe is
+                responsible for. We keep the exact Domge dog and change the
+                rooms, clothes, hats, props, friends, cigarette packs, and
+                commercial debris around it. Dogelore supplies a shared remix
+                grammar; LayPipe is responsible for the collection system and
+                the finished combinations.
               </p>
             </div>
           </div>
@@ -395,9 +674,9 @@ export default function LorePage() {
                 A Marlboro pack without its roof, a Newport pack without its
                 swoosh, or a Lucky Strike pack without its target is not the
                 same found object. Sanitizing logos launders the cultural
-                specificity out of the image. PipeDogs preserve the packaging,
-                typography, wear, and embarrassment of the real thing. This is
-                found visual culture, not brand sponsorship.
+                specificity out of the image. Lay Pipedogs preserves the
+                packaging, typography, wear, and embarrassment of the real
+                thing. This is found visual culture, not brand sponsorship.
               </p>
             </div>
           </div>
@@ -417,23 +696,40 @@ export default function LorePage() {
 
         <section className={styles.section} id="collection">
           <p className={styles.sectionLabel}>05 / THE COLLECTION</p>
-          <h2>Ten thousand dogs, one unchanged ancestor.</h2>
+          <h2>One inherited dog layer. Ten thousand new compositions.</h2>
           <p>
-            The PipeDogs collection will be assembled from photographed layers,
-            not generated approximations of the dog. Backgrounds and traits
-            can come from motel rooms, pawn shops, corner stores, disposable
-            cameras, cigarette packaging, bootleg electronics, thrift-store
-            clothing, trading lore, and other evidence of life on the network.
-            Each accepted layer gets a source record. Each rendered token gets
-            a deterministic recipe. The core cutout gets no makeover.
+            The singular PipeDog is a specific flattened detective image. The
+            Lay Pipedogs collection begins with the exact high-resolution Domge
+            cutout beneath it and builds outward with sourced motel rooms, pawn
+            shops, corner stores, cigarette packaging, bootleg electronics,
+            thrift-store clothes, trading lore, and other evidence of life on
+            the network.
+          </p>
+          <p>
+            The point is not to manufacture a cleaner mascot or place an old
+            PNG behind ten thousand arbitrary costumes. The exact Domge file is
+            a common visual substrate: one piece of inherited network culture
+            that lets every later collision remain visibly related. What
+            changes around it records another room, object, joke, market, and
+            moment in the life of the network.
+          </p>
+          <p>
+            One locked Sherlock Genesis may preserve canonical PipeDog
+            byte-for-byte. The remaining Lay Pipedogs keep the same Domge dog
+            pixels but do not pretend the inherited detective costume was a
+            modular source file. Ten thousand pieces become a distributed
+            anthology rather than ten thousand claims of original authorship.
+            Every room, object, and overlay gets a source record; every rendered
+            token gets a deterministic recipe.
           </p>
           <div className={styles.ruleCard}>
-            <strong>The permanent image rule</strong>
+            <strong>The permanent dog rule</strong>
             <p>
-              Preserve the canonical Domge pixels. Preserve real logos on found
-              objects. Keep the source ledger public. Label uncertainty. Never
-              pass generated scenery or a visual concept off as a provenance
-              master.
+              Preserve the exact Domge pixels in every Lay Pipedog. Preserve
+              canonical PipeDog byte-for-byte wherever PipeDog itself appears.
+              Preserve real marks on found objects. Keep the source ledger
+              public. Label uncertainty. Never pass a generated concept off as
+              a photographed or inherited provenance master.
             </p>
           </div>
           <div className={styles.animalNote}>
@@ -464,15 +760,53 @@ export default function LorePage() {
           </div>
         </section>
 
+        <section className={styles.assetSection} id="build-list">
+          <p className={styles.sectionLabel}>06 / WHAT WE ARE MAKING</p>
+          <h2>The first collection build list.</h2>
+          <p className={styles.assetIntro}>
+            These are production targets, not prompts to redraw PipeDog. The
+            motel, corner-store, and pawnshop examples establish the range:
+            the unchanged Domge dog, ordinary rooms, oversized found objects,
+            readable packaging, direct flash, and combinations that feel
+            discovered rather than designed. Open a category to inspect the
+            working list.
+          </p>
+          <div className={styles.assetGrid}>
+            {collectionBuildGroups.map((group) => (
+              <details className={styles.assetGroup} key={group.name}>
+                <summary>
+                  <span>{group.name}</span>
+                  <strong>{group.items.length} targets</strong>
+                </summary>
+                <p>{group.note}</p>
+                <ul>
+                  {group.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </details>
+            ))}
+          </div>
+          <div className={styles.ruleCard}>
+            <strong>The pack rule</strong>
+            <p>
+              Marlboro, Newport, Lucky Strike, and every later found pack keep
+              their real marks, typography, cellophane, tax stamps, damage, and
+              awkward scale. We do not blur a logo, invent fake spelling, or
+              turn a culturally specific object into a generic box.
+            </p>
+          </div>
+        </section>
+
         <section className={styles.ledgerSection} id="ledger">
-          <p className={styles.sectionLabel}>06 / PROVENANCE LEDGER</p>
+          <p className={styles.sectionLabel}>07 / PROVENANCE LEDGER</p>
           <h2>The receipts.</h2>
           <div className={styles.ledgerWrap}>
             <table>
               <thead>
                 <tr>
                   <th>Artifact</th>
-                  <th>Earliest verified source</th>
+                  <th>Earliest located source</th>
                   <th>Local record</th>
                   <th>Status</th>
                 </tr>
@@ -489,7 +823,12 @@ export default function LorePage() {
                       Atsuko Sato original blog, 2010-02-13
                     </a>
                   </td>
-                  <td>Contextual ancestor; not the PipeDog body</td>
+                  <td>
+                    <code>public/lore/doge-2010.jpg</code>
+                    <small>SHA-256 {DOGE_SHA}</small>
+                    Cultural ancestor only; no Kabosu pixels in PipeDog or Lay
+                    Pipedogs
+                  </td>
                   <td>Confirmed</td>
                 </tr>
                 <tr>
@@ -504,7 +843,7 @@ export default function LorePage() {
                     </a>
                   </td>
                   <td>
-                    <code>balltze-cheems-original-instagram-2017.jpg</code>
+                    <code>public/lore/cheems-2017.jpg</code>
                     <small>SHA-256 {BALLTZE_SHA}</small>
                   </td>
                   <td>Confirmed</td>
@@ -524,11 +863,11 @@ export default function LorePage() {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Independent KYM archive
+                      Same-day KYM archive
                     </a>
                   </td>
                   <td>
-                    <code>domge-exact-pipedog-base.png</code>
+                    <code>public/brand/pipedog-domge-source.png</code>
                     <small>SHA-256 {DOMGE_SHA}</small>
                   </td>
                   <td>Exact, byte-matched</td>
@@ -544,7 +883,10 @@ export default function LorePage() {
                     <code>public/brand/pipedog.png</code>
                     <small>SHA-256 {PIPEDOG_SHA}</small>
                   </td>
-                  <td>Exact project canonical</td>
+                  <td>
+                    Exact project canonical; byte-matched to the live asset on
+                    {` ${LIVE_SITE_CHECKED}`}
+                  </td>
                 </tr>
                 <tr>
                   <td>Detective hat</td>
@@ -559,6 +901,23 @@ export default function LorePage() {
                   </td>
                   <td>Public preview retained as evidence only</td>
                   <td>Exact source identified</td>
+                </tr>
+                <tr>
+                  <td>Detective Cheems post</td>
+                  <td>
+                    <a
+                      href="https://www.reddit.com/r/cheemsburbgerlore/comments/jg7sg7/detective_cheems_looks_around_for_clues/"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Earliest located appearance, 2020-10-22
+                    </a>
+                  </td>
+                  <td>
+                    <code>public/lore/detective-cheems-2020.png</code>
+                    <small>SHA-256 {DETECTIVE_CHEEMS_SHA}</small>
+                  </td>
+                  <td>Repost indicated; maker and relation to PipeDog unresolved</td>
                 </tr>
                 <tr>
                   <td>Plaid cape / bent pipe</td>
@@ -586,9 +945,11 @@ export default function LorePage() {
             hard drive to another. We will not pretend to be the beginning of
             that story.
           </p>
-          <strong>Keep the dog exact. Make the world around him stranger.</strong>
+          <strong>
+            Keep PipeDog exact. Let Lay Pipedogs make a stranger network.
+          </strong>
           <div className={styles.endLinks}>
-            <Link href="/my">Meet the PipeDogs</Link>
+            <Link href="/my">Meet Lay Pipedogs</Link>
             <Link href="/docs">Read the protocol docs</Link>
             <a
               href="https://blog.remilia.org/what-remilia-believes-in-a-new-net-art-manifesto/"

@@ -41,16 +41,11 @@ test("production CSP covers every intentional browser network boundary", async (
   );
 });
 
-test("theme bootstrap is a same-origin asset instead of authored inline script", () => {
+test("layout uses one light scheme without a runtime theme bootstrap", () => {
   const layout = readFileSync(resolve("app/layout.tsx"), "utf8");
-  const theme = readFileSync(resolve("public/theme-init.js"), "utf8");
-  assert.match(
-    layout,
-    /<Script src="\/theme-init\.js" strategy="beforeInteractive" \/>/,
-  );
+  assert.match(layout, /colorScheme: "light"/);
+  assert.doesNotMatch(layout, /theme-init\.js|next\/script|data-theme/);
   assert.doesNotMatch(layout, /dangerouslySetInnerHTML/);
-  assert.match(theme, /localStorage\.getItem\("laypipe-theme"\)/);
-  assert.doesNotMatch(theme, /fetch\(|XMLHttpRequest|document\.write|innerHTML/);
 });
 
 test("expected fixture readiness is quiet while real failures remain secret-free", async () => {

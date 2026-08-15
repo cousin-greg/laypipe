@@ -12,13 +12,13 @@ const sideCopy: Record<
 > = {
   buy: {
     inputLabel: "You pay",
-    inputSymbol: "PIPEDOG",
+    inputSymbol: "ETH",
     outputSymbol: "LAYPIPE",
   },
   sell: {
     inputLabel: "You sell",
     inputSymbol: "LAYPIPE",
-    outputSymbol: "PIPEDOG",
+    outputSymbol: "ETH",
   },
 };
 
@@ -39,7 +39,7 @@ export function LaypipeTradePanel({
       <div className={styles.panelHeading}>
         <div>
           <span>Bonding pool</span>
-          <h3>PIPEDOG / LAYPIPE</h3>
+          <h3>ETH / LAYPIPE</h3>
         </div>
         <span className={styles.previewBadge}>{protocol.statusLabel}</span>
       </div>
@@ -81,7 +81,7 @@ export function LaypipeTradePanel({
         </div>
         <div>
           <span>Hook fee</span>
-          <strong>{protocol.tradeFeeBps / 100}% in PIPEDOG</strong>
+          <strong>{protocol.tradeFeeBps / 100}% on the ETH side</strong>
         </div>
         <div>
           <span>Route</span>
@@ -95,9 +95,10 @@ export function LaypipeTradePanel({
 
       <p className={styles.safetyNote}>
         Contract preview. No approval or transaction can be submitted. Live
-        buys will request one exact, single-use PIPEDOG allowance. A single
-        buy, sell, or transfer may cross at most 20 NFT thresholds (2,000,000
-        LAYPIPE); larger actions must be split across transactions.
+        buys will use native ETH; LAYPIPE sells will request only the
+        transaction-specific permission required by the reviewed contracts. A
+        single buy, sell, or transfer may cross at most 20 NFT thresholds
+        (2,000,000 LAYPIPE); larger actions must be split across transactions.
       </p>
     </form>
   );

@@ -87,10 +87,13 @@ async function expectPage(path, patterns) {
   const html = await response.text();
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
-  assert.match(html, /100,000[\s\S]*LAYPIPE per PipeDog/i);
+  assert.match(html, /100,000[\s\S]*LAYPIPE per Lay Pipedog/i);
   assert.match(html, /pipedog-pipe-mark\.png/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
-  assert.doesNotMatch(html, /buybacks?/i);
+  assert.doesNotMatch(
+    html,
+    /PIPEDOG \/ LAYPIPE|Buy LAYPIPE with PIPEDOG|PIPEDOG fee to NFT holders/i,
+  );
   assert.doesNotMatch(html, /Launch a coin|Latest indexed launches|Fixture feed/i);
 
   for (const pattern of patterns) {
@@ -113,7 +116,7 @@ async function expectCanonicalFontAssets(html) {
       }),
     )
   ).join("\n");
-  assert.match(css, /Dragon[_-]Regular[^"')]*\.woff2/i);
+  assert.doesNotMatch(css, /Dragon[_-][^"')]*\.woff2/i);
   assert.match(css, /PPMori[_-]Regular[^"')]*\.woff2/i);
 }
 
@@ -122,9 +125,11 @@ test("server-renders the singleton LayPipe product surface", async () => {
     /One coin\. One pipe\./i,
     /1,000,000,000/i,
     /10,000/i,
+    /Buy LAYPIPE with native ETH/i,
+    /Periodic reward cycle/i,
     /Automatic threshold/i,
     /One clean percent/i,
-    /My PipeDogs/i,
+    /My Lay Pipedogs/i,
     /51,750[\s\S]*LAYPIPE to go/i,
     /Trading opens when contracts are wired/i,
   ]);
@@ -140,7 +145,7 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
   const routes = [
     [
       "/my",
-      [/My PipeDogs/i, /Preview position/i, /51,750[\s\S]*LAYPIPE to go/i],
+      [/My Lay Pipedogs/i, /Preview position/i, /51,750[\s\S]*LAYPIPE to go/i],
     ],
     [
       "/rewards",
@@ -153,8 +158,9 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
     [
       "/tokenomics",
       [
-        /Every official-pool trade fills the PipeDog pool/i,
-        /Collected in PIPEDOG/i,
+        /Every official-pool trade funds the PIPEDOG reward cycle/i,
+        /Accrued on the native ETH side/i,
+        /Periodic, trustless execution/i,
         /No developer cut/i,
       ],
     ],
@@ -164,7 +170,8 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         /One product/i,
         /Very large buys may need to be split/i,
         /Contract registry/i,
-        /One percent to holders/i,
+        /One percent into PIPEDOG rewards/i,
+        /quoted only in native ETH/i,
         /100,000 LAYPIPE held by a wallet/i,
       ],
     ],
@@ -175,13 +182,41 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         /Lineage without possession/i,
         /Domge PNG/i,
         /Keep the marks on the objects/i,
+        /PipeDog source images by year/i,
+        /balkan-grandpa-2021\.jpg/i,
+        /Literally all Balkan grandpa/i,
         /05450b2360b7591058bb19bc050b6c84546851d75d6623e1867e0e96b0a3f9b2/i,
       ],
     ],
   ];
 
   for (const [path, patterns] of routes) {
-    await expectPage(path, patterns);
+    const html = await expectPage(path, patterns);
+    if (path === "/lore") {
+      assert.doesNotMatch(html, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
+      assert.doesNotMatch(html, /dog-rushmore(?:-2026-display)?/i);
+
+      const timelineStart = html.indexOf(
+        'aria-label="PipeDog source images by year"',
+      );
+      const timelineEnd = html.indexOf("</ol>", timelineStart);
+      assert.ok(timelineStart >= 0 && timelineEnd > timelineStart);
+      const timelineHtml = html.slice(timelineStart, timelineEnd);
+      const orderedImages = [
+        "/lore/doge-2010.jpg",
+        "/lore/cheems-2017.jpg",
+        "/brand/pipedog-domge-source.png",
+        "/lore/detective-cheems-2020.png",
+        "/lore/balkan-grandpa-2021.jpg",
+        "/brand/pipedog.png",
+      ];
+      let previous = -1;
+      for (const image of orderedImages) {
+        const position = timelineHtml.indexOf(image);
+        assert.ok(position > previous, `${image} should render in lineage order`);
+        previous = position;
+      }
+    }
   }
 });
 

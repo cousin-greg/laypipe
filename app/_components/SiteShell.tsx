@@ -3,14 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useWallet } from "./WalletProvider";
-
-type Theme = "light" | "dark";
 
 const navigation = [
   { href: "/#trade", currentPath: "/", label: "Trade" },
-  { href: "/my", currentPath: "/my", label: "My PipeDogs" },
+  { href: "/my", currentPath: "/my", label: "My Lay Pipedogs" },
   { href: "/rewards", currentPath: "/rewards", label: "Rewards" },
   { href: "/tokenomics", currentPath: "/tokenomics", label: "Mechanics" },
   { href: "/lore", currentPath: "/lore", label: "Lore" },
@@ -23,7 +21,6 @@ function shortAddress(address: string) {
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [theme, setTheme] = useState<Theme>("light");
   const [menuOpen, setMenuOpen] = useState(false);
   const { account, status: walletStatus, connect: connectWallet } = useWallet();
   const walletBusy = walletStatus === "connecting";
@@ -39,25 +36,19 @@ export function SiteShell({ children }: { children: ReactNode }) {
             ? "Try again"
             : "Connect wallet";
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setTheme(
-        document.documentElement.dataset.theme === "dark" ? "dark" : "light",
-      );
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  function applyTheme(nextTheme: Theme) {
-    document.documentElement.dataset.theme = nextTheme;
-    localStorage.setItem("laypipe-theme", nextTheme);
-    setTheme(nextTheme);
-  }
-
   return (
     <div className="site-frame">
       <header className="app-header">
+        <div className="web-strip">
+          <span>laypipe.fun / one coin / one pipe</span>
+          <nav aria-label="Site shortcuts">
+            <Link href="/lore#ledger">source ledger</Link>
+            <Link href="/docs">how it works</Link>
+            <a href="https://pipedog.xyz" target="_blank" rel="noreferrer">
+              original pipedog site ↗
+            </a>
+          </nav>
+        </div>
         <div className="header-main">
           <Link className="brand-lockup" href="/" aria-label="laypipe.fun home">
             <Image
@@ -90,22 +81,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="header-tools">
-            <div className="theme-switcher" aria-label="Color scheme">
-              <button
-                type="button"
-                aria-pressed={theme === "light"}
-                onClick={() => applyTheme("light")}
-              >
-                Light
-              </button>
-              <button
-                type="button"
-                aria-pressed={theme === "dark"}
-                onClick={() => applyTheme("dark")}
-              >
-                Dark
-              </button>
-            </div>
             <button
               className="button button-accent button-small"
               type="button"
@@ -153,31 +128,15 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 </Link>
               ))}
             </nav>
-            <div className="theme-switcher" aria-label="Color scheme">
-              <button
-                type="button"
-                aria-pressed={theme === "light"}
-                onClick={() => applyTheme("light")}
-              >
-                Light
-              </button>
-              <button
-                type="button"
-                aria-pressed={theme === "dark"}
-                onClick={() => applyTheme("dark")}
-              >
-                Dark
-              </button>
-            </div>
           </div>
         ) : null}
 
         <div className="singleton-bar" aria-label="LayPipe protocol constants">
           <span><strong>1B</strong> fixed LAYPIPE</span>
           <i aria-hidden="true" />
-          <span><strong>100,000</strong> LAYPIPE per PipeDog</span>
+          <span><strong>100,000</strong> LAYPIPE per Lay Pipedog</span>
           <i aria-hidden="true" />
-          <span><strong>1%</strong> PIPEDOG fee to NFT holders</span>
+          <span><strong>1%</strong> ETH-side fee funds PIPEDOG rewards</span>
         </div>
       </header>
 
@@ -193,12 +152,12 @@ export function SiteShell({ children }: { children: ReactNode }) {
           />
           <div>
             <strong>laypipe.fun</strong>
-            <p>LayPipe. Get PipeDog. Claim PIPEDOG.</p>
+            <p>LAYPIPE. Get a Lay Pipedog. Receive PIPEDOG.</p>
           </div>
         </div>
         <nav aria-label="Footer navigation">
           <Link href="/#trade">Trade</Link>
-          <Link href="/my">My PipeDogs</Link>
+          <Link href="/my">My Lay Pipedogs</Link>
           <Link href="/rewards">Rewards</Link>
           <Link href="/tokenomics">Mechanics</Link>
           <Link href="/lore">Lore</Link>
@@ -207,8 +166,14 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </a>
         </nav>
         <p className="footer-risk">
-          Contract preview. LAYPIPE trading, NFT mirroring, and PIPEDOG claims
-          remain disabled until the singleton deployment is configured.
+          Contract preview. ETH/LAYPIPE trading, NFT mirroring, reward-cycle
+          execution, and PIPEDOG claims remain disabled until the singleton
+          deployment is configured.
+        </p>
+        <p className="footer-web-note">
+          Best viewed on whatever machine is already connected. Built in PP
+          Mori. Canonical PIPEDOG pixels preserved. Last site-art pass:
+          2026-08-15.
         </p>
       </footer>
     </div>

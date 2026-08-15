@@ -876,7 +876,7 @@ test("legacy MarketBoard stays fail-closed but is not mounted by the singleton s
   assert.doesNotMatch(layout, /readMarketDataMode|MarketDataProvider/);
   assert.match(provider, /marketMode === "fixture" \? fixtureBoardSource : null/);
   assert.doesNotMatch(shell, /useMarketData|tokens\.slice\(0, 16\)|Live feed unavailable/);
-  assert.match(shell, /label: "My PipeDogs"/);
+  assert.match(shell, /label: "My Lay Pipedogs"/);
   assert.match(adapter, /mode === "live" \? createApiMarketAdapter\(\) : fixtureMarketAdapter/);
   assert.doesNotMatch(adapter, /catch[\s\S]{0,200}fixtureMarketAdapter/);
   assert.match(tokenPage, /redirect\("\/#trade"\)/);

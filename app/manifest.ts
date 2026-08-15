@@ -3,9 +3,9 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "laypipe.fun",
-    short_name: "LayPipe",
+    short_name: "LAYPIPE",
     description:
-      "Trade LAYPIPE against PIPEDOG and unlock automatic PipeDog NFTs.",
+      "Trade LAYPIPE against native ETH and unlock automatic Lay Pipedog NFTs.",
     start_url: "/",
     display: "standalone",
     background_color: "#fff7dc",

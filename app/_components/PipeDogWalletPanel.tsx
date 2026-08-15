@@ -70,11 +70,11 @@ export function PipeDogWalletPanel({
             {variant === "rewards" ? "PIPEDOG rewards" : "Your automatic NFTs"}
           </p>
           <h2>
-            {variant === "rewards" ? "Claim from the pipe." : "My PipeDogs"}
+            {variant === "rewards" ? "Claim from the pipe." : "My Lay Pipedogs"}
           </h2>
           <p>
             Every complete {formatWhole(protocol.laypipePerPipeDog)}
-            {" "}LAYPIPE balance creates one PipeDog and one reward unit.
+            {" "}LAYPIPE balance creates one Lay Pipedog and one reward unit.
           </p>
         </div>
         <button
@@ -103,7 +103,7 @@ export function PipeDogWalletPanel({
           <small>Preview balance</small>
         </article>
         <article>
-          <span>PipeDogs</span>
+          <span>Lay Pipedogs</span>
           <strong>{snapshot.pipeDogCount}</strong>
           <small>{snapshot.rewardUnits} reward units</small>
         </article>
@@ -118,7 +118,7 @@ export function PipeDogWalletPanel({
 
       <div className={styles.progressCard}>
         <div>
-          <span>Next PipeDog</span>
+          <span>Next Lay Pipedog</span>
           <strong>
             {formatWhole(snapshot.tokensToNextPipeDog)} LAYPIPE to go
           </strong>
@@ -126,7 +126,7 @@ export function PipeDogWalletPanel({
         <div
           className={styles.progressTrack}
           role="progressbar"
-          aria-label="Progress to next PipeDog"
+          aria-label="Progress to next Lay Pipedog"
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={progressPercent}
@@ -141,7 +141,7 @@ export function PipeDogWalletPanel({
       </div>
 
       {showGallery ? (
-        <div className={styles.pipeDogGallery} aria-label="Preview PipeDogs">
+        <div className={styles.pipeDogGallery} aria-label="Preview Lay Pipedogs">
           {snapshot.pipeDogs.map((pipeDog) => (
             <article key={pipeDog.id} className={styles.pipeDogCard}>
               <div className={styles.pipeDogArt}>
