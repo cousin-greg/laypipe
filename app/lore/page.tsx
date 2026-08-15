@@ -13,8 +13,6 @@ const DOGE_SHA =
   "0e073bf5219341a6901235a5ce163981b4c26a7873c14331d03fd2ce90c8d8f3";
 const DETECTIVE_CHEEMS_SHA =
   "a4d481d7aaad833e0b14db876844368817a092f75d57cb273e8c1c40b58328ce";
-const RUSHMORE_LIVE_SHA =
-  "df0d96640ddf31dc1bedf8fa6d64a931329396fc75522ef4b50d0b86507652bf";
 const LIVE_SITE_CHECKED = "2026-08-14";
 
 const sourceImageTimeline = [
@@ -51,42 +49,6 @@ const sourceImageTimeline = [
     relevance:
       "Cheems turned one family photograph into a recurring network character. The same photograph is the material later distorted into Domge.",
     localHash: BALLTZE_SHA,
-  },
-  {
-    year: "2018",
-    dateTime: "2018-09-30",
-    title: "Walter / Nelson",
-    image: "/lore/walter-2018.png",
-    width: 799,
-    height: 450,
-    alt: "Nelson the bull terrier in the source photograph later known as Walter",
-    copy: "A parallel dog-meme source later gathered into pipedog.xyz's Rushmore image.",
-    href: "https://twitter.com/PupperNelson/status/1046428179618045952",
-    source: "@PupperNelson source post",
-    status: "primary source",
-    role: "pipedog.xyz constellation / no shared pixels",
-    relevance:
-      "Walter shows how dog memes became a cast rather than a single template. He enters this record because pipedog.xyz places him on its dog Rushmore, not because PipeDog uses his image.",
-    localHash:
-      "2ba39e9932e4dc3556f685bdc45fadd69bfc0a1d19f1769d2057a23262005fbc",
-  },
-  {
-    year: "2018",
-    dateTime: "2018-11-17",
-    title: "Dogwifhat / Achi",
-    image: "/lore/dogwifhat-2018.jpg",
-    width: 1920,
-    height: 1080,
-    alt: "Achi the Shiba Inu wearing the pink knitted hat used for dogwifhat",
-    copy: "Another source photograph later assembled into the official Rushmore image.",
-    href: "https://www.instagram.com/p/BqRvWYiHoKl/",
-    source: "@bangdddd on Instagram",
-    status: "primary source",
-    role: "pipedog.xyz constellation / no shared pixels",
-    relevance:
-      "Dogwifhat reduced a meme to a blunt found-image proposition: a dog with a hat. Its appearance on pipedog.xyz's Rushmore locates PipeDog inside that broader visual economy.",
-    localHash:
-      "1b56048ffc0545fbda3ca8b3c6e62a30a35b63a39386fea3dc597442ccfcff84",
   },
   {
     year: "2020",
@@ -139,24 +101,6 @@ const sourceImageTimeline = [
       "The post proves that a pipe-smoking detective Cheems was already circulating before LayPipe. It does not prove who assembled canonical PipeDog.",
     localHash:
       "7595ade529ad0d8d92de6df5db0df2bbe111905df897fcb8814260033305f3a8",
-  },
-  {
-    year: "2026",
-    dateTime: "2026",
-    title: "The great dogs on the mountain",
-    image: "/lore/dog-rushmore-2026-display.webp",
-    width: 1536,
-    height: 1024,
-    alt: "The official pipedog.xyz collage of four meme dogs carved into a mountain",
-    copy: "The current pipedog.xyz collage brings Doge, Cheems, Walter, and dogwifhat into one official site image.",
-    href: "https://pipedog.xyz/dog_rushmore_wut.png",
-    source: "pipedog.xyz",
-    status: "current site snapshot",
-    role: "official project context / no body pixels",
-    relevance:
-      "The current site makes its own canon visible by placing Doge, Cheems, Walter, and dogwifhat together. That grouping is project context, not a claim that all four images form PipeDog's pixel lineage.",
-    localHash:
-      "321c76db5691ac4497de9885c5e7f238f19f93a10bf500cb6c3ad05262a68163",
   },
   {
     year: "date unknown",
@@ -352,7 +296,7 @@ export default function LorePage() {
           <div className={styles.byline}>
             <span>Published by LayPipe</span>
             <time dateTime="2026-08-13">August 13, 2026</time>
-            <span>Updated August 14, 2026</span>
+            <span>Updated August 15, 2026</span>
             <span>Living document / sources can change</span>
           </div>
           <nav className={styles.articleIndex} aria-label="Lore article index">
@@ -459,66 +403,17 @@ export default function LorePage() {
             image in the lineage.
           </p>
 
-          <aside className={styles.twoTrees} aria-label="Cultural ancestry and pixel lineage">
-            <div>
-              <strong>Cultural ancestry</strong>
-              <p>
-                Doge / Kabosu → the dog-meme grammar → dogelore&apos;s shared cast
-                → the visual conditions in which PipeDog can be read instantly.
-              </p>
-            </div>
-            <div>
-              <strong>Direct pixel lineage</strong>
-              <p>
-                Balltze source photograph → Cheems character → exact Domge PNG
-                → canonical flattened PipeDog → exact Domge body in Lay Pipedogs.
-              </p>
-            </div>
-          </aside>
-
-          <div className={styles.culturalChronology}>
-            <p>
-              <strong>2005 / the word.</strong> Homestar Runner&apos;s
-              <a
-                href="https://homestarrunner.com/toons/biz-cas-fri-1"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Biz Cas Fri 1
-              </a>
-              records the misspelling &ldquo;doge&rdquo; before the famous photograph
-              carried it.
-            </p>
-            <p>
-              <strong>2013 / the grammar becomes infrastructure.</strong>
-              <a
-                href="https://dogecoin.com/dogepedia/articles/history-of-dogecoin/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Dogecoin launches on December 6
-              </a>
-              and Doge moves from caption language into a payment token and
-              tipping culture: evidence that internet vernacular can organize
-              an economy without becoming visually respectable first.
-            </p>
-            <p>
-              <strong>2018–2020 / the cast becomes modular.</strong> Dogelore
-              treats transparent dog cutouts as reusable actors. Names,
-              personalities, and relationships emerge from posting rather than
-              from a single official author.
-            </p>
-          </div>
-
           <div className={styles.timelineIntro}>
             <p>
-              The cultural history is wider than any one file. This strip stays
-              narrower: the source images themselves, ordered by the year each
-              exact post or earliest located appearance entered the record.
+              The visual timeline starts here, immediately after the names and
+              relationships are clear. The documented appearances run in year
+              order; the undated canonical PipeDog is shown last as the
+              destination.
             </p>
             <span>
-              Status labels separate confirmed files, cultural context, and
-              unresolved attribution.
+              Doge / Kabosu → Balltze / Cheems → Domge → detective circulation
+              → canonical PipeDog. Status labels keep direct sources separate
+              from adjacent evidence.
             </span>
           </div>
 
@@ -578,6 +473,58 @@ export default function LorePage() {
               </li>
             ))}
           </ol>
+
+          <aside className={styles.twoTrees} aria-label="Cultural ancestry and pixel lineage">
+            <div>
+              <strong>Cultural ancestry</strong>
+              <p>
+                Doge / Kabosu → the dog-meme grammar → dogelore&apos;s shared cast
+                → the visual conditions in which PipeDog can be read instantly.
+              </p>
+            </div>
+            <div>
+              <strong>Direct pixel lineage</strong>
+              <p>
+                Balltze source photograph → Cheems character → exact Domge PNG
+                → canonical flattened PipeDog → exact Domge body in Lay Pipedogs.
+              </p>
+            </div>
+          </aside>
+
+          <div className={styles.culturalChronology}>
+            <p>
+              <strong>2005 / the word.</strong> Homestar Runner&apos;s
+              <a
+                href="https://homestarrunner.com/toons/biz-cas-fri-1"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Biz Cas Fri 1
+              </a>
+              records the misspelling &ldquo;doge&rdquo; before the famous photograph
+              carried it.
+            </p>
+            <p>
+              <strong>2013 / the grammar becomes infrastructure.</strong>
+              <a
+                href="https://dogecoin.com/dogepedia/articles/history-of-dogecoin/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Dogecoin launches on December 6
+              </a>
+              and Doge moves from caption language into a payment token and
+              tipping culture: evidence that internet vernacular can organize
+              an economy without becoming visually respectable first.
+            </p>
+            <p>
+              <strong>2018–2020 / the cast becomes modular.</strong> Dogelore
+              treats transparent dog cutouts as reusable actors. Names,
+              personalities, and relationships emerge from posting rather than
+              from a single official author.
+            </p>
+          </div>
+
         </section>
 
         <section className={styles.section} id="domge">
@@ -939,25 +886,6 @@ export default function LorePage() {
                   <td>
                     Exact project canonical; byte-matched to the live asset on
                     {` ${LIVE_SITE_CHECKED}`}
-                  </td>
-                </tr>
-                <tr>
-                  <td>pipedog.xyz dog Rushmore</td>
-                  <td>
-                    <a
-                      href="https://pipedog.xyz/dog_rushmore_wut.png"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Current official-site asset, checked {LIVE_SITE_CHECKED}
-                    </a>
-                  </td>
-                  <td>
-                    Original live PNG snapshot
-                    <small>SHA-256 {RUSHMORE_LIVE_SHA}</small>
-                  </td>
-                  <td>
-                    Official site context; not part of PipeDog&apos;s body lineage
                   </td>
                 </tr>
                 <tr>

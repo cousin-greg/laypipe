@@ -191,7 +191,32 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
   ];
 
   for (const [path, patterns] of routes) {
-    await expectPage(path, patterns);
+    const html = await expectPage(path, patterns);
+    if (path === "/lore") {
+      assert.doesNotMatch(html, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
+      assert.doesNotMatch(html, /dog-rushmore(?:-2026-display)?/i);
+
+      const timelineStart = html.indexOf(
+        'aria-label="PipeDog source images by year"',
+      );
+      const timelineEnd = html.indexOf("</ol>", timelineStart);
+      assert.ok(timelineStart >= 0 && timelineEnd > timelineStart);
+      const timelineHtml = html.slice(timelineStart, timelineEnd);
+      const orderedImages = [
+        "/lore/doge-2010.jpg",
+        "/lore/cheems-2017.jpg",
+        "/brand/pipedog-domge-source.png",
+        "/lore/detective-cheems-2020.png",
+        "/lore/balkan-grandpa-2021.jpg",
+        "/brand/pipedog.png",
+      ];
+      let previous = -1;
+      for (const image of orderedImages) {
+        const position = timelineHtml.indexOf(image);
+        assert.ok(position > previous, `${image} should render in lineage order`);
+        previous = position;
+      }
+    }
   }
 });
 

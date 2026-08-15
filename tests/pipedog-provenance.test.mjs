@@ -36,7 +36,8 @@ test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art 
   );
   assert.match(page, /balkan-grandpa-2021\.jpg/);
   assert.match(page, /detective-cheems-2020\.png/);
-  assert.match(page, /dog-rushmore-2026-display\.webp/);
+  assert.doesNotMatch(page, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
+  assert.doesNotMatch(page, /dog-rushmore(?:-2026-display)?/i);
   assert.match(page, /Keep the marks on the objects/);
   assert.match(page, /Lay Pipedogs is LayPipe&apos;s planned\s+collection/);
   assert.match(page, /same exact Domge\s+cutout/);
@@ -47,6 +48,35 @@ test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art 
   assert.match(page, /does not itself grant a license/i);
   assert.doesNotMatch(css, /var\(--dragon\)/);
   assert.match(css, /\.masthead h1[\s\S]*font-family: var\(--mori\)/);
+});
+
+test("lore visual timeline follows the relevant lineage before interpretation", () => {
+  const page = readFileSync(resolve(root, "app/lore/page.tsx"), "utf8");
+  const definition = page.indexOf("Here are the names we use");
+  const timeline = page.indexOf("<div className={styles.timelineIntro}>");
+  const interpretation = page.indexOf("<aside className={styles.twoTrees}");
+
+  assert.ok(definition >= 0, "the PipeDog and Lay Pipedogs definition should exist");
+  assert.ok(timeline > definition, "the image timeline should follow the definition");
+  assert.ok(
+    interpretation > timeline,
+    "ancestry interpretation should follow the image timeline",
+  );
+
+  const orderedImages = [
+    "/lore/doge-2010.jpg",
+    "/lore/cheems-2017.jpg",
+    "/brand/pipedog-domge-source.png",
+    "/lore/detective-cheems-2020.png",
+    "/lore/balkan-grandpa-2021.jpg",
+    "/brand/pipedog.png",
+  ];
+  let previous = -1;
+  for (const image of orderedImages) {
+    const position = page.indexOf(`image: "${image}"`);
+    assert.ok(position > previous, `${image} should follow the previous entry`);
+    previous = position;
+  }
 });
 
 test("published timeline preserves the exact captioned Balkan artifact", () => {
