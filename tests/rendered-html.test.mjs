@@ -87,10 +87,13 @@ async function expectPage(path, patterns) {
   const html = await response.text();
   assert.match(html, /laypipe\.fun/i);
   assert.match(html, /Robinhood Chain/i);
-  assert.match(html, /100,000[\s\S]*LAYPIPE per PipeDog/i);
+  assert.match(html, /100,000[\s\S]*LAYPIPE per Lay Pipedog/i);
   assert.match(html, /pipedog-pipe-mark\.png/i);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
-  assert.doesNotMatch(html, /buybacks?/i);
+  assert.doesNotMatch(
+    html,
+    /PIPEDOG \/ LAYPIPE|Buy LAYPIPE with PIPEDOG|PIPEDOG fee to NFT holders/i,
+  );
   assert.doesNotMatch(html, /Launch a coin|Latest indexed launches|Fixture feed/i);
 
   for (const pattern of patterns) {
@@ -122,9 +125,11 @@ test("server-renders the singleton LayPipe product surface", async () => {
     /One coin\. One pipe\./i,
     /1,000,000,000/i,
     /10,000/i,
+    /Buy LAYPIPE with native ETH/i,
+    /Periodic reward cycle/i,
     /Automatic threshold/i,
     /One clean percent/i,
-    /My PipeDogs/i,
+    /My Lay Pipedogs/i,
     /51,750[\s\S]*LAYPIPE to go/i,
     /Trading opens when contracts are wired/i,
   ]);
@@ -140,7 +145,7 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
   const routes = [
     [
       "/my",
-      [/My PipeDogs/i, /Preview position/i, /51,750[\s\S]*LAYPIPE to go/i],
+      [/My Lay Pipedogs/i, /Preview position/i, /51,750[\s\S]*LAYPIPE to go/i],
     ],
     [
       "/rewards",
@@ -153,8 +158,9 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
     [
       "/tokenomics",
       [
-        /Every official-pool trade fills the PipeDog pool/i,
-        /Collected in PIPEDOG/i,
+        /Every official-pool trade funds the PIPEDOG reward cycle/i,
+        /Accrued on the native ETH side/i,
+        /Periodic, trustless execution/i,
         /No developer cut/i,
       ],
     ],
@@ -164,7 +170,8 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         /One product/i,
         /Very large buys may need to be split/i,
         /Contract registry/i,
-        /One percent to holders/i,
+        /One percent into PIPEDOG rewards/i,
+        /quoted only in native ETH/i,
         /100,000 LAYPIPE held by a wallet/i,
       ],
     ],

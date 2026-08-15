@@ -19,7 +19,7 @@ test("published Domge artifact is pinned to the documented source hash", () => {
   assert.equal(sha256(published), expected);
 });
 
-test("lore page records sources, uncertainty, and the permanent image ethos", () => {
+test("lore page distinguishes PipeDog from Lay Pipedogs and records the net-art ethos", () => {
   const page = readFileSync(resolve(root, "app/lore/page.tsx"), "utf8");
   const css = readFileSync(resolve(root, "app/lore/lore.module.css"), "utf8");
 
@@ -38,7 +38,11 @@ test("lore page records sources, uncertainty, and the permanent image ethos", ()
   assert.match(page, /detective-cheems-2020\.png/);
   assert.match(page, /dog-rushmore-2026-display\.webp/);
   assert.match(page, /Keep the marks on the objects/);
-  assert.match(page, /We add context; we do not regenerate the ancestor/);
+  assert.match(page, /Lay Pipedogs is LayPipe&apos;s planned\s+collection/);
+  assert.match(page, /same exact Domge\s+cutout/);
+  assert.match(page, /common visual substrate/);
+  assert.match(page, /distributed\s+anthology rather than ten thousand claims/);
+  assert.match(page, /Marlboro, Newport, Lucky Strike/);
   assert.match(page, /exact frames not found/i);
   assert.match(page, /does not itself grant a license/i);
   assert.doesNotMatch(css, /var\(--dragon\)/);

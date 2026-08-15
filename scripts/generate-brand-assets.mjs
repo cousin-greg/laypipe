@@ -250,11 +250,11 @@ const openGraphHtml = `<!doctype html>
       <section class="copy">
         <div class="chain">Robinhood Chain</div>
         <h1>LAYPIPE<span>.FUN</span></h1>
-        <p class="tagline">Launch and trade in PIPEDOG.</p>
-        <div class="route">Protocol lane: 25% to 0xdead</div>
+        <p class="tagline">Trade LAYPIPE against native ETH.</p>
+        <div class="route">1% ETH-side fee buys PIPEDOG</div>
       </section>
       <img class="hero-art" src="${hero}" alt="" />
-      <div class="burn">Fees to the furnace</div>
+      <div class="burn">Periodic rewards to Lay Pipedogs</div>
     </main>
   </body>
 </html>`;

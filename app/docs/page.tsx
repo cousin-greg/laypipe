@@ -6,15 +6,15 @@ const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
 const readiness = [
   { system: "Singleton product UI", status: "Contract preview" },
   { system: "LAYPIPE token + NFT mirror", status: "ABI pending" },
-  { system: "PIPEDOG v4 fee hook", status: "ABI pending" },
-  { system: "PipeDog reward accumulator", status: "ABI pending" },
+  { system: "ETH/LAYPIPE v4 fee hook", status: "ABI pending" },
+  { system: "PIPEDOG buyback + rewards", status: "ABI pending" },
   { system: "Robinhood deployment", status: "Not configured" },
 ];
 
 export const metadata: Metadata = {
   title: "Docs | laypipe.fun",
   description:
-    "The single-coin LayPipe lifecycle, automatic PipeDogs, PIPEDOG fee flow, and interface status.",
+    "The native ETH/LAYPIPE lifecycle, automatic Lay Pipedogs, periodic PIPEDOG rewards, and interface status.",
 };
 
 export default function DocsPage() {
@@ -25,8 +25,8 @@ export default function DocsPage() {
           <p className="eyebrow">OPEN THE PIPEWORKS</p>
           <h1>Docs</h1>
           <p>
-            The intended lifecycle for one LAYPIPE token, one PIPEDOG bonding
-            pool, automatic PipeDogs, and holder claims.
+            The intended lifecycle for one LAYPIPE token, one native ETH bonding
+            pool, automatic Lay Pipedogs, and periodic PIPEDOG rewards.
           </p>
         </div>
       </section>
@@ -48,7 +48,7 @@ export default function DocsPage() {
             <h2>One product</h2>
             <p>
               LayPipe is no longer a public token launcher. The website is a
-              single market for LAYPIPE, quoted only in PIPEDOG on Robinhood
+              single market for LAYPIPE, quoted only in native ETH on Robinhood
               Chain. Total supply is fixed at 1,000,000,000 LAYPIPE.
             </p>
             <div className="docs-note">
@@ -63,17 +63,17 @@ export default function DocsPage() {
 
           <section id="trade">
             <span className="docs-number">02</span>
-            <h2>PIPEDOG / LAYPIPE</h2>
+            <h2>ETH / LAYPIPE</h2>
             <p>
               The intended market is one permanent one-sided Uniswap v4 bonding
-              pool. PIPEDOG is the payment asset, paired asset, and fee asset.
-              Native ETH pays chain gas only.
+              pool. Native ETH is the payment asset, paired asset, and source of
+              the hook fee. PIPEDOG is purchased later for holder rewards.
             </p>
             <ol>
               <li>Choose buy or sell and request a fresh curve quote.</li>
               <li>
-                For buys, approve only the exact PIPEDOG amount required by the
-                submitted transaction.
+                For buys, set the native ETH amount. No payment-token allowance
+                is required for ETH.
               </li>
               <li>Submit a slippage-bounded swap through the singleton router.</li>
               <li>
@@ -86,9 +86,9 @@ export default function DocsPage() {
 
           <section id="pipedogs">
             <span className="docs-number">03</span>
-            <h2>Automatic PipeDogs</h2>
+            <h2>Automatic Lay Pipedogs</h2>
             <p>
-              Every whole 100,000 LAYPIPE held by a wallet maps to one PipeDog
+              Every whole 100,000 LAYPIPE held by a wallet maps to one Lay Pipedog
               NFT. A 99,999 balance maps to zero; 248,250 maps to two with 48,250
               progress toward the third. The maximum mirror supply is 10,000.
             </p>
@@ -101,7 +101,7 @@ export default function DocsPage() {
                 <strong>Contracts are excluded</strong>
                 <p>
                   Pool, router, hook, and reward-vault balances do not create
-                  user-facing PipeDogs.
+                  user-facing Lay Pipedogs.
                 </p>
               </div>
             </div>
@@ -109,18 +109,20 @@ export default function DocsPage() {
 
           <section id="rewards">
             <span className="docs-number">04</span>
-            <h2>One percent to holders</h2>
+            <h2>One percent into PIPEDOG rewards</h2>
             <p>
-              The v4 hook collects a clean 1% fee in PIPEDOG on each buy and
-              sell through the official pool. The full fee enters a cumulative
-              per-NFT reward index. One PipeDog is one reward unit; wallets
-              below the NFT threshold have zero reward units.
+              The planned v4 hook accrues a clean 1% fee on the ETH side of each
+              official-pool trade. A periodic, trustless reward cycle uses the
+              accrued ETH to buy PIPEDOG, then allocates the purchased PIPEDOG
+              by whole Lay Pipedog count. Wallets below the NFT threshold have
+              zero reward units.
             </p>
             <div className="docs-note">
-              <strong>Pull-based claims</strong>
+              <strong>Deterministic holder accounting</strong>
               <p>
-                Trades update one accumulator instead of transferring to every
-                holder. Each wallet settles and claims its own PIPEDOG.
+                The reward cycle updates one accumulator instead of looping over
+                every holder. Each wallet&apos;s allocation follows its whole NFT
+                count; no operator chooses holder-by-holder payouts.
               </p>
             </div>
           </section>
@@ -147,9 +149,9 @@ export default function DocsPage() {
             <span className="docs-number">06</span>
             <h2>Contract registry</h2>
             <p>
-              PIPEDOG is the only configured asset. Singleton addresses remain
-              blank rather than falling back to the previous multi-launch
-              system.
+              PIPEDOG is the configured external reward asset. Native ETH needs
+              no token address, and all singleton addresses remain blank rather
+              than falling back to the previous multi-launch system.
             </p>
             <dl className="contract-registry">
               <div>
@@ -157,11 +159,15 @@ export default function DocsPage() {
                 <dd>{PIPEDOG_CA}</dd>
               </div>
               <div>
+                <dt>Native ETH</dt>
+                <dd>Official market quote and fee input</dd>
+              </div>
+              <div>
                 <dt>LAYPIPE + PipeDog mirror</dt>
                 <dd>Pending singleton deployment</dd>
               </div>
               <div>
-                <dt>PipeDog fee hook</dt>
+                <dt>ETH/LAYPIPE fee hook</dt>
                 <dd>Pending singleton deployment</dd>
               </div>
               <div>

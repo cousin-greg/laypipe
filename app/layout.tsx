@@ -44,9 +44,9 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://laypipe.fun"),
-  title: "laypipe.fun - LayPipe, PipeDogs, and PIPEDOG",
+  title: "laypipe.fun - LAYPIPE, Lay Pipedogs, and PIPEDOG",
   description:
-    "The single LAYPIPE bonding market: trade against PIPEDOG, automatically unlock PipeDog NFTs, and claim PIPEDOG fees by NFT count.",
+    "The official native ETH/LAYPIPE bonding market: unlock Lay Pipedog NFTs and receive periodic PIPEDOG rewards by NFT count.",
   applicationName: "laypipe.fun",
   icons: {
     icon: "/brand/favicon.png",
@@ -56,7 +56,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "laypipe.fun - Every official-pool trade fills the pipe",
     description:
-      "Buy LAYPIPE with PIPEDOG. Every 100,000 LAYPIPE automatically maps to one PipeDog and one share of official-pool PIPEDOG fees.",
+      "Buy LAYPIPE with native ETH. Every 100,000 LAYPIPE maps to one Lay Pipedog and one share of periodic PIPEDOG rewards.",
     url: "https://laypipe.fun",
     siteName: "laypipe.fun",
     type: "website",
@@ -73,7 +73,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "laypipe.fun - Every official-pool trade fills the pipe",
     description:
-      "Trade LAYPIPE against PIPEDOG, unlock automatic PipeDogs, and claim PIPEDOG by NFT count.",
+      "Trade LAYPIPE against native ETH, unlock automatic Lay Pipedogs, and receive periodic PIPEDOG rewards by NFT count.",
     images: ["/og.png"],
   },
 };

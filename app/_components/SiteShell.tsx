@@ -8,7 +8,7 @@ import { useWallet } from "./WalletProvider";
 
 const navigation = [
   { href: "/#trade", currentPath: "/", label: "Trade" },
-  { href: "/my", currentPath: "/my", label: "My PipeDogs" },
+  { href: "/my", currentPath: "/my", label: "My Lay Pipedogs" },
   { href: "/rewards", currentPath: "/rewards", label: "Rewards" },
   { href: "/tokenomics", currentPath: "/tokenomics", label: "Mechanics" },
   { href: "/lore", currentPath: "/lore", label: "Lore" },
@@ -39,6 +39,16 @@ export function SiteShell({ children }: { children: ReactNode }) {
   return (
     <div className="site-frame">
       <header className="app-header">
+        <div className="web-strip">
+          <span>laypipe.fun / one coin / one pipe</span>
+          <nav aria-label="Site shortcuts">
+            <Link href="/lore#ledger">source ledger</Link>
+            <Link href="/docs">how it works</Link>
+            <a href="https://pipedog.xyz" target="_blank" rel="noreferrer">
+              original pipedog site ↗
+            </a>
+          </nav>
+        </div>
         <div className="header-main">
           <Link className="brand-lockup" href="/" aria-label="laypipe.fun home">
             <Image
@@ -124,9 +134,9 @@ export function SiteShell({ children }: { children: ReactNode }) {
         <div className="singleton-bar" aria-label="LayPipe protocol constants">
           <span><strong>1B</strong> fixed LAYPIPE</span>
           <i aria-hidden="true" />
-          <span><strong>100,000</strong> LAYPIPE per PipeDog</span>
+          <span><strong>100,000</strong> LAYPIPE per Lay Pipedog</span>
           <i aria-hidden="true" />
-          <span><strong>1%</strong> PIPEDOG fee to NFT holders</span>
+          <span><strong>1%</strong> ETH-side fee funds PIPEDOG rewards</span>
         </div>
       </header>
 
@@ -142,12 +152,12 @@ export function SiteShell({ children }: { children: ReactNode }) {
           />
           <div>
             <strong>laypipe.fun</strong>
-            <p>LayPipe. Get PipeDog. Claim PIPEDOG.</p>
+            <p>LAYPIPE. Get a Lay Pipedog. Receive PIPEDOG.</p>
           </div>
         </div>
         <nav aria-label="Footer navigation">
           <Link href="/#trade">Trade</Link>
-          <Link href="/my">My PipeDogs</Link>
+          <Link href="/my">My Lay Pipedogs</Link>
           <Link href="/rewards">Rewards</Link>
           <Link href="/tokenomics">Mechanics</Link>
           <Link href="/lore">Lore</Link>
@@ -156,8 +166,14 @@ export function SiteShell({ children }: { children: ReactNode }) {
           </a>
         </nav>
         <p className="footer-risk">
-          Contract preview. LAYPIPE trading, NFT mirroring, and PIPEDOG claims
-          remain disabled until the singleton deployment is configured.
+          Contract preview. ETH/LAYPIPE trading, NFT mirroring, reward-cycle
+          execution, and PIPEDOG claims remain disabled until the singleton
+          deployment is configured.
+        </p>
+        <p className="footer-web-note">
+          Best viewed on whatever machine is already connected. Built in PP
+          Mori. Canonical PIPEDOG pixels preserved. Last site-art pass:
+          2026-08-15.
         </p>
       </footer>
     </div>

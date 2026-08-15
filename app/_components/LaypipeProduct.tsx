@@ -18,19 +18,19 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
       <section className={`${styles.hero} content-width`}>
         <div className={styles.heroCopy}>
           <p className={styles.sectionEyebrow}>One coin. One pipe.</p>
-          <h1>LayPipe.</h1>
+          <h1>LAYPIPE.</h1>
           <p className={styles.heroLead}>
-            Buy LAYPIPE with PIPEDOG. Every complete{" "}
+            Buy LAYPIPE with native ETH. Every complete{" "}
             {wholeNumber.format(BigInt(protocol.laypipePerPipeDog))} LAYPIPE
-            automatically becomes a PipeDog. Every PipeDog counts as one share
-            of the PIPEDOG flowing from trades.
+            automatically becomes a Lay Pipedog. Every Lay Pipedog counts as one
+            share of the PIPEDOG purchased and distributed by the reward cycle.
           </p>
           <div className={styles.heroActions}>
             <a className={styles.primaryAction} href="#trade">
               Enter the pipe
             </a>
             <a className={styles.secondaryAction} href="#pipedogs">
-              See My PipeDogs
+              See My Lay Pipedogs
             </a>
           </div>
           <dl className={styles.heroStats}>
@@ -40,14 +40,14 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
               <small>LAYPIPE</small>
             </div>
             <div>
-              <dt>Max PipeDogs</dt>
+              <dt>Max Lay Pipedogs</dt>
               <dd>{wholeNumber.format(protocol.maxPipeDogs)}</dd>
               <small>Automatic NFTs</small>
             </div>
             <div>
               <dt>Trading fee</dt>
               <dd>{feePercent}%</dd>
-              <small>All to NFT holders</small>
+              <small>Funds PIPEDOG rewards</small>
             </div>
           </dl>
         </div>
@@ -74,7 +74,7 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
             <strong>
               {wholeNumber.format(BigInt(protocol.laypipePerPipeDog))} LAYPIPE
             </strong>
-            <small>= 1 PipeDog</small>
+            <small>= 1 Lay Pipedog</small>
           </div>
         </div>
       </section>
@@ -83,17 +83,17 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
         <div className={`${styles.twoColumn} content-width`}>
           <div className={styles.tradeCopy}>
             <p className={styles.sectionEyebrow}>The only market</p>
-            <h2>LAYPIPE trades against PIPEDOG.</h2>
+            <h2>LAYPIPE trades against native ETH.</h2>
             <p>
               One permanent, one-sided Uniswap v4 bonding pool. No public token
-              launcher, no leaderboard, and no second quote asset.
+              launcher, no leaderboard, and no ERC-20 quote asset.
             </p>
             <div className={styles.mechanicList}>
               <article>
                 <span>01</span>
                 <div>
                   <strong>Buy or sell on the curve</strong>
-                  <p>PIPEDOG is the payment, paired asset, and fee asset.</p>
+                  <p>Native ETH is the payment, paired asset, and fee input.</p>
                 </div>
               </article>
               <article>
@@ -106,8 +106,11 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
               <article>
                 <span>03</span>
                 <div>
-                  <strong>Claim PIPEDOG by NFT count</strong>
-                  <p>Less than one complete unit receives no fee allocation.</p>
+                  <strong>Receive PIPEDOG by NFT count</strong>
+                  <p>
+                    Periodic, trustless purchases distribute PIPEDOG by whole
+                    Lay Pipedog units.
+                  </p>
                 </div>
               </article>
             </div>
@@ -121,25 +124,26 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
           <p className={styles.sectionEyebrow}>Every official-pool trade fills the pipe</p>
           <h2>One clean percent.</h2>
           <p>
-            The official pool&apos;s v4 hook collects {feePercent}% in PIPEDOG. The
-            reward accumulator divides it by the active PipeDog count. Your
-            share is based only on how many whole PipeDogs your wallet holds.
+            The official pool&apos;s v4 hook accrues a {feePercent}% fee on the ETH
+            side. The planned reward cycle periodically buys PIPEDOG and
+            distributes it by active Lay Pipedog count, without a discretionary
+            operator choosing each holder&apos;s share.
           </p>
         </div>
-        <div className={styles.feeFlow} aria-label="PIPEDOG fee flow">
+        <div className={styles.feeFlow} aria-label="ETH fee to PIPEDOG reward flow">
           <article>
             <span>Buy or sell</span>
-            <strong>{feePercent}% PIPEDOG</strong>
+            <strong>{feePercent}% native ETH</strong>
           </article>
           <i aria-hidden="true" />
           <article>
-            <span>Reward accumulator</span>
-            <strong>No holder loop</strong>
+            <span>Periodic reward cycle</span>
+            <strong>Buy PIPEDOG</strong>
           </article>
           <i aria-hidden="true" />
           <article>
-            <span>Your claim</span>
-            <strong>PipeDogs x share</strong>
+            <span>Holder allocation</span>
+            <strong>Lay Pipedogs x share</strong>
           </article>
         </div>
       </section>
@@ -158,7 +162,7 @@ export function LaypipeProduct({ data }: { data: LaypipePageData }) {
         />
         <div>
           <p className={styles.sectionEyebrow}>The full loop</p>
-          <h2>LayPipe. Get PipeDog. Claim PIPEDOG.</h2>
+          <h2>LAYPIPE. Get a Lay Pipedog. Receive PIPEDOG.</h2>
         </div>
         <Link href="/tokenomics">See the mechanics</Link>
       </section>

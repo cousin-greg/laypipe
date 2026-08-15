@@ -114,6 +114,8 @@ try {
   assert.match(home.text, /One coin\. One pipe\./);
   assert.match(home.text, /100,000/);
   assert.match(home.text, /1%/);
+  assert.match(home.text, /Buy LAYPIPE with native ETH/);
+  assert.match(home.text, /Periodic reward cycle/);
   assert.match(home.text, /Trading opens when contracts are wired/);
   assert.equal(home.response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(home.response.headers.get("x-frame-options"), "DENY");
@@ -127,13 +129,16 @@ try {
   assert.equal(docs.response.status, 200);
   assert.match(docs.text, /0x5Cb6F181081301b44905F3ae15419112ecaBd8A6/);
   assert.match(docs.text, /single market for LAYPIPE/);
-  assert.match(docs.text, /automatic PipeDogs/);
+  assert.match(docs.text, /quoted only in native ETH/);
+  assert.match(docs.text, /periodic, trustless reward cycle/);
+  assert.match(docs.text, /automatic Lay Pipedogs/);
 
   const tokenomics = await readResponse(origin, "/tokenomics");
   assert.equal(tokenomics.response.status, 200);
   assert.match(tokenomics.text, /1,000,000,000 LAYPIPE/);
   assert.match(tokenomics.text, /10,000/);
-  assert.match(tokenomics.text, /PipeDog holder lane/);
+  assert.match(tokenomics.text, /native ETH side/);
+  assert.match(tokenomics.text, /Lay Pipedog holder lane/);
   assert.match(tokenomics.text, /No developer cut/);
 
   const health = await readResponse(origin, "/api/health", {
@@ -205,7 +210,7 @@ try {
   assert.equal(manifest.response.status, 200);
   const manifestDocument = JSON.parse(manifest.text);
   assert.equal(manifestDocument.name, "laypipe.fun");
-  assert.equal(manifestDocument.short_name, "LayPipe");
+  assert.equal(manifestDocument.short_name, "LAYPIPE");
   assert.equal(manifestDocument.icons?.[0]?.src, "/brand/pipedog-pipe-mark.png");
 
   const brandMark = await readResponse(origin, "/brand/pipedog-pipe-mark.png");

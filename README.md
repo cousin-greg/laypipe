@@ -1,34 +1,29 @@
 # laypipe.fun
 
-A sunshine-styled Robinhood Chain launch board and contract implementation
-where PIPEDOG is the quote, payment, fee, and paired asset for every launch.
-Native ETH is used for network gas only.
+An early-web Robinhood Chain preview for one fixed-supply LAYPIPE market,
+automatic Lay Pipedogs, and periodic PIPEDOG holder rewards. The intended
+official pool is native ETH/LAYPIPE. Its v4 hook accrues an ETH-side fee that a
+permissionless reward cycle uses to purchase PIPEDOG for whole-NFT holders.
 
 ## Product surface
 
-- latest-token marquee and rotating fixture Hot/Largest/Newest/Mover feature;
-  live mode publishes reorg-safe global Most traded/Newest/Biggest mover
-  leaders while its keyset-paginated Board remains newest-first. PIPEDOG
-  volume and percentage-change displays stay exact; market cap remains
-  unavailable until a trusted PIPEDOG-denominated supply valuation is
-  implemented;
-- responsive 1–5-column Board with card/table views and URL-backed filters;
-- Board, My Tokens, Rewards, Tokenomics, Docs, Launch, and token-detail routes;
-- a clean light theme, injected-wallet connection, and Robinhood Chain
+- one disabled single-market ETH/LAYPIPE trade preview;
+- automatic Lay Pipedog ownership and reward-unit previews at each complete
+  100,000 LAYPIPE balance threshold;
+- My Lay Pipedogs, Rewards, Mechanics, Lore, and Docs routes;
+- an early-web light theme, injected-wallet connection, and Robinhood Chain
   switching;
 - local PP Mori webfonts;
-- canonical PIPEDOG artwork composited with separately generated pipe and
-  furnace scenery, plus the favicon and social card;
-- fixture and live market adapters behind an explicit fail-closed deployment
-  mode, signed keyset pagination, and a reorg-safe canonical indexer;
-- Foundry factory, permanent one-sided v4 pool, token, self-burner, and direct
-  25/25/50 PIPEDOG revenue router, plus deployment preflight, fork tests,
-  invariants, and committed ABIs under `contracts/`.
+- canonical PIPEDOG artwork preserved exactly in the interface, favicon, and
+  social card;
+- a source-linked lore timeline that distinguishes cultural ancestry from the
+  exact PipeDog pixel lineage;
+- fixture adapters behind an explicit fail-closed contract-preview mode.
 
-The public product is intentionally a preview. Demo coins are labeled
-throughout, transaction controls remain disabled, and no LayPipe contract is
-deployed or audited. The PIPEDOG-denominated curve parameters are not
-production-calibrated. Read [contracts/README.md](./contracts/README.md) and
+The public product is intentionally a preview. Transaction controls remain
+disabled, and no current singleton LayPipe system is deployed or audited. The
+ETH-denominated curve and reward-cycle parameters are not production-calibrated.
+Read [contracts/README.md](./contracts/README.md) and
 [contracts/SECURITY.md](./contracts/SECURITY.md) before any test deployment.
 The infrastructure, account, metadata, indexing, and staged-release gates are
 tracked in [PRODUCTION.md](./PRODUCTION.md).
@@ -36,13 +31,9 @@ The shorter owner/operator sequence is in
 [LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md), and the external-review boundary
 is in [contracts/AUDIT_HANDOFF.md](./contracts/AUDIT_HANDOFF.md).
 
-PIPEDOG has no native `burn()` method. The platform’s 25% sink lane sends
-PIPEDOG directly to `0x000000000000000000000000000000000000dEaD`; this removes
-tokens from practical circulation without reducing ERC-20 `totalSupply`. The
-other protocol lanes route 25% directly to treasury and 50% to operations.
-
-PIPEDOG does not support permit. A live launch or buy must request only the
-exact ERC-20 allowance needed for that action, never an unlimited approval.
+The repository still contains the previous multi-launch implementation and its
+indexer tests. Those contracts are not wired to this singleton preview and must
+not be treated as the current launch plan or a production release candidate.
 
 ## Local development
 

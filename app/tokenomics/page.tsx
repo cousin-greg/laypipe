@@ -6,7 +6,7 @@ const PIPEDOG_CA = "0x5Cb6F181081301b44905F3ae15419112ecaBd8A6";
 export const metadata: Metadata = {
   title: "Mechanics | laypipe.fun",
   description:
-    "One billion LAYPIPE, 10,000 automatic PipeDogs, and a 1% PIPEDOG holder fee.",
+    "One billion LAYPIPE, 10,000 automatic Lay Pipedogs, and a 1% ETH-side fee funding periodic PIPEDOG rewards.",
 };
 
 export default function TokenomicsPage() {
@@ -15,11 +15,11 @@ export default function TokenomicsPage() {
       <section className="page-heading tokenomics-heading">
         <div>
           <p className="eyebrow">ONE COIN. ONE CLEAN PERCENT.</p>
-          <h1>Every official-pool trade fills the PipeDog pool.</h1>
+          <h1>Every official-pool trade funds the PIPEDOG reward cycle.</h1>
           <p>
             LAYPIPE has a fixed one-billion-token supply and a maximum of 10,000
-            automatic PipeDog NFTs. Every complete 100,000 LAYPIPE balance is
-            one NFT and one unit of the PIPEDOG fee allocation.
+            automatic Lay Pipedog NFTs. Every complete 100,000 LAYPIPE balance is
+            one NFT and one unit of the periodic PIPEDOG reward allocation.
           </p>
         </div>
         <Image
@@ -31,22 +31,22 @@ export default function TokenomicsPage() {
         />
       </section>
 
-      <section className="fee-diagram" aria-label="One percent PIPEDOG fee flow">
+      <section className="fee-diagram" aria-label="ETH fee to PIPEDOG reward flow">
         <div className="fee-source">
           <span>Every official-pool buy + sell</span>
           <strong>1.00%</strong>
-          <small>Collected in PIPEDOG by the Uniswap v4 hook</small>
+          <small>Accrued on the native ETH side by the Uniswap v4 hook</small>
         </div>
         <div className="fee-pipe" aria-hidden="true">
           <i />
         </div>
         <div className="fee-branches">
           <article>
-            <span>PipeDog holder lane</span>
+            <span>Lay Pipedog holder lane</span>
             <strong>100%</strong>
             <p>
-              The full hook fee enters the reward accumulator. A wallet&apos;s share
-              is proportional to its whole automatic PipeDog count.
+              Periodic, trustless execution uses the accrued ETH to buy PIPEDOG.
+              The purchased PIPEDOG is allocated by whole Lay Pipedog count.
             </p>
             <div className="branch-choice">
               <span>1 NFT = 1 unit</span>
@@ -57,8 +57,8 @@ export default function TokenomicsPage() {
             <span>Claim model</span>
             <strong>Pull</strong>
             <p>
-              Fees accrue to a per-NFT index. Holders claim PIPEDOG themselves;
-              trades never loop over every holder.
+              Purchased PIPEDOG accrues to a per-NFT index. Holder accounting is
+              deterministic, and trades never loop over every wallet.
             </p>
             <div className="branch-choice">
               <span>No developer cut</span>
@@ -78,14 +78,14 @@ export default function TokenomicsPage() {
         </article>
         <article>
           <span>Automatic threshold</span>
-          <h2>100,000 per PipeDog.</h2>
+          <h2>100,000 per Lay Pipedog.</h2>
           <p>
             The mirror count follows the whole-unit portion of a wallet balance.
           </p>
         </article>
         <article>
           <span>Single market</span>
-          <h2>PIPEDOG / LAYPIPE.</h2>
+          <h2>ETH / LAYPIPE.</h2>
           <p>
             A permanent one-sided v4 bonding pool is the only intended trading
             route exposed by the website.
@@ -113,8 +113,9 @@ export default function TokenomicsPage() {
         <div>
           <strong>The singleton ABIs and addresses are not wired yet.</strong>
           <p>
-            The website keeps buy, sell, mirror, and claim mutations disabled
-            until the reviewed singleton deployment is configured.
+            The website keeps buy, sell, mirror, reward-cycle, and claim
+            mutations disabled until the reviewed singleton deployment is
+            configured.
           </p>
         </div>
       </aside>

@@ -3876,3 +3876,476 @@ dd {
     animation: none;
   }
 }
+
+/*
+ * Basic-web pass, 2026-08-14.
+ * The reference is pipedog.xyz's plain artboard and link-first construction,
+ * translated into PP Mori without changing the product's behavior.
+ */
+:root {
+  --bg: #e7e4cb;
+  --surface: #fffef3;
+  --surface-2: #f2f0dc;
+  --surface-3: #e5e2ca;
+  --ink: #111;
+  --muted: #4b4b43;
+  --faint: #767468;
+  --rule: rgba(17, 17, 17, 0.28);
+  --border: #111;
+  --header: #fffef3;
+  --shadow: rgba(17, 17, 17, 0.16);
+  --web-blue: #0000c8;
+  --web-purple: #551a8b;
+  --web-green: #087f23;
+}
+
+body {
+  background: var(--bg);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.site-frame {
+  width: min(calc(100% - 24px), 1180px);
+  min-height: 100vh;
+  margin-inline: auto;
+  border-inline: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.content-width {
+  width: min(calc(100% - 40px), 1080px);
+}
+
+.web-strip {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 12px;
+  border-bottom: 1px dotted var(--rule);
+  background: #f4f4e3;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.web-strip > span {
+  font-weight: 700;
+}
+
+.web-strip nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+}
+
+.web-strip a,
+.primary-nav a,
+.mobile-menu a,
+.app-footer a,
+.docs-nav a,
+.docs-links a,
+.breadcrumb a {
+  color: var(--web-blue);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.web-strip a:visited,
+.app-footer a:visited,
+.docs-links a:visited {
+  color: var(--web-purple);
+}
+
+.app-header {
+  position: relative;
+  top: auto;
+  border-bottom: 3px double var(--border);
+  background: var(--header);
+}
+
+.header-main {
+  width: calc(100% - 24px);
+  min-height: 70px;
+  gap: 14px;
+}
+
+.brand-lockup {
+  gap: 8px;
+}
+
+.brand-lockup img {
+  width: 54px;
+  height: 54px;
+}
+
+.brand-type {
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.brand-type span {
+  color: var(--web-green);
+}
+
+.chain-badge {
+  padding-left: 12px;
+  font-size: 0.58rem;
+  letter-spacing: 0.05em;
+}
+
+.chain-badge i,
+.singleton-bar i {
+  border-radius: 0;
+  background: var(--web-green);
+}
+
+.primary-nav {
+  align-self: center;
+  gap: 10px;
+}
+
+.primary-nav a {
+  height: auto;
+  padding: 2px 0;
+  border: 0;
+  color: var(--web-blue);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.primary-nav a:hover,
+.primary-nav a[aria-current="page"] {
+  border: 0;
+  color: var(--ink);
+  background: #ffff67;
+}
+
+.button,
+.button-small {
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 2px outset #d6d6cc;
+  border-radius: 0;
+  background: #ecece2;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 0.7rem;
+  transition: none;
+}
+
+.button:hover:not(:disabled) {
+  background: #ffff67;
+}
+
+.button:active:not(:disabled),
+.button-accent:active:not(:disabled) {
+  border-style: inset;
+  box-shadow: none;
+  transform: none;
+}
+
+.button-accent,
+.button-accent:hover:not(:disabled) {
+  border-color: #2b9c45;
+  background: #8ee29a;
+  box-shadow: none;
+  color: #001b06;
+}
+
+.singleton-bar {
+  min-height: 31px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--rule);
+  background: #e9f4d7;
+  color: var(--ink);
+  font-size: 0.62rem;
+}
+
+.singleton-bar::before {
+  color: var(--web-green);
+  content: "site status:";
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.page-shell {
+  min-height: 66vh;
+}
+
+.eyebrow,
+.form-section-title > span,
+.future-grid article > span,
+.docs-number {
+  color: var(--web-green);
+  letter-spacing: 0.08em;
+}
+
+.page-heading,
+.token-hero {
+  min-height: 0;
+  padding-block: 42px;
+}
+
+.board-intro h1,
+.page-heading h1,
+.token-hero h1 {
+  margin-bottom: 16px;
+  font-size: clamp(3rem, 6vw, 5.2rem);
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  word-spacing: normal;
+}
+
+.page-heading > div > p:last-child,
+.board-intro-copy > p:last-child {
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+:where(
+  .featured-token,
+  .preview-notice,
+  .token-card,
+  .market-metric-unavailable,
+  .readiness-banner,
+  .product-form,
+  .launch-receipt,
+  .wallet-empty-state,
+  .wallet-position-card,
+  .keeper-panel,
+  .future-grid article,
+  .reward-grid article,
+  .fee-diagram,
+  .fee-source,
+  .fee-branches article,
+  .tokenomics-notes article,
+  .contract-callout,
+  .docs-nav,
+  .docs-content,
+  .docs-note,
+  .docs-columns div,
+  .readiness-table,
+  .contract-registry,
+  .token-notice,
+  .token-chart-panel,
+  .trade-panel,
+  .token-route-card
+) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.readiness-banner {
+  border: 1px solid var(--border);
+  border-left: 8px solid #d7bd18;
+  background: #fffbd4;
+}
+
+.readiness-banner > span,
+.status-pill,
+.preview-tag,
+.mode-badge,
+.demo-chip {
+  border-radius: 0;
+}
+
+.inner-page {
+  width: min(calc(100% - 40px), 1080px);
+  margin-inline: auto;
+}
+
+.docs-layout {
+  gap: 22px;
+}
+
+.docs-nav {
+  top: 18px;
+  border: 1px solid var(--border);
+  background: #f4f4e3;
+}
+
+.docs-nav a:hover {
+  color: var(--ink);
+  background: #ffff67;
+}
+
+.docs-content {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.docs-content > section {
+  border-bottom: 1px dotted var(--rule);
+}
+
+.docs-content h2,
+.tokenomics-notes h2,
+.future-grid h3 {
+  letter-spacing: -0.02em;
+}
+
+.docs-links a {
+  border: 0;
+  background: transparent;
+  color: var(--web-blue);
+  text-decoration: underline;
+}
+
+.docs-links a:hover {
+  background: #ffff67;
+}
+
+.readiness-table,
+.contract-registry {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.readiness-table div,
+.contract-registry div {
+  border-bottom-style: dotted;
+}
+
+.app-footer {
+  width: auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px 30px;
+  padding: 28px 18px 18px;
+  border-top: 3px double var(--border);
+  background: #f4f4e3;
+}
+
+.footer-brand img {
+  width: 44px;
+  height: 44px;
+}
+
+.footer-brand strong {
+  font-size: 1rem;
+}
+
+.footer-brand p,
+.footer-risk,
+.footer-web-note {
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.app-footer nav {
+  justify-content: flex-end;
+  gap: 6px 16px;
+}
+
+.app-footer nav a:hover {
+  color: var(--ink);
+  background: #ffff67;
+}
+
+.footer-risk {
+  grid-column: 1 / -1;
+  padding-top: 10px;
+  border-top: 1px dotted var(--rule);
+}
+
+.footer-web-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--faint);
+}
+
+@media (max-width: 900px) {
+  .site-frame {
+    width: 100%;
+    border-inline: 0;
+  }
+
+  .header-main {
+    width: calc(100% - 20px);
+  }
+
+  .mobile-menu {
+    border-top: 1px dotted var(--rule);
+    border-bottom: 0;
+    background: #f4f4e3;
+  }
+
+  .mobile-menu nav {
+    gap: 8px 14px;
+  }
+
+  .mobile-menu a {
+    border: 0;
+    background: transparent;
+  }
+}
+
+@media (max-width: 620px) {
+  .content-width,
+  .inner-page {
+    width: min(calc(100% - 24px), 1080px);
+  }
+
+  .web-strip {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .web-strip nav {
+    gap: 4px 10px;
+  }
+
+  .chain-badge {
+    display: none;
+  }
+
+  .brand-lockup img {
+    width: 44px;
+    height: 44px;
+  }
+
+  .brand-type {
+    font-size: 1.25rem;
+  }
+
+  .singleton-bar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    overflow: visible;
+    row-gap: 3px;
+    white-space: normal;
+  }
+
+  .singleton-bar::before {
+    display: none;
+  }
+
+  .singleton-bar i {
+    display: none;
+  }
+
+  .page-heading h1,
+  .token-hero h1 {
+    font-size: clamp(2.8rem, 15vw, 4.4rem);
+  }
+
+  .app-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .app-footer nav,
+  .footer-risk,
+  .footer-web-note {
+    grid-column: 1;
+  }
+
+  .app-footer nav {
+    justify-content: flex-start;
+  }
+}
