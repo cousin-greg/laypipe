@@ -185,6 +185,10 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         /PipeDog source images by year/i,
         /balkan-grandpa-2021\.jpg/i,
         /Literally all Balkan grandpa/i,
+        /Broader cultural context, not direct pixels/i,
+        /Walter \/ Nelson/i,
+        /Dogwifhat \/ Achi/i,
+        /official cultural context \/ no shared pixels/i,
         /05450b2360b7591058bb19bc050b6c84546851d75d6623e1867e0e96b0a3f9b2/i,
       ],
     ],
@@ -193,9 +197,6 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
   for (const [path, patterns] of routes) {
     const html = await expectPage(path, patterns);
     if (path === "/lore") {
-      assert.doesNotMatch(html, /\b(?:Walter|Nelson|Dogwifhat|Achi)\b/i);
-      assert.doesNotMatch(html, /dog-rushmore(?:-2026-display)?/i);
-
       const timelineStart = html.indexOf(
         'aria-label="PipeDog source images by year"',
       );
@@ -215,6 +216,22 @@ test("server-renders singleton wallet, reward, mechanics, and docs routes", asyn
         const position = timelineHtml.indexOf(image);
         assert.ok(position > previous, `${image} should render in lineage order`);
         previous = position;
+      }
+
+      assert.doesNotMatch(timelineHtml, /walter-2018|dogwifhat-2018|dog-rushmore/i);
+
+      const contextStart = html.indexOf(
+        'aria-label="Official PipeDog cultural context by year"',
+      );
+      const contextEnd = html.indexOf("</ol>", contextStart);
+      assert.ok(contextStart > timelineEnd && contextEnd > contextStart);
+      const contextHtml = html.slice(contextStart, contextEnd);
+      for (const image of [
+        "/lore/walter-2018.png",
+        "/lore/dogwifhat-2018.jpg",
+        "/lore/dog-rushmore-2026-display.webp",
+      ]) {
+        assert.match(contextHtml, new RegExp(image.replaceAll("/", "\\/")));
       }
     }
   }
